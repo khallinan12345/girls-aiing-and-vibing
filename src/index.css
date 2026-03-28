@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply font-sans text-gray-900 bg-gray-50 min-h-screen;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-medium leading-tight;
+  }
+
+  h1 {
+    @apply text-4xl; /* Slightly larger than default */
+  }
+
+  h2 {
+    @apply text-3xl;
+  }
+
+  h3 {
+    @apply text-2xl;
+  }
+
+  a {
+    @apply text-blue-600 hover:text-blue-700;
+  }
+}
+
+@layer components {
+  /* Remove Tailwind’s container max‐width entirely (so it’s full-width) */
+  .container {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* Or if you prefer a “centered but much wider” wrapper */
+  .wide-container {
+    max-width: 90vw;
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Sidebar link tweaks */
+  .sidebar-link {
+    @apply block px-3 py-3 text-base font-semibold rounded-md transition-colors;
+  }
+  .sidebar-link svg {
+    @apply mr-3 flex-shrink-0 w-6 h-6;
+  }
+
+  /* Navbar link tweaks */
+  .navbar-link {
+    @apply px-4 py-3 text-base font-semibold rounded-lg transition-all duration-200;
+  }
+}
+
+/* Ensure the very largest screens have a faint background */
+body, html {
+  background-color: #f9fafb;
+}

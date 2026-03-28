@@ -1,0 +1,18 @@
+{
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/assess-monthly",
+      "schedule": "0 2 1 * *"
+    },
+    {
+      "path": "/api/daily-report",
+      "schedule": "0 11 * * *"
+    }
+  ]
+}

@@ -1,0 +1,1223 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabaseClient';
+import AppLayout from '../components/layout/AppLayout';
+import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
+import { 
+  User, 
+  Mail, 
+  Shield, 
+  Users, 
+  Award, 
+  Edit3, 
+  Save, 
+  X,
+  Camera,
+  Key,
+  TrendingUp,
+  Calendar,
+  CheckCircle,
+  Globe,
+  MapPin
+} from 'lucide-react';
+import classNames from 'classnames';
+import { useAuth } from '../hooks/useAuth';
+
+interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  role: 'student' | 'teacher';
+  grade_level?: number;
+  gender?: 'female' | 'male' | 'other';
+  continent?: string;
+  country?: string;
+  state?: string;
+  city?: string;
+  school_name?: string;
+  avatar_url?: string;
+  team_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SkillProgress {
+  skill: string;
+  progress: number;
+  updated_at: string;
+}
+
+interface TeamInfo {
+  id: string;
+  name: string;
+  facilitator: {
+    name: string;
+    email: string;
+  };
+}
+
+// All continents except Antarctica
+const CONTINENTS = [
+  'Africa',
+  'Asia',
+  'Europe',
+  'North America',
+  'Oceania',
+  'South America'
+];
+
+// Same comprehensive list of countries from ProfileCompletionPopup
+const COUNTRIES = [
+  'United States',
+  'Afghanistan',
+  'Albania',
+  'Algeria',
+  'Andorra',
+  'Angola',
+  'Antigua and Barbuda',
+  'Argentina',
+  'Armenia',
+  'Australia',
+  'Austria',
+  'Azerbaijan',
+  'Bahamas',
+  'Bahrain',
+  'Bangladesh',
+  'Barbados',
+  'Belarus',
+  'Belgium',
+  'Belize',
+  'Benin',
+  'Bhutan',
+  'Bolivia',
+  'Bosnia and Herzegovina',
+  'Botswana',
+  'Brazil',
+  'Brunei',
+  'Bulgaria',
+  'Burkina Faso',
+  'Burundi',
+  'Cabo Verde',
+  'Cambodia',
+  'Cameroon',
+  'Canada',
+  'Central African Republic',
+  'Chad',
+  'Chile',
+  'China',
+  'Colombia',
+  'Comoros',
+  'Congo',
+  'Costa Rica',
+  'Croatia',
+  'Cuba',
+  'Cyprus',
+  'Czech Republic',
+  'Democratic Republic of the Congo',
+  'Denmark',
+  'Djibouti',
+  'Dominica',
+  'Dominican Republic',
+  'Ecuador',
+  'Egypt',
+  'El Salvador',
+  'Equatorial Guinea',
+  'Eritrea',
+  'Estonia',
+  'Eswatini',
+  'Ethiopia',
+  'Fiji',
+  'Finland',
+  'France',
+  'Gabon',
+  'Gambia',
+  'Georgia',
+  'Germany',
+  'Ghana',
+  'Greece',
+  'Grenada',
+  'Guatemala',
+  'Guinea',
+  'Guinea-Bissau',
+  'Guyana',
+  'Haiti',
+  'Honduras',
+  'Hungary',
+  'Iceland',
+  'India',
+  'Indonesia',
+  'Iran',
+  'Iraq',
+  'Ireland',
+  'Israel',
+  'Italy',
+  'Ivory Coast',
+  'Jamaica',
+  'Japan',
+  'Jordan',
+  'Kazakhstan',
+  'Kenya',
+  'Kiribati',
+  'Kuwait',
+  'Kyrgyzstan',
+  'Laos',
+  'Latvia',
+  'Lebanon',
+  'Lesotho',
+  'Liberia',
+  'Libya',
+  'Liechtenstein',
+  'Lithuania',
+  'Luxembourg',
+  'Madagascar',
+  'Malawi',
+  'Malaysia',
+  'Maldives',
+  'Mali',
+  'Malta',
+  'Marshall Islands',
+  'Mauritania',
+  'Mauritius',
+  'Mexico',
+  'Micronesia',
+  'Moldova',
+  'Monaco',
+  'Mongolia',
+  'Montenegro',
+  'Morocco',
+  'Mozambique',
+  'Myanmar',
+  'Namibia',
+  'Nauru',
+  'Nepal',
+  'Netherlands',
+  'New Zealand',
+  'Nicaragua',
+  'Niger',
+  'Nigeria',
+  'North Korea',
+  'North Macedonia',
+  'Norway',
+  'Oman',
+  'Pakistan',
+  'Palau',
+  'Palestine',
+  'Panama',
+  'Papua New Guinea',
+  'Paraguay',
+  'Peru',
+  'Philippines',
+  'Poland',
+  'Portugal',
+  'Qatar',
+  'Romania',
+  'Russia',
+  'Rwanda',
+  'Saint Kitts and Nevis',
+  'Saint Lucia',
+  'Saint Vincent and the Grenadines',
+  'Samoa',
+  'San Marino',
+  'Sao Tome and Principe',
+  'Saudi Arabia',
+  'Senegal',
+  'Serbia',
+  'Seychelles',
+  'Sierra Leone',
+  'Singapore',
+  'Slovakia',
+  'Slovenia',
+  'Solomon Islands',
+  'Somalia',
+  'South Africa',
+  'South Korea',
+  'South Sudan',
+  'Spain',
+  'Sri Lanka',
+  'Sudan',
+  'Suriname',
+  'Sweden',
+  'Switzerland',
+  'Syria',
+  'Taiwan',
+  'Tajikistan',
+  'Tanzania',
+  'Thailand',
+  'Timor-Leste',
+  'Togo',
+  'Tonga',
+  'Trinidad and Tobago',
+  'Tunisia',
+  'Turkey',
+  'Turkmenistan',
+  'Tuvalu',
+  'Uganda',
+  'Ukraine',
+  'United Arab Emirates',
+  'United Kingdom',
+  'Uruguay',
+  'Uzbekistan',
+  'Vanuatu',
+  'Vatican City',
+  'Venezuela',
+  'Vietnam',
+  'Yemen',
+  'Zambia',
+  'Zimbabwe'
+];
+
+const ProfilePage: React.FC = () => {
+  const { user: authUser, refreshUserProfile } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [teamInfo, setTeamInfo] = useState<TeamInfo | null>(null);
+  const [skillsProgress, setSkillsProgress] = useState<SkillProgress[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  
+  // Form state - updated to include all profile fields
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    role: 'student' as 'student' | 'teacher',
+    grade_level: '1',
+    gender: 'female' as 'female' | 'male' | 'other',
+    continent: '',
+    country: '',
+    state: '',
+    city: '',
+    school_name: ''
+  });
+
+  // ── Seed a default personality baseline for new users ─────────────────────
+  // Called once after profile load. Uses .maybeSingle() so it never throws
+  // on a missing row. The row is only inserted if one doesn't already exist.
+  //
+  // Values are set to level-1 (Emerging) defaults:
+  //   • Big Five scores at low-mid range (reflecting an unknown baseline)
+  //   • communication_strategy  — warm, simple, patient  (level 1)
+  //   • learning_strategy       — step-by-step, concrete, encouraging
+  //   • communication_level     — 1 (Emerging)
+  //
+  const seedPersonalityBaseline = async (userId: string): Promise<void> => {
+    try {
+      // Check for an existing row first — never overwrite a real assessment
+      const { data: existing } = await supabase
+        .from('user_personality_baseline')
+        .select('user_id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (existing) return; // Already assessed — nothing to do
+
+      const now = new Date().toISOString();
+
+      const { error } = await supabase
+        .from('user_personality_baseline')
+        .insert({
+          user_id: userId,
+
+          // ── Big Five: conservative mid-low defaults ──────────────────────
+          // These will be updated after real sessions are assessed.
+          openness_score:           55,
+          conscientiousness_score:  50,
+          extraversion_score:       50,
+          agreeableness_score:      65,
+          neuroticism_score:        50,
+
+          // ── Evidence arrays: placeholder until real sessions are assessed ─
+          openness_evidence:           ['No sessions recorded yet — default baseline'],
+          conscientiousness_evidence:  ['No sessions recorded yet — default baseline'],
+          extraversion_evidence:       ['No sessions recorded yet — default baseline'],
+          agreeableness_evidence:      ['No sessions recorded yet — default baseline'],
+          neuroticism_evidence:        ['No sessions recorded yet — default baseline'],
+
+          // ── Communication strategy — Level 1 (Emerging) ─────────────────
+          // Short sentences, simple vocabulary, patient and warm.
+          communication_strategy: {
+            preferred_tone: 'warm, patient, and encouraging',
+            interaction_style: 'guided step-by-step with one question at a time',
+            detail_level: 'simple explanations using short sentences and familiar examples',
+            recommendations: [
+              'Use plain, everyday language — avoid technical jargon',
+              'Ask only one question per turn',
+              'Celebrate small wins and validate every attempt',
+              'Connect new ideas to things familiar from daily life',
+              'Re-explain terms if the learner seems unsure — do not assume prior knowledge',
+            ],
+          },
+
+          // ── Learning strategy — general level-1 defaults ─────────────────
+          learning_strategy: {
+            learning_style: 'concrete and interactive with real-world examples',
+            motivation_approach: 'encourage through visible progress and small celebrations',
+            pacing_preference: 'slow and steady with frequent check-ins',
+            recommendations: [
+              'Break tasks into very small, manageable steps',
+              'Confirm understanding before moving to the next idea',
+              'Use examples drawn from the learner\'s immediate community or daily experience',
+              'Provide gentle correction — frame mistakes as part of learning',
+              'Offer positive reinforcement consistently throughout the session',
+            ],
+          },
+
+          // ── Communication level ───────────────────────────────────────────
+          communication_level: 1,
+
+          // ── Metadata ─────────────────────────────────────────────────────
+          assessment_model: 'default',
+          assessment_version: 'v0.0-seed',
+          measured_at: now,
+          created_at: now,
+          updated_at: now,
+        });
+
+      if (error) {
+        console.warn('[ProfilePage] Could not seed personality baseline:', error.message);
+      } else {
+        console.log('[ProfilePage] ✅ Default personality baseline seeded for new user');
+      }
+    } catch (err) {
+      // Non-fatal — the rest of the page should still load
+      console.warn('[ProfilePage] seedPersonalityBaseline skipped:', err);
+    }
+  };
+
+  const fetchProfileData = useCallback(async () => {
+    if (!authUser) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      console.log('[ProfilePage] Fetching profile data for user:', authUser.id);
+
+      // Fetch user profile
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+
+      if (profileError) {
+        console.error('[ProfilePage] Profile fetch error:', profileError);
+        throw profileError;
+      }
+      
+      console.log('[ProfilePage] Profile data fetched:', profileData);
+      setProfile(profileData);
+      setFormData({
+        name: profileData.name || '',
+        email: profileData.email || '',
+        role: profileData.role || 'student',
+        grade_level: profileData.grade_level?.toString() || '1',
+        gender: profileData.gender || 'female',
+        continent: profileData.continent || '',
+        country: profileData.country || '',
+        state: profileData.state || '',
+        city: profileData.city || '',
+        school_name: profileData.school_name || ''
+      });
+
+      // Seed a default personality baseline for new users (no-op if already exists)
+      seedPersonalityBaseline(authUser.id);
+
+      // Fetch team info if user has a team
+      if (profileData.team_id) {
+        console.log('[ProfilePage] Fetching team info for team:', profileData.team_id);
+        const { data: teamData, error: teamError } = await supabase
+          .from('teams')
+          .select(`
+            id,
+            name,
+            facilitator:profiles!teams_facilitator_id_fkey(
+              name,
+              email
+            )
+          `)
+          .eq('id', profileData.team_id)
+          .single();
+
+        if (teamError) {
+          console.warn('[ProfilePage] Team fetch error:', teamError);
+        } else {
+          console.log('[ProfilePage] Team data fetched:', teamData);
+          setTeamInfo(teamData);
+        }
+      }
+
+      // Fetch skills progress
+      const { data: skillsData, error: skillsError } = await supabase
+        .from('skills_progress')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .order('updated_at', { ascending: false });
+
+      if (skillsError) {
+        console.warn('[ProfilePage] Skills fetch error:', skillsError);
+      } else {
+        console.log('[ProfilePage] Skills data fetched:', skillsData?.length || 0, 'skills');
+        setSkillsProgress(skillsData || []);
+      }
+
+    } catch (err) {
+      console.error('[ProfilePage] Error fetching profile data:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load profile data');
+    } finally {
+      setLoading(false);
+    }
+  }, [authUser]);
+
+  useEffect(() => {
+    if (authUser) {
+      fetchProfileData();
+    }
+  }, [authUser, fetchProfileData]);
+
+  // Updated handleSaveProfile to include location fields
+  const handleSaveProfile = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log('[ProfilePage] handleSaveProfile called');
+    
+    if (!authUser || !profile) {
+      console.error('[ProfilePage] Missing authUser or profile');
+      setError('User information not available');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError(null);
+      setSuccess(null);
+
+      console.log('[ProfilePage] Updating profile with data:', formData);
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          name: formData.name,
+          email: formData.email,
+          role: formData.role,
+          grade_level: formData.role === 'student' ? parseInt(formData.grade_level, 10) : null,
+          gender: formData.gender,
+          continent: formData.continent || null,
+          country: formData.country || null,
+          state: formData.state || null,
+          city: formData.city || null,
+          school_name: formData.school_name || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', authUser.id);
+
+      if (updateError) {
+        console.error('[ProfilePage] Update error:', updateError);
+        throw updateError;
+      }
+
+      console.log('[ProfilePage] Profile updated successfully');
+
+      // Update local state
+      setProfile(prev => prev ? {
+        ...prev,
+        name: formData.name,
+        email: formData.email,
+        role: formData.role,
+        grade_level: formData.role === 'student' ? parseInt(formData.grade_level, 10) : undefined,
+        gender: formData.gender,
+        continent: formData.continent,
+        country: formData.country,
+        state: formData.state,
+        city: formData.city,
+        school_name: formData.school_name,
+        updated_at: new Date().toISOString()
+      } : null);
+
+      // Refresh the auth user profile
+      await refreshUserProfile();
+
+      setEditing(false);
+      setSuccess('Profile updated successfully!');
+      setTimeout(() => setSuccess(null), 3000);
+
+    } catch (err) {
+      console.error('[ProfilePage] Error updating profile:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update profile');
+    } finally {
+      setSaving(false);
+    }
+  }, [authUser, profile, formData, refreshUserProfile]);
+
+  const handlePasswordReset = useCallback(async () => {
+    if (!profile?.email) {
+      setError('No email address available');
+      return;
+    }
+
+    try {
+      console.log('[ProfilePage] Sending password reset to:', profile.email);
+      const { error } = await supabase.auth.resetPasswordForEmail(profile.email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`
+      });
+      
+      if (error) {
+        console.error('[ProfilePage] Password reset error:', error);
+        throw error;
+      }
+      
+      setSuccess('Password reset email sent! Check your inbox.');
+      setTimeout(() => setSuccess(null), 5000);
+    } catch (err) {
+      console.error('[ProfilePage] Error sending password reset:', err);
+      setError(err instanceof Error ? err.message : 'Failed to send password reset email');
+    }
+  }, [profile?.email]);
+
+  const getSkillCompletionRate = useCallback(() => {
+    if (skillsProgress.length === 0) return 0;
+    const totalProgress = skillsProgress.reduce((sum, skill) => sum + skill.progress, 0);
+    return Math.round(totalProgress / skillsProgress.length);
+  }, [skillsProgress]);
+
+  const getCompletedSkillsCount = useCallback(() => {
+    return skillsProgress.filter(skill => skill.progress === 100).length;
+  }, [skillsProgress]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditing(false);
+    setFormData({
+      name: profile?.name || '',
+      email: profile?.email || '',
+      role: profile?.role || 'student',
+      grade_level: profile?.grade_level?.toString() || '1',
+      gender: profile?.gender || 'female',
+      continent: profile?.continent || '',
+      country: profile?.country || '',
+      state: profile?.state || '',
+      city: profile?.city || '',
+      school_name: profile?.school_name || ''
+    });
+    setError(null);
+  }, [profile]);
+
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <AppLayout>
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-red-800">Failed to load profile data.</p>
+            <Button 
+              onClick={fetchProfileData} 
+              className="mt-2" 
+              size="sm"
+            >
+              Retry
+            </Button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  return (
+    <AppLayout>
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 flex items-center">
+            <User className="h-8 w-8 text-blue-600 mr-3" />
+            My Profile
+          </h1>
+          <p className="mt-2 text-gray-600">
+            Manage your personal information and track your learning progress.
+          </p>
+        </div>
+
+        {/* Alert Messages */}
+        {error && (
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-red-800">{error}</p>
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+            <p className="text-green-800">{success}</p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Main Profile Info */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Personal Information */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900">Personal Information</h2>
+                {!editing ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditing(true)}
+                    icon={<Edit3 size={16} />}
+                  >
+                    Edit
+                  </Button>
+                ) : (
+                  <div className="flex space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCancelEdit}
+                      icon={<X size={16} />}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6">
+                {editing ? (
+                  <form onSubmit={handleSaveProfile} className="space-y-6">
+                    {/* Full Name Field */}
+                    <div className="w-full">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <User className="inline h-4 w-4 mr-1" />
+                        Full Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.name}
+                        onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                        required
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        placeholder="Enter your full name"
+                      />
+                    </div>
+                    
+                    {/* Email Field */}
+                    <div className="w-full">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <Mail className="inline h-4 w-4 mr-1" />
+                        Email Address *
+                      </label>
+                      <input
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                        required
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        placeholder="Enter your email address"
+                      />
+                    </div>
+
+                    {/* Role Selection */}
+                    <div className="w-full">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <Shield className="inline h-4 w-4 mr-1" />
+                        Role *
+                      </label>
+                      <div className="space-y-2">
+                        {(['student', 'teacher'] as const).map((role) => (
+                          <label key={role} className="flex items-center">
+                            <input
+                              type="radio"
+                              name="role"
+                              value={role}
+                              checked={formData.role === role}
+                              onChange={(e) => setFormData(prev => ({ ...prev, role: e.target.value as 'student' | 'teacher' }))}
+                              className="mr-3"
+                              required
+                            />
+                            <span className="capitalize">
+                              {role === 'student' ? 'Student' : 'Teacher/Educator'}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Grade Level (students only) */}
+                    {formData.role === 'student' && (
+                      <div className="w-full">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Grade Level *
+                        </label>
+                        <div className="space-y-2">
+                          {(['1', '2', '3'] as const).map((grade) => (
+                            <label key={grade} className="flex items-start">
+                              <input
+                                type="radio"
+                                name="grade_level"
+                                value={grade}
+                                checked={formData.grade_level === grade}
+                                onChange={(e) => setFormData(prev => ({ ...prev, grade_level: e.target.value }))}
+                                className="mr-3 mt-1"
+                                required
+                              />
+                              <div>
+                                <div className="font-medium text-gray-900">
+                                  {grade === '1'
+                                    ? 'Elementary (Grades 3–5)'
+                                    : grade === '2'
+                                    ? 'Middle School (Grades 6–8)'
+                                    : 'High School (Grades 9–12)'}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  {grade === '1'
+                                    ? 'Ages 8–11'
+                                    : grade === '2'
+                                    ? 'Ages 11–14'
+                                    : 'Ages 14–18'}
+                                </div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Gender */}
+                    <div className="w-full">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Gender *
+                      </label>
+                      <div className="space-y-2">
+                        {(['female', 'male', 'other'] as const).map((gender) => (
+                          <label key={gender} className="flex items-center">
+                            <input
+                              type="radio"
+                              name="gender"
+                              value={gender}
+                              checked={formData.gender === gender}
+                              onChange={(e) => setFormData(prev => ({ ...prev, gender: e.target.value as 'female' | 'male' | 'other' }))}
+                              className="mr-3"
+                              required
+                            />
+                            <span className="capitalize">{gender}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Continent */}
+                    <div className="w-full">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Continent *
+                      </label>
+                      <select
+                        value={formData.continent}
+                        onChange={(e) => setFormData(prev => ({ ...prev, continent: e.target.value }))}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                        required
+                      >
+                        <option value="">-- Select a continent --</option>
+                        {CONTINENTS.map((continent) => (
+                          <option key={continent} value={continent}>
+                            {continent}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Country Dropdown */}
+                    <div className="w-full">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <Globe className="inline h-4 w-4 mr-1" />
+                        Country
+                      </label>
+                      <select
+                        value={formData.country}
+                        onChange={(e) => setFormData(prev => ({ ...prev, country: e.target.value }))}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                      >
+                        <option value="">-- Select a country --</option>
+                        {COUNTRIES.map((country) => (
+                          <option key={country} value={country}>
+                            {country}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* State/Province Field */}
+                    <div className="w-full">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <MapPin className="inline h-4 w-4 mr-1" />
+                        State/Province
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.state}
+                        onChange={(e) => setFormData(prev => ({ ...prev, state: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        placeholder="e.g., Ohio, Ontario, New South Wales"
+                      />
+                    </div>
+
+                    {/* City Field */}
+                    <div className="w-full">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        City
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.city}
+                        onChange={(e) => setFormData(prev => ({ ...prev, city: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        placeholder="e.g., Dayton, Toronto, Sydney"
+                      />
+                    </div>
+
+                    {/* School Name */}
+                    <div className="w-full">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        School/Organization
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.school_name}
+                        onChange={(e) => setFormData(prev => ({ ...prev, school_name: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        placeholder="Optional - Enter school or organization name"
+                      />
+                    </div>
+
+                    {/* Form Actions */}
+                    <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleCancelEdit}
+                        disabled={saving}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        isLoading={saving}
+                        disabled={saving}
+                        icon={<Save size={16} />}
+                      >
+                        {saving ? 'Saving...' : 'Save Changes'}
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Profile Header */}
+                    <div className="flex items-center">
+                      <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mr-4">
+                        {profile.avatar_url ? (
+                          <img
+                            src={profile.avatar_url}
+                            alt={profile.name}
+                            className="w-16 h-16 rounded-full object-cover"
+                          />
+                        ) : (
+                          <User className="h-8 w-8 text-gray-400" />
+                        )}
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900">{profile.name}</h3>
+                        <p className="text-gray-600">{profile.email}</p>
+                      </div>
+                    </div>
+
+                    {/* Profile Details Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+                      <div className="flex items-center text-sm text-gray-600">
+                        <Shield className="h-4 w-4 mr-2 text-blue-500" />
+                        <span className="font-medium">Role:</span>
+                        <span className="ml-1 capitalize">{profile.role}</span>
+                      </div>
+                      
+                      {profile.role === 'student' && profile.grade_level && (
+                        <div className="flex items-center text-sm text-gray-600">
+                          <Award className="h-4 w-4 mr-2 text-purple-500" />
+                          <span className="font-medium">Grade Level:</span>
+                          <span className="ml-1">
+                            {profile.grade_level === 1
+                              ? 'Elementary (3-5)'
+                              : profile.grade_level === 2
+                              ? 'Middle School (6-8)'
+                              : 'High School (9-12)'}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {profile.gender && (
+                        <div className="flex items-center text-sm text-gray-600">
+                          <User className="h-4 w-4 mr-2 text-green-500" />
+                          <span className="font-medium">Gender:</span>
+                          <span className="ml-1 capitalize">{profile.gender}</span>
+                        </div>
+                      )}
+                      
+                      <div className="flex items-center text-sm text-gray-600">
+                        <Calendar className="h-4 w-4 mr-2 text-green-500" />
+                        <span className="font-medium">Joined:</span>
+                        <span className="ml-1">{new Date(profile.created_at).toLocaleDateString()}</span>
+                      </div>
+                      
+                      {profile.continent && (
+                        <div className="flex items-center text-sm text-gray-600">
+                          <Globe className="h-4 w-4 mr-2 text-indigo-500" />
+                          <span className="font-medium">Continent:</span>
+                          <span className="ml-1">{profile.continent}</span>
+                        </div>
+                      )}
+                      
+                      {profile.country && (
+                        <div className="flex items-center text-sm text-gray-600">
+                          <Globe className="h-4 w-4 mr-2 text-blue-500" />
+                          <span className="font-medium">Country:</span>
+                          <span className="ml-1">{profile.country}</span>
+                        </div>
+                      )}
+                      
+                      {(profile.state || profile.city) && (
+                        <div className="flex items-center text-sm text-gray-600">
+                          <MapPin className="h-4 w-4 mr-2 text-red-500" />
+                          <span className="font-medium">Location:</span>
+                          <span className="ml-1">
+                            {[profile.city, profile.state].filter(Boolean).join(', ')}
+                          </span>
+                        </div>
+                      )}
+
+                      {profile.school_name && (
+                        <div className="flex items-center text-sm text-gray-600">
+                          <div className="h-4 w-4 mr-2 text-yellow-500 flex items-center justify-center">
+                            🏫
+                          </div>
+                          <span className="font-medium">School:</span>
+                          <span className="ml-1">{profile.school_name}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Show empty fields message if key profile info not set */}
+                    {(!profile.continent || !profile.country || (!profile.state && !profile.city)) && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
+                        <p className="text-blue-800 text-sm">
+                          <Globe className="inline h-4 w-4 mr-1" />
+                          Complete your profile by adding missing location information.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Team Information */}
+            {teamInfo && (
+              <div className="bg-white rounded-lg shadow">
+                <div className="px-6 py-4 border-b border-gray-200">
+                  <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+                    <Users className="h-5 w-5 mr-2" />
+                    Team Information
+                  </h2>
+                </div>
+                <div className="p-6">
+                  <div className="space-y-3">
+                    <div>
+                      <h3 className="font-medium text-gray-900">{teamInfo.name}</h3>
+                      <p className="text-sm text-gray-600">Your current team</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700">Facilitator</h4>
+                      <p className="text-sm text-gray-600">
+                        {teamInfo.facilitator.name} • {teamInfo.facilitator.email}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Account Settings */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-xl font-semibold text-gray-900">Account Settings</h2>
+              </div>
+              <div className="p-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-medium text-gray-900 flex items-center">
+                        <Key className="h-4 w-4 mr-2" />
+                        Password
+                      </h3>
+                      <p className="text-sm text-gray-600">Reset your password via email</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handlePasswordReset}
+                    >
+                      Reset Password
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Progress Sidebar */}
+          <div className="lg:col-span-1 space-y-6">
+            {/* Learning Progress */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                  <Award className="h-5 w-5 mr-2" />
+                  Learning Progress
+                </h3>
+              </div>
+              <div className="p-6">
+                <div className="text-center mb-6">
+                  <div className="relative inline-flex items-center justify-center w-20 h-20 mb-4">
+                    <svg className="w-20 h-20 transform -rotate-90" viewBox="0 0 36 36">
+                      <path
+                        className="text-gray-200"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                      />
+                      <path
+                        className="text-green-600"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        strokeDasharray={`${getSkillCompletionRate()}, 100`}
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-xl font-bold text-gray-900">
+                        {getSkillCompletionRate()}%
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-600">Overall Progress</p>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Skills Completed</span>
+                    <span className="text-sm font-medium text-gray-900">
+                      {getCompletedSkillsCount()} / {skillsProgress.length || 4}
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    {skillsProgress.length > 0 ? (
+                      skillsProgress.map((skill) => (
+                        <div key={skill.skill} className="flex items-center justify-between">
+                          <div className="flex items-center">
+                            {skill.progress === 100 ? (
+                              <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
+                            ) : (
+                              <div className="h-4 w-4 rounded-full bg-gray-200 mr-2" />
+                            )}
+                            <span className="text-sm text-gray-700 capitalize">
+                              {skill.skill.replace('-', ' ')}
+                            </span>
+                          </div>
+                          <span className="text-xs text-gray-500">
+                            {skill.progress}%
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500 text-center py-4">
+                        No skills progress yet. Start learning to see your progress here!
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Stats */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                  <TrendingUp className="h-5 w-5 mr-2" />
+                  Quick Stats
+                </h3>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Account Age</span>
+                  <span className="text-sm font-medium text-gray-900">
+                    {Math.floor((Date.now() - new Date(profile.created_at).getTime()) / (1000 * 60 * 60 * 24))} days
+                  </span>
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Last Updated</span>
+                  <span className="text-sm font-medium text-gray-900">
+                    {new Date(profile.updated_at).toLocaleDateString()}
+                  </span>
+                </div>
+
+                {teamInfo && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Team Status</span>
+                    <span className="text-sm font-medium text-green-600">Active</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Achievement Badges (Placeholder for future) */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">Achievements</h3>
+              </div>
+              <div className="p-6">
+                <div className="text-center py-8">
+                  <Award className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-sm text-gray-500">
+                    Achievement system coming soon! Keep learning to unlock badges.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Activity (Placeholder) */}
+        <div className="mt-8 bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900">Recent Activity</h2>
+          </div>
+          <div className="p-6">
+            <div className="text-center py-8">
+              <Calendar className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+              <p className="text-sm text-gray-500">
+                Activity tracking coming soon! Your learning journey will be displayed here.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </AppLayout>
+  );
+};
+
+export default ProfilePage;
