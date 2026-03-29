@@ -494,6 +494,59 @@ const buildSpokenEvaluation = (evaluation: SessionEvaluation): string => {
 };
 
 // ─── Message renderer — detects ✅ correction lines → green bold ─────────────
+  const stage = STAGES[stageId];
+  const subcats = STAGE_RUBRICS[stageId];
+  const fullHistory = chatHistory
+    .map(m => `${m.role === 'user' ? 'STUDENT' : 'COACH'}: ${m.content}`)
+    .join('\n\n');
+
+  const encouragementInstruction = communicationLevel <= 0
+    ? 'Write the encouragement in ONLY the simplest words. Maximum 2 short sentences. Use emojis to anchor meaning (e.g. "Well done! 👏"). No jargon at all.'
+    : communicationLevel === 1
+    ? 'Write the encouragement in short, clear sentences. One idea per sentence. No jargon. Warm and celebratory. 2–3 sentences.'
+    : communicationLevel === 2
+    ? 'Write the encouragement in clear, friendly language. Brief explanations where helpful. 2–3 sentences.'
+    : 'Write the encouragement in well-structured, natural English. 2–3 personalised sentences referencing specific strengths.';
+
+  const prompt = `You are an expert English language evaluator for young people in rural Nigeria.
+
+CRITICAL: Do NOT penalise Nigerian English or Pidgin — they show linguistic richness. Evaluate COMMUNICATION EFFECTIVENESS, not formal grammar perfection.
+
+You are evaluating a "${stage.name}" session.
+
+FULL CONVERSATION:
+${fullHistory}
+
+Evaluate the STUDENT only across these sub-categories:
+${subcats.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+
+SCORING LEVELS:
+• Emerging   (0–39):  Very limited demonstration
+• Developing (40–64): Partial demonstration; support still needed
+• Proficient (65–84): Consistent, independent demonstration
+• Advanced   (85–100): Sophisticated, nuanced demonstration
+
+For EACH sub-category provide:
+  - level: exactly one of "Emerging" | "Developing" | "Proficient" | "Advanced"
+  - score: integer 0–100
+  - evidence: 1–2 warm sentences citing a SPECIFIC example from the student's messages
+
+Also provide:
+  - overall_level: the modal level across all sub-categories
+  - can_advance: true ONLY IF every sub-category is Proficient OR Advanced
+  - is_complete: true ONLY IF every sub-category is Advanced
+  - encouragement: ${encouragementInstruction}
+
+Return ONLY valid JSON:
+{
+  "stage_id": ${stageId},
+  "stage_name": "${stage.name}",
+  "overall_level": "...",
+  "can_advance": false,
+  "is_complete": false,
+  "sub_categories": [{ "name": "...", "level": "...", "score": 0, "evidence": "..." }],
+  "encouragement": "..."
+}`;
 
 const deriveProgress = (rows: DashboardSession[]): UserProgress => {
   const completedStages = [false, false, false, false, false];
@@ -693,6 +746,7 @@ const EnglishSkillsPage: React.FC = () => {
   const isAfrica = continent === 'Africa';
 
   const [speechEnabled, setSpeechEnabled] = useState(true);
+  const [ttsUnlocked, setTtsUnlocked] = useState(false); // requires user gesture to activate TTS
   const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin'); // default Nigerian
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -733,14 +787,15 @@ const EnglishSkillsPage: React.FC = () => {
 
   // ── Core speak (ignores speechEnabled — used for modal/eval voice) ────
   const speakAlways = useCallback((text: string) => {
+    if (!ttsUnlocked) return;
     hookSpeak(text);
-  }, [hookSpeak]);
+  }, [hookSpeak, ttsUnlocked]);
 
   // ── Speak (respects speechEnabled toggle) ────────────────────────────
   const speak = useCallback((text: string) => {
-    if (!speechEnabled) return;
+    if (!speechEnabled || !ttsUnlocked) return;
     hookSpeak(text);
-  }, [speechEnabled, hookSpeak]);
+  }, [speechEnabled, hookSpeak, ttsUnlocked]);
 
   // ── Stages intro voice ────────────────────────────────────────────────
   useEffect(() => {
@@ -1197,6 +1252,31 @@ Respond ONLY with valid JSON:
                     ? 'British English voice — clear standard accent'
                     : 'Nigerian English voice (en-NG) — familiar local accent, works offline on Chromebook'}
                 </p>
+              </div>
+
+              {/* ── TTS unlock button — satisfies browser autoplay policy ── */}
+              <div className="mt-4 flex justify-center">
+                {!ttsUnlocked ? (
+                  <button
+                    onClick={() => {
+                      setTtsUnlocked(true);
+                      // Play a silent utterance immediately to unlock the audio context
+                      const utt = new SpeechSynthesisUtterance(' ');
+                      utt.volume = 0;
+                      window.speechSynthesis.speak(utt);
+                      // Then speak the welcome message
+                      setTimeout(() => hookSpeak('Welcome to English Skills. Tap a stage card to begin.'), 300);
+                    }}
+                    className="flex items-center gap-2 px-6 py-3 bg-teal-600 hover:bg-teal-500 active:bg-teal-700 text-white font-bold rounded-xl shadow-lg transition-all text-base animate-pulse"
+                  >
+                    <Volume2 className="h-5 w-5" />
+                    🔊 Tap here to enable voice
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 text-teal-300 text-sm font-semibold">
+                    <Volume2 className="h-4 w-4" /> Voice is on
+                  </div>
+                )}
               </div>
             </div>
 
