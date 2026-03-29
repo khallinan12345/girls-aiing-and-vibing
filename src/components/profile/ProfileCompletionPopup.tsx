@@ -22,218 +22,62 @@ interface ProfileFormData {
   school_name: string;
 }
 
-// All continents except Antarctica
+// Continents
 const CONTINENTS = [
   'Africa',
   'Asia',
-  'Europe',
-  'North America',
-  'Oceania',
-  'South America'
-];
-
-// Full list of countries (unchanged from your original)
-// Paste your existing COUNTRIES array here:
-const COUNTRIES = [
-  'United States',
-  'Nigeria',
-  'Kenya',
-
-  'Afghanistan',
-  'Albania',
-  'Algeria',
-  'Andorra',
-  'Angola',
-  'Antigua and Barbuda',
-  'Argentina',
-  'Armenia',
-  'Aruba',
   'Australia',
-  'Austria',
-  'Azerbaijan',
-  'Bahamas',
-  'Bahrain',
-  'Bangladesh',
-  'Barbados',
-  'Belarus',
-  'Belgium',
-  'Belize',
-  'Benin',
-  'Bhutan',
-  'Bolivia',
-  'Bosnia and Herzegovina',
-  'Botswana',
-  'Brazil',
-  'Brunei',
-  'Bulgaria',
-  'Burkina Faso',
-  'Burundi',
-  'Cabo Verde',
-  'Cambodia',
-  'Cameroon',
-  'Canada',
-  'Central African Republic',
-  'Chad',
-  'Chile',
-  'China',
-  'Colombia',
-  'Comoros',
-  'Costa Rica',
-  'Côte d’Ivoire',
-  'Croatia',
-  'Cuba',
-  'Cyprus',
-  'Czech Republic',
-  'Democratic Republic of the Congo',
-  'Denmark',
-  'Djibouti',
-  'Dominica',
-  'Dominican Republic',
-  'Ecuador',
-  'Egypt',
-  'El Salvador',
-  'Equatorial Guinea',
-  'Eritrea',
-  'Estonia',
-  'Eswatini',
-  'Ethiopia',
-  'Federated States of Micronesia',
-  'Fiji',
-  'Finland',
-  'France',
-  'Gabon',
-  'Gambia',
-  'Georgia',
-  'Germany',
-  'Ghana',
-  'Greece',
-  'Grenada',
-  'Guatemala',
-  'Guinea',
-  'Guinea-Bissau',
-  'Guyana',
-  'Haiti',
-  'Honduras',
-  'Hungary',
-  'Iceland',
-  'India',
-  'Indonesia',
-  'Iran',
-  'Iraq',
-  'Ireland',
-  'Israel',
-  'Italy',
-  'Jamaica',
-  'Japan',
-  'Jordan',
-  'Kazakhstan',
-  'Kiribati',
-  'Kosovo',
-  'Kuwait',
-  'Kyrgyzstan',
-  'Laos',
-  'Latvia',
-  'Lebanon',
-  'Lesotho',
-  'Liberia',
-  'Libya',
-  'Liechtenstein',
-  'Lithuania',
-  'Luxembourg',
-  'Madagascar',
-  'Malawi',
-  'Malaysia',
-  'Maldives',
-  'Mali',
-  'Malta',
-  'Marshall Islands',
-  'Mauritania',
-  'Mauritius',
-  'Mexico',
-  'Moldova',
-  'Monaco',
-  'Mongolia',
-  'Montenegro',
-  'Morocco',
-  'Mozambique',
-  'Myanmar',
-  'Namibia',
-  'Nauru',
-  'Nepal',
-  'Netherlands',
-  'New Zealand',
-  'Nicaragua',
-  'Niger',
-  'North Korea',
-  'North Macedonia',
-  'Norway',
-  'Oman',
-  'Pakistan',
-  'Palau',
-  'Panama',
-  'Papua New Guinea',
-  'Paraguay',
-  'Peru',
-  'Philippines',
-  'Poland',
-  'Portugal',
-  'Qatar',
-  'Republic of the Congo',
-  'Romania',
-  'Russia',
-  'Rwanda',
-  'Saint Kitts and Nevis',
-  'Saint Lucia',
-  'Saint Vincent and the Grenadines',
-  'Samoa',
-  'San Marino',
-  'Sao Tome and Principe',
-  'Saudi Arabia',
-  'Senegal',
-  'Serbia',
-  'Seychelles',
-  'Sierra Leone',
-  'Singapore',
-  'Slovakia',
-  'Slovenia',
-  'Solomon Islands',
-  'Somalia',
-  'South Africa',
-  'South Korea',
-  'South Sudan',
-  'Spain',
-  'Sri Lanka',
-  'Sudan',
-  'Suriname',
-  'Sweden',
-  'Switzerland',
-  'Syria',
-  'Taiwan',
-  'Tajikistan',
-  'Tanzania',
-  'Thailand',
-  'Timor-Leste',
-  'Togo',
-  'Tonga',
-  'Trinidad and Tobago',
-  'Tunisia',
-  'Turkey',
-  'Turkmenistan',
-  'Tuvalu',
-  'Uganda',
-  'Ukraine',
-  'United Arab Emirates',
-  'United Kingdom',
-  'Uruguay',
-  'Uzbekistan',
-  'Vanuatu',
-  'Vatican City',
-  'Venezuela',
-  'Vietnam',
-  'Yemen',
-  'Zambia',
-  'Zimbabwe'
+  'North America',
+  'South America',
 ];
+
+// Countries grouped by continent
+const COUNTRIES_BY_CONTINENT: Record<string, string[]> = {
+  Africa: [
+    'Algeria','Angola','Benin','Botswana','Burkina Faso','Burundi','Cabo Verde',
+    'Cameroon','Central African Republic','Chad','Comoros','Congo',
+    'Democratic Republic of the Congo','Djibouti','Egypt','Equatorial Guinea',
+    'Eritrea','Eswatini','Ethiopia','Gabon','Gambia','Ghana','Guinea',
+    'Guinea-Bissau','Ivory Coast','Kenya','Lesotho','Liberia','Libya',
+    'Madagascar','Malawi','Mali','Mauritania','Mauritius','Morocco',
+    'Mozambique','Namibia','Niger','Nigeria','Rwanda','Senegal','Seychelles',
+    'Sierra Leone','Somalia','South Africa','South Sudan','Sudan','Tanzania',
+    'Togo','Tunisia','Uganda','Zambia','Zimbabwe',
+  ],
+  Asia: [
+    'Afghanistan','Armenia','Azerbaijan','Bahrain','Bangladesh','Bhutan',
+    'Brunei','Cambodia','China','Cyprus','Georgia','India','Indonesia',
+    'Iran','Iraq','Israel','Japan','Jordan','Kazakhstan','Kuwait',
+    'Kyrgyzstan','Laos','Lebanon','Malaysia','Maldives','Mongolia','Myanmar',
+    'Nepal','North Korea','Oman','Pakistan','Philippines','Qatar',
+    'Saudi Arabia','Singapore','South Korea','Sri Lanka','Syria','Taiwan',
+    'Tajikistan','Thailand','Timor-Leste','Turkey','Turkmenistan',
+    'United Arab Emirates','Uzbekistan','Vietnam','Yemen',
+  ],
+  Australia: [
+    'Australia','Fiji','Kiribati','Marshall Islands','Micronesia','Nauru',
+    'New Zealand','Palau','Papua New Guinea','Samoa','Solomon Islands',
+    'Tonga','Tuvalu','Vanuatu',
+  ],
+  'North America': [
+    'Antigua and Barbuda','Bahamas','Barbados','Belize','Canada','Costa Rica',
+    'Cuba','Dominica','Dominican Republic','El Salvador','Grenada','Guatemala',
+    'Haiti','Honduras','Jamaica','Mexico','Nicaragua','Panama',
+    'Saint Kitts and Nevis','Saint Lucia','Saint Vincent and the Grenadines',
+    'Trinidad and Tobago','United States',
+  ],
+  'South America': [
+    'Argentina','Bolivia','Brazil','Chile','Colombia','Ecuador','Guyana',
+    'Paraguay','Peru','Suriname','Uruguay','Venezuela',
+  ],
+};
+
+// City dropdown options by continent
+const CITY_OPTIONS: Record<string, string[]> = {
+  Africa:          ['Oloibiri area', 'Other'],
+  'North America': ['Dayton', 'Other'],
+};
+
 
 
 const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({
@@ -253,6 +97,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({
     school_name: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [cityChoice, setCityChoice] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const handleInputChange = (field: keyof ProfileFormData, value: string) => {
@@ -569,43 +414,43 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({
               </label>
               <select
                 value={formData.continent}
-                onChange={(e) =>
-                  handleInputChange('continent', e.target.value)
-                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  handleInputChange('continent', val);
+                  handleInputChange('country', '');
+                  handleInputChange('city', '');
+                  setCityChoice('');
+                }}
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                 required
               >
                 <option value="">Select a continent</option>
                 {CONTINENTS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
+                  <option key={c} value={c}>{c}</option>
                 ))}
               </select>
             </div>
 
-            {/* Country */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <Globe className="inline mr-1" />
-                Country *
-              </label>
-              <select
-                value={formData.country}
-                onChange={(e) =>
-                  handleInputChange('country', e.target.value)
-                }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                required
-              >
-                <option value="">Select a country</option>
-                {COUNTRIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Country — filtered by continent */}
+            {formData.continent && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <Globe className="inline mr-1" />
+                  Country *
+                </label>
+                <select
+                  value={formData.country}
+                  onChange={(e) => handleInputChange('country', e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                  required
+                >
+                  <option value="">Select a country</option>
+                  {(COUNTRIES_BY_CONTINENT[formData.continent] ?? []).map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* State */}
             <div className="bg-gray-50 p-3 rounded-lg">
@@ -616,29 +461,58 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({
               <input
                 type="text"
                 value={formData.state}
-                onChange={(e) =>
-                  handleInputChange('state', e.target.value)
-                }
+                onChange={(e) => handleInputChange('state', e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                 placeholder="Optional"
               />
             </div>
 
-            {/* City */}
+            {/* City — smart dropdown for Africa and North America */}
             <div className="bg-gray-50 p-3 rounded-lg">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <MapPin className="inline mr-1 text-green-600" />
                 City
               </label>
-              <input
-                type="text"
-                value={formData.city}
-                onChange={(e) =>
-                  handleInputChange('city', e.target.value)
-                }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                placeholder="Optional"
-              />
+              {CITY_OPTIONS[formData.continent] ? (
+                <>
+                  <select
+                    value={cityChoice}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCityChoice(val);
+                      if (val !== 'Other') {
+                        handleInputChange('city', val);
+                      } else {
+                        handleInputChange('city', '');
+                      }
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white mb-2"
+                  >
+                    <option value="">Select a city</option>
+                    {CITY_OPTIONS[formData.continent].map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                  {cityChoice === 'Other' && (
+                    <input
+                      type="text"
+                      value={formData.city}
+                      onChange={(e) => handleInputChange('city', e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                      placeholder="Enter your city or town"
+                      autoFocus
+                    />
+                  )}
+                </>
+              ) : (
+                <input
+                  type="text"
+                  value={formData.city}
+                  onChange={(e) => handleInputChange('city', e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                  placeholder="Optional"
+                />
+              )}
             </div>
 
             {/* School */}
