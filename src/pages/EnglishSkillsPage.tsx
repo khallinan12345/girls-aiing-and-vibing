@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabaseClient';
-import { chatJSON } from '../lib/chatClient';
+import { chatText, chatJSON } from '../lib/chatClient';
 import { useVoice } from '../hooks/useVoice';
 import { VoiceFallback } from '../components/VoiceFallback';
 
