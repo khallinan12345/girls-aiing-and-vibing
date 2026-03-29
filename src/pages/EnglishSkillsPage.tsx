@@ -328,9 +328,98 @@ const LEVEL_CONFIG: Record<ProficiencyLevel, { color: string; bg: string; border
   Advanced:   { color: 'text-green-300',  bg: 'bg-green-500/90',  border: 'border-green-400/40',  emoji: '🏆' },
 };
 
-const OPENAI_MODEL = 'gpt-4o';
+// ─── Claude via chatClient ────────────────────────────────────────────────────
 
-// ─── Message renderer — detects ✅ correction lines → green bold ─────────────
+const evaluateSession = async (
+  chatHistory: ChatMessage[],
+  stageId: number,
+  communicationLevel: number = 1,
+): Promise<SessionEvaluation> => {
+  const stage = STAGES[stageId];
+  const subcats = STAGE_RUBRICS[stageId];
+  const fullHistory = chatHistory
+    .map(m => `${m.role === 'user' ? 'STUDENT' : 'COACH'}: ${m.content}`)
+    .join('\n\n');
+
+  const encouragementInstruction = communicationLevel <= 0
+    ? 'Write the encouragement in ONLY the simplest words. Maximum 2 short sentences. Use emojis to anchor meaning (e.g. "Well done! 👏"). No jargon at all.'
+    : communicationLevel === 1
+    ? 'Write the encouragement in short, clear sentences. One idea per sentence. No jargon. Warm and celebratory. 2–3 sentences.'
+    : communicationLevel === 2
+    ? 'Write the encouragement in clear, friendly language. Brief explanations where helpful. 2–3 sentences.'
+    : 'Write the encouragement in well-structured, natural English. 2–3 personalised sentences referencing specific strengths.';
+
+  const prompt = `You are an expert English language evaluator for young people in rural Nigeria.
+
+CRITICAL: Do NOT penalise Nigerian English or Pidgin — they show linguistic richness. Evaluate COMMUNICATION EFFECTIVENESS, not formal grammar perfection.
+
+You are evaluating a "${stage.name}" session.
+
+FULL CONVERSATION:
+${fullHistory}
+
+Evaluate the STUDENT only across these sub-categories:
+${subcats.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+
+SCORING LEVELS:
+• Emerging   (0–39):  Very limited demonstration
+• Developing (40–64): Partial demonstration; support still needed
+• Proficient (65–84): Consistent, independent demonstration
+• Advanced   (85–100): Sophisticated, nuanced demonstration
+
+For EACH sub-category provide:
+  - level: exactly one of "Emerging" | "Developing" | "Proficient" | "Advanced"
+  - score: integer 0–100
+  - evidence: 1–2 warm sentences citing a SPECIFIC example from the student's messages
+
+Also provide:
+  - overall_level: the modal level across all sub-categories
+  - can_advance: true ONLY IF every sub-category is Proficient OR Advanced
+  - is_complete: true ONLY IF every sub-category is Advanced
+  - encouragement: ${encouragementInstruction}
+
+Return ONLY valid JSON:
+{
+  "stage_id": ${stageId},
+  "stage_name": "${stage.name}",
+  "overall_level": "...",
+  "can_advance": false,
+  "is_complete": false,
+  "sub_categories": [{ "name": "...", "level": "...", "score": 0, "evidence": "..." }],
+  "encouragement": "..."
+}`;
+
+  const result = await chatJSON({
+    messages: [{ role: 'user', content: prompt }],
+    system: 'You are an expert English language evaluator. Return only valid JSON.',
+    max_tokens: 1200,
+    temperature: 0.2,
+  });
+  return result as SessionEvaluation;
+};
+
+const improveText = async (
+  text: string,
+  context: string,
+  stageId: number,
+): Promise<{ improved: string; explanation: string }> => {
+  const prompt = `You are an English language coach helping a young student in Nigeria improve their writing.
+Stage: ${STAGES[stageId].name}
+Recent context: ${context}
+Student wrote: "${text}"
+
+Rewrite with clearer English — PRESERVE their authentic voice and meaning. Keep changes minimal.
+Return ONLY valid JSON: { "improved_text": "...", "explanation": "..." }
+Explanation: 2–3 warm sentences to the student explaining WHAT changed and WHY.`;
+
+  const result = await chatJSON({
+    messages: [{ role: 'user', content: prompt }],
+    system: 'You are an English language coach. Return only valid JSON.',
+    max_tokens: 600,
+    temperature: 0.3,
+  });
+  return { improved: result.improved_text, explanation: result.explanation };
+};
 
 const MessageContent: React.FC<{ content: string }> = ({ content }) => {
   const lines = content.split('\n');
@@ -404,31 +493,7 @@ const buildSpokenEvaluation = (evaluation: SessionEvaluation): string => {
   return speech;
 };
 
-// ─── OpenAI Helpers ───────────────────────────────────────────────────────────
-
-const callOpenAI = async (
-  messages: { role: string; content: string }[],
-  maxTokens = 400,
-  jsonMode = false,
-): Promise<string> => {
-  const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-  const body: Record<string, unknown> = { model: OPENAI_MODEL, messages, max_tokens: maxTokens };
-  if (jsonMode) body.response_format = { type: 'json_object' };
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`OpenAI error: ${res.status}`);
-  const data = await res.json();
-  return data.choices[0].message.content as string;
-};
-
-const evaluateSession = async (
-  chatHistory: ChatMessage[],
-  stageId: number,
-  communicationLevel: number = 1,
-): Promise<SessionEvaluation> => {
+// ─── Message renderer — detects ✅ correction lines → green bold ─────────────
   const stage = STAGES[stageId];
   const subcats = STAGE_RUBRICS[stageId];
   const fullHistory = chatHistory
@@ -482,29 +547,6 @@ Return ONLY valid JSON:
   "sub_categories": [{ "name": "...", "level": "...", "score": 0, "evidence": "..." }],
   "encouragement": "..."
 }`;
-
-  const raw = await callOpenAI([{ role: 'user', content: prompt }], 1200, true);
-  return JSON.parse(raw.replace(/```json|```/g, '').trim()) as SessionEvaluation;
-};
-
-const improveText = async (
-  text: string,
-  context: string,
-  stageId: number,
-): Promise<{ improved: string; explanation: string }> => {
-  const prompt = `You are an English language coach helping a young student in Nigeria improve their writing.
-Stage: ${STAGES[stageId].name}
-Recent context: ${context}
-Student wrote: "${text}"
-
-Rewrite with clearer English — PRESERVE their authentic voice and meaning. Keep changes minimal.
-Return ONLY valid JSON: { "improved_text": "...", "explanation": "..." }
-Explanation: 2–3 warm sentences to the student explaining WHAT changed and WHY.`;
-
-  const raw = await callOpenAI([{ role: 'user', content: prompt }], 600, true);
-  const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
-  return { improved: parsed.improved_text, explanation: parsed.explanation };
-};
 
 const deriveProgress = (rows: DashboardSession[]): UserProgress => {
   const completedStages = [false, false, false, false, false];
@@ -1030,10 +1072,11 @@ Respond ONLY with valid JSON:
 
     try {
       const sysPrompt = selectedStage.systemPrompt.replace('{TOPIC}', t) + buildCommLevelBlock(communicationLevel);
-      const welcome = await callOpenAI([
-        { role: 'system', content: sysPrompt },
-        { role: 'user', content: `The student has chosen the topic: "${t}". Give a warm 2-sentence welcome and ask your very first question or prompt. Be friendly and encouraging.` },
-      ]);
+      const welcome = await chatText({
+        messages: [{ role: 'user', content: `The student has chosen the topic: "${t}". Give a warm 2-sentence welcome and ask your very first question or prompt. Be friendly and encouraging.` }],
+        system: sysPrompt,
+        max_tokens: 400,
+      });
       const welcomeMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: welcome, timestamp: new Date().toISOString() };
       setMessages([welcomeMsg]);
       await persistToDashboard([welcomeMsg]);
@@ -1071,10 +1114,11 @@ Respond ONLY with valid JSON:
 
     try {
       const sysPrompt = selectedStage.systemPrompt.replace('{TOPIC}', topic) + buildCommLevelBlock(communicationLevel);
-      const aiText = await callOpenAI([
-        { role: 'system', content: sysPrompt },
-        ...withUser.map(m => ({ role: m.role, content: m.content })),
-      ], 400);
+      const aiText = await chatText({
+        messages: withUser.map(m => ({ role: m.role, content: m.content })),
+        system: sysPrompt,
+        max_tokens: 400,
+      });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: aiText, timestamp: new Date().toISOString() };
       const finalMsgs = [...withUser, aiMsg];
       setMessages(finalMsgs);
