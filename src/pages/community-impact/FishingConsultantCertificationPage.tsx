@@ -856,7 +856,7 @@ Return valid JSON only (no markdown, no code fences):
     return (
       <div className="min-h-screen bg-gray-900 flex flex-col">
         <Navbar />
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto relative z-10">
           <div className="max-w-2xl mx-auto px-6 py-6 space-y-4">
 
             <div className="flex items-center justify-between">
@@ -988,7 +988,7 @@ Return valid JSON only (no markdown, no code fences):
     return (
       <div className="min-h-screen bg-gray-900 flex flex-col">
         <Navbar />
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto relative z-10">
           <div className="max-w-2xl mx-auto px-6 py-6 space-y-5">
             <VoiceBar text={`Your Fishing Consultant Certification results are ready. ${allProficient ? 'Congratulations — you have achieved certification level on all criteria!' : 'Continue building your portfolio and try again.'}`} />
 
@@ -1070,7 +1070,7 @@ Return valid JSON only (no markdown, no code fences):
     return (
       <div className="min-h-screen bg-gray-900 flex flex-col">
         <Navbar />
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto relative z-10">
           <div className="max-w-2xl mx-auto px-6 py-6 space-y-5">
             <VoiceBar text="Enter your name to generate your Fishing Consultant Certificate." />
 
