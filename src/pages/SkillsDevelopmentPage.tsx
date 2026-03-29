@@ -2349,17 +2349,10 @@ Provide assessment now:`;
     if (!userInput.trim() || isImproving) return;
     setIsImproving(true);
     try {
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          max_tokens: 600,
-          response_format: { type: 'json_object' },
-          messages: [{
-            role: 'user',
-            content: `You are an English language coach helping a student in rural Nigeria improve their writing.
+      const result = await chatJSON({
+        messages: [{
+          role: 'user',
+          content: `You are an English language coach helping a student in rural Nigeria improve their writing.
             The student wrote: "${userInput.trim()}"
 
             Your job:
@@ -2370,18 +2363,18 @@ Provide assessment now:`;
             5. If the meaning is unclear, make the most reasonable interpretation and write the clearest possible sentence.
 
             Return ONLY valid JSON: { "improved_text": "..." }`
-                      }]
-                    })
-                  });
-                  const data = await res.json();
-                  const parsed = JSON.parse(data.choices[0].message.content);
-                  if (parsed.improved_text) setUserInput(parsed.improved_text);
-                } catch (err) {
-                  console.error('Improve English error:', err);
-                } finally {
-                  setIsImproving(false);
-                }
-              };
+        }],
+        system: 'You are an English language coach. Return only valid JSON.',
+        max_tokens: 600,
+        temperature: 0.3,
+      });
+      if (result?.improved_text) setUserInput(result.improved_text);
+    } catch (err) {
+      console.error('Improve English error:', err);
+    } finally {
+      setIsImproving(false);
+    }
+  };
   // ── Parse rubric scores from the most recent AI rubric block in chat ─────────
   // Finds patterns like "dimension name: 2 —" to detect Proficient/Advanced status
   // without requiring a full evaluation to have run first.
