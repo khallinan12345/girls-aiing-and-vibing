@@ -1,4 +1,4 @@
-// src/App.tsx - Fixed with better profile completion handling
+// src/App.tsx
 
 import React, { useEffect, useMemo } from 'react';
 import EnglishSkillsPage from './pages/EnglishSkillsPage';
@@ -35,7 +35,6 @@ import AIProficiencyPage from './pages/AIProficiencyPage';
 import AIReadySkillsPage from './pages/AIReadySkillsPage';
 import AIPlaygroundPage from './pages/AIPlaygroundPage';
 
-
 // Tech Skills Pages
 import WebDevelopmentPage from './pages/tech-skills/WebDevelopmentPage';
 import VibeCodingPage from './pages/tech-skills/VibeCodingPage';
@@ -71,7 +70,11 @@ import AIAmbassadorsCertificationPage from './pages/community-impact/AIAmbassado
 import AgricultureConsultantPage from './pages/community-impact/AgricultureConsultantPage';
 import AgricultureConsultantCertificationPage from './pages/community-impact/AgricultureConsultantCertificationPage';
 import FishingConsultantPage from './pages/community-impact/FishingConsultantPage';
+import FishingConsultantCertificationPage from './pages/community-impact/FishingConsultantCertificationPage';
 import HealthcareNavigatorPage from './pages/community-impact/HealthcareNavigatorPage';
+import HealthcareNavigatorCertificationPage from './pages/community-impact/HealthcareNavigatorCertificationPage';
+import EntrepreneurshipConsultantPage from './pages/community-impact/EntrepreneurshipConsultantPage';
+import EntrepreneurshipConsultantCertificationPage from './pages/community-impact/EntrepreneurshipConsultantCertificationPage';
 
 const AppContent: React.FC = () => {
   const location = useLocation();
@@ -84,12 +87,10 @@ const AppContent: React.FC = () => {
     markProfileCompleted
   } = useAuth();
 
-  // Log page navigations
   useEffect(() => {
     console.log('[AppContent] location change:', location.pathname);
   }, [location.pathname]);
 
-  // Show the profile-completion popup when appropriate
   const showPopup = useMemo(
     () =>
       session !== null &&
@@ -98,7 +99,6 @@ const AppContent: React.FC = () => {
     [session, user, needsProfileCompletion]
   );
 
-  // Log auth state changes
   useEffect(() => {
     console.log('[AppContent] auth state →', {
       loading,
@@ -126,7 +126,6 @@ const AppContent: React.FC = () => {
     }
   };
 
-  // Loading state
   if (loading) {
     console.log('[AppContent] loading, showing spinner');
     return (
@@ -149,10 +148,7 @@ const AppContent: React.FC = () => {
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/auth/confirmation" element={<ConfirmationPage />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
-        <Route
-          path="/auth/confirmation-success"
-          element={<EmailConfirmationSuccess />}
-        />
+        <Route path="/auth/confirmation-success" element={<EmailConfirmationSuccess />} />
 
         {/* Main App Routes */}
         <Route path="/home" element={<HomePage />} />
@@ -196,7 +192,11 @@ const AppContent: React.FC = () => {
         <Route path="/community-impact/agriculture" element={<AgricultureConsultantPage />} />
         <Route path="/community-impact/agriculture/certification" element={<AgricultureConsultantCertificationPage />} />
         <Route path="/community-impact/fishing" element={<FishingConsultantPage />} />
+        <Route path="/community-impact/fishing/certification" element={<FishingConsultantCertificationPage />} />
         <Route path="/community-impact/healthcare" element={<HealthcareNavigatorPage />} />
+        <Route path="/community-impact/healthcare/certification" element={<HealthcareNavigatorCertificationPage />} />
+        <Route path="/community-impact/entrepreneurship" element={<EntrepreneurshipConsultantPage />} />
+        <Route path="/community-impact/entrepreneurship/certification" element={<EntrepreneurshipConsultantCertificationPage />} />
 
         {/* Legacy Route Redirects */}
         <Route path="/ai-proficiency" element={<Navigate to="/certifications/ai-proficiency" replace />} />
@@ -224,7 +224,6 @@ const AppContent: React.FC = () => {
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
 
-      {/* Profile Completion Modal */}
       {showPopup && (
         <ProfileCompletionPopup
           userId={user!.id}
@@ -237,7 +236,6 @@ const AppContent: React.FC = () => {
 };
 
 function App() {
-  // DEV-only: clearly label your local build in the browser tab
   useEffect(() => {
     if (import.meta.env.DEV) {
       document.title = 'AI-ing and Vibing [DEV]';

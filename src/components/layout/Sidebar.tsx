@@ -5,7 +5,7 @@ import {
   Home, Award, Brain, BarChart, Info, BookOpen, GraduationCap,
   Code, Database, Layers, ImagePlus, Video, Mic, PenLine, Zap,
   Briefcase, Code2, Film, ImagePlus as ImagePlusIcon, Mic as MicIcon,
-  Cpu, Wand2, ChevronDown, ChevronUp, ShieldCheck, Users, Sprout, Fish, Heart, Award, Briefcase,
+  Cpu, Wand2, ChevronDown, ChevronUp, ShieldCheck, Users, Sprout, Fish, Heart,
 } from 'lucide-react';
 import classNames from 'classnames';
 
