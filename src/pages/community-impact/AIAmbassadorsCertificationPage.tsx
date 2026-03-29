@@ -710,7 +710,7 @@ Return valid JSON only (no markdown, no code fences):
       <div className="min-h-screen flex flex-col relative">
         <Navbar />
         <AmbassadorCertBackground />
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto relative z-10">
           <div className="max-w-2xl mx-auto px-6 py-8 space-y-5">
 
             <VoiceBar text={`Welcome to the AI Ambassadors Certification. To earn this certificate, you must complete three written sections and at least two live teaching sessions with different community personas. Then submit your portfolio for evaluation.`} />

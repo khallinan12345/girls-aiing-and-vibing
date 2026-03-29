@@ -837,7 +837,7 @@ Return valid JSON only (no markdown, no code fences):
       <div className="min-h-screen flex flex-col relative">
         <Navbar />
         <HealthCertBackground />
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto relative z-10">
           <div className="max-w-2xl mx-auto px-6 py-8 space-y-5">
             <VoiceBar text="Welcome to the Healthcare Navigator Certification. Complete three written sections — including a full referral note — and at least two live patient consultations. Then submit for evaluation." />
 

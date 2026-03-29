@@ -764,7 +764,7 @@ Return valid JSON only (no markdown, no code fences):
     return (
       <div className="min-h-screen bg-gray-900 flex flex-col">
         <Navbar />
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto relative z-10">
           <div className="max-w-2xl mx-auto px-6 py-8 space-y-5">
             <VoiceBar text="Welcome to the Fishing Consultant Certification. Complete three written sections and at least two live consultations with different fishers or traders, then submit for evaluation." />
 
