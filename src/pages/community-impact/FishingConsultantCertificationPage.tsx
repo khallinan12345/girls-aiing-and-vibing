@@ -701,6 +701,7 @@ Return valid JSON only (no markdown, no code fences):
             </p>
           </div>
 
+
           <div className="flex-1 bg-gray-800/60 border border-gray-700/50 rounded-2xl flex flex-col overflow-hidden" style={{ height: '420px' }}>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {sessionMessages.map(msg => (
