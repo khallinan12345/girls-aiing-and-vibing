@@ -75,8 +75,11 @@ const COUNTRIES_BY_CONTINENT: Record<string, string[]> = {
 // City dropdown options by continent
 const CITY_OPTIONS: Record<string, string[]> = {
   Africa:          ['Oloibiri area', 'Other'],
-  'North America': ['Dayton', 'Other'],
+  'North America': ['Cincinnati', 'Dayton', 'Other'],
 };
+
+// School/organization dropdown for African users
+const AFRICA_SCHOOL_OPTIONS = ['Davidson AI Innovation Lab', 'Other'];
 
 
 
@@ -98,6 +101,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cityChoice, setCityChoice] = useState('');
+  const [schoolChoice, setSchoolChoice] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const handleInputChange = (field: keyof ProfileFormData, value: string) => {
@@ -419,7 +423,9 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({
                   handleInputChange('continent', val);
                   handleInputChange('country', '');
                   handleInputChange('city', '');
+                  handleInputChange('school_name', '');
                   setCityChoice('');
+                  setSchoolChoice('');
                 }}
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                 required
@@ -482,8 +488,20 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({
                       setCityChoice(val);
                       if (val !== 'Other') {
                         handleInputChange('city', val);
+                        // Auto-populate school for Cincinnati (North America)
+                        if (val === 'Cincinnati') {
+                          handleInputChange('school_name', '100 Black Girls Breaking Barriers in STEM');
+                        } else {
+                          // Clear auto-populated value if switching away from Cincinnati
+                          if (formData.school_name === '100 Black Girls Breaking Barriers in STEM') {
+                            handleInputChange('school_name', '');
+                          }
+                        }
                       } else {
                         handleInputChange('city', '');
+                        if (formData.school_name === '100 Black Girls Breaking Barriers in STEM') {
+                          handleInputChange('school_name', '');
+                        }
                       }
                     }}
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white mb-2"
@@ -515,21 +533,63 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({
               )}
             </div>
 
-            {/* School */}
+            {/* School/Organization */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <School className="inline mr-1" />
                 School/Organization (Optional)
               </label>
-              <input
-                type="text"
-                value={formData.school_name}
-                onChange={(e) =>
-                  handleInputChange('school_name', e.target.value)
-                }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                placeholder="Optional"
-              />
+
+              {/* Africa: dropdown with Davidson AI Innovation Lab or Other */}
+              {formData.continent === 'Africa' ? (
+                <>
+                  <select
+                    value={schoolChoice}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSchoolChoice(val);
+                      if (val !== 'Other') {
+                        handleInputChange('school_name', val);
+                      } else {
+                        handleInputChange('school_name', '');
+                      }
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white mb-2"
+                  >
+                    <option value="">Select a school or organization</option>
+                    {AFRICA_SCHOOL_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                  {schoolChoice === 'Other' && (
+                    <input
+                      type="text"
+                      value={formData.school_name}
+                      onChange={(e) => handleInputChange('school_name', e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                      placeholder="Enter your school or organization"
+                      autoFocus
+                    />
+                  )}
+                </>
+              ) : /* North America + Cincinnati: auto-populated read-only field */
+              formData.continent === 'North America' && cityChoice === 'Cincinnati' ? (
+                <input
+                  type="text"
+                  value={formData.school_name}
+                  readOnly
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-600 text-sm cursor-default"
+                />
+              ) : (
+                /* All other users: free text */
+                <input
+                  type="text"
+                  value={formData.school_name}
+                  onChange={(e) => handleInputChange('school_name', e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                  placeholder="Optional"
+                />
+              )}
             </div>
 
             {/* Submit */}

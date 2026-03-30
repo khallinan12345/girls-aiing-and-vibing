@@ -109,8 +109,11 @@ const COUNTRIES_BY_CONTINENT: Record<string, string[]> = {
 // City dropdown options by continent (null = free-text only)
 const CITY_OPTIONS: Record<string, string[]> = {
   Africa:        ['Oloibiri area', 'Other'],
-  'North America': ['Dayton', 'Other'],
+  'North America': ['Cincinnati', 'Dayton', 'Other'],
 };
+
+// School/organization dropdown for African users
+const AFRICA_SCHOOL_OPTIONS = ['Davidson AI Innovation Lab', 'Other'];
 
 const ProfilePage: React.FC = () => {
   const { user: authUser, refreshUserProfile } = useAuth();
@@ -122,6 +125,7 @@ const ProfilePage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cityChoice, setCityChoice] = useState(''); // tracks dropdown selection for smart city field
+  const [schoolChoice, setSchoolChoice] = useState(''); // tracks dropdown selection for smart school field
   const [success, setSuccess] = useState<string | null>(null);
   
   // Form state - updated to include all profile fields
@@ -277,6 +281,15 @@ const ProfilePage: React.FC = () => {
         setCityChoice(namedOption ? namedOption : savedCity ? 'Other' : '');
       } else {
         setCityChoice('');
+      }
+
+      // Initialise schoolChoice dropdown from saved school value (Africa only)
+      const savedSchool = profileData.school_name || '';
+      if (c === 'Africa') {
+        const namedSchool = AFRICA_SCHOOL_OPTIONS.find(o => o !== 'Other' && o === savedSchool);
+        setSchoolChoice(namedSchool ? namedSchool : savedSchool ? 'Other' : '');
+      } else {
+        setSchoolChoice('');
       }
 
       // Seed a default personality baseline for new users (no-op if already exists)
@@ -465,6 +478,15 @@ const ProfilePage: React.FC = () => {
       setCityChoice(namedOption ? namedOption : savedCity ? 'Other' : '');
     } else {
       setCityChoice('');
+    }
+
+    // Reinitialise schoolChoice when edit starts (Africa only)
+    const savedSchool = profile?.school_name || '';
+    if (c === 'Africa') {
+      const namedSchool = AFRICA_SCHOOL_OPTIONS.find(o => o !== 'Other' && o === savedSchool);
+      setSchoolChoice(namedSchool ? namedSchool : savedSchool ? 'Other' : '');
+    } else {
+      setSchoolChoice('');
     }
     setError(null);
   }, [profile]);
@@ -688,8 +710,9 @@ const ProfilePage: React.FC = () => {
                         value={formData.continent}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setFormData(prev => ({ ...prev, continent: val, country: '', city: '' }));
+                          setFormData(prev => ({ ...prev, continent: val, country: '', city: '', school_name: '' }));
                           setCityChoice('');
+                          setSchoolChoice('');
                         }}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                         required
@@ -749,9 +772,25 @@ const ProfilePage: React.FC = () => {
                               const val = e.target.value;
                               setCityChoice(val);
                               if (val !== 'Other') {
-                                setFormData(prev => ({ ...prev, city: val }));
+                                if (val === 'Cincinnati') {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    city: val,
+                                    school_name: '100 Black Girls Breaking Barriers in STEM'
+                                  }));
+                                } else {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    city: val,
+                                    school_name: prev.school_name === '100 Black Girls Breaking Barriers in STEM' ? '' : prev.school_name
+                                  }));
+                                }
                               } else {
-                                setFormData(prev => ({ ...prev, city: '' }));
+                                setFormData(prev => ({
+                                  ...prev,
+                                  city: '',
+                                  school_name: prev.school_name === '100 Black Girls Breaking Barriers in STEM' ? '' : prev.school_name
+                                }));
                               }
                             }}
                             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white mb-2"
@@ -783,18 +822,62 @@ const ProfilePage: React.FC = () => {
                       )}
                     </div>
 
-                    {/* School Name */}
+                    {/* School/Organization */}
                     <div className="w-full">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         School/Organization
                       </label>
-                      <input
-                        type="text"
-                        value={formData.school_name}
-                        onChange={(e) => setFormData(prev => ({ ...prev, school_name: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                        placeholder="Optional - Enter school or organization name"
-                      />
+
+                      {/* Africa: dropdown with Davidson AI Innovation Lab or Other */}
+                      {formData.continent === 'Africa' ? (
+                        <>
+                          <select
+                            value={schoolChoice}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSchoolChoice(val);
+                              if (val !== 'Other') {
+                                setFormData(prev => ({ ...prev, school_name: val }));
+                              } else {
+                                setFormData(prev => ({ ...prev, school_name: '' }));
+                              }
+                            }}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white mb-2"
+                          >
+                            <option value="">Select a school or organization</option>
+                            {AFRICA_SCHOOL_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          {schoolChoice === 'Other' && (
+                            <input
+                              type="text"
+                              value={formData.school_name}
+                              onChange={(e) => setFormData(prev => ({ ...prev, school_name: e.target.value }))}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                              placeholder="Enter your school or organization name"
+                              autoFocus
+                            />
+                          )}
+                        </>
+                      ) : /* North America + Cincinnati: auto-populated read-only field */
+                      formData.continent === 'North America' && cityChoice === 'Cincinnati' ? (
+                        <input
+                          type="text"
+                          value={formData.school_name}
+                          readOnly
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-600 text-sm cursor-default"
+                        />
+                      ) : (
+                        /* All other users: free text */
+                        <input
+                          type="text"
+                          value={formData.school_name}
+                          onChange={(e) => setFormData(prev => ({ ...prev, school_name: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          placeholder="Optional - Enter school or organization name"
+                        />
+                      )}
                     </div>
 
                     {/* Form Actions */}
@@ -905,7 +988,7 @@ const ProfilePage: React.FC = () => {
                           <div className="h-4 w-4 mr-2 text-yellow-500 flex items-center justify-center">
                             🏫
                           </div>
-                          <span className="font-medium">School:</span>
+                          <span className="font-medium">School/Organization:</span>
                           <span className="ml-1">{profile.school_name}</span>
                         </div>
                       )}
