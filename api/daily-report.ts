@@ -342,6 +342,8 @@ function buildEmailHtml(oloibiri: DailyMetrics, ibiade: DailyMetrics, dateLabel:
   </div>
 </div>
 </body></html>`;
+}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
