@@ -1066,6 +1066,7 @@ const SkillsPage: React.FC = () => {
   const [currentEvaluationState, setCurrentEvaluationState] = useState<CurrentEvaluationState | null>(null);
   const [userGradeLevel, setUserGradeLevel] = useState<number | null>(null);
   const [userContinent, setUserContinent] = useState<string | null>(null);
+  const [userCity, setUserCity] = useState<string | null>(null);
   const [personalityBaseline, setPersonalityBaseline] = useState<PersonalityBaseline>({
     communicationStrategy: null,
     learningStrategy: null
@@ -1246,7 +1247,7 @@ const SkillsPage: React.FC = () => {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('grade_level, continent')
+        .select('grade_level, continent, city')
         .eq('id', userId)
         .single();
 
@@ -1254,13 +1255,15 @@ const SkillsPage: React.FC = () => {
 
       return {
         gradeLevel: data?.grade_level || null,
-        continent: data?.continent || null
+        continent: data?.continent || null,
+        city: data?.city || null,
       };
     } catch (err) {
       console.error('Error fetching user profile:', err);
       return {
         gradeLevel: null,
-        continent: null
+        continent: null,
+        city: null,
       };
     }
   };
@@ -1369,14 +1372,18 @@ Remember: Every response is an opportunity to help them improve. Be specific, en
   };
 
   // Load dashboard activities
-  const loadDashboardActivities = async () => {
+  const loadDashboardActivities = async (city?: string | null) => {
     if (!user?.id) return;
 
     try {
       setLoading(true);
-      
+
+      // Resolve which city_town to show: Ibiade users see Ibiade modules, everyone else sees Oloibiri
+      const cityTown = city === 'Ibiade' ? 'Ibiade' : 'Oloibiri';
+
       console.log('[Skills Activities] Querying with JOIN to learning_modules');
       console.log('[Skills Activities] User ID:', user.id);
+      console.log('[Skills Activities] Filtering by city_town:', cityTown);
       
       // Join with learning_modules to get the actual category
       const { data: dashboardData, error } = await supabase
@@ -1387,7 +1394,8 @@ Remember: Every response is an opportunity to help them improve. Be specific, en
             category,
             sub_category,
             learning_or_certification,
-            public
+            public,
+            city_town
           )
         `)
         .eq('user_id', user.id)
@@ -1400,10 +1408,15 @@ Remember: Every response is an opportunity to help them improve. Be specific, en
         throw error;
       }
 
-      // Filter for Skills category, excluding Vibe Coding (now in Tech Workshop)
+      // Filter for Skills category, correct city_town, excluding Vibe Coding
       const skillsActivities = (dashboardData?.filter(activity => {
         const module = activity.learning_modules;
-        return module && module.category === 'Skills' && module.sub_category !== 'Vibe Coding';
+        return (
+          module &&
+          module.category === 'Skills' &&
+          module.sub_category !== 'Vibe Coding' &&
+          (module.city_town === cityTown || module.city_town == null)
+        );
       }) || []).map(activity => ({
         ...activity,
         isPublic: activity.learning_modules?.public === 1 ||
@@ -1438,19 +1451,20 @@ Remember: Every response is an opportunity to help them improve. Be specific, en
   // Refresh dashboard
   const refreshDashboard = async () => {
     setRefreshing(true);
-    await loadDashboardActivities();
+    await loadDashboardActivities(userCity);
     setRefreshing(false);
   };
 
-  // Initial load
+  // Initial load — fetch profile first so city_town filter is applied immediately
   useEffect(() => {
     if (user?.id) {
-      loadDashboardActivities();
       fetchUserProfile(user.id).then(profile => {
         setUserGradeLevel(profile.gradeLevel);
         setUserContinent(profile.continent);
+        setUserCity(profile.city);
         if (profile.continent === 'Africa') setVoiceMode('pidgin');
         else setVoiceMode('english');
+        return loadDashboardActivities(profile.city);
       });
       fetchPersonalityBaseline(user.id);
     }
@@ -3357,7 +3371,7 @@ const handleExecuteCode = async (code: string, language: 'python' | 'javascript'
       // 3. Reset form and reload
       setShowCreateActivity(false);
       setCreateForm({ title: '', description: '', location: '', constraints: '', stakeholders: '', entrepreneurialContext: '', category: 'vibe-coding' });
-      await loadDashboardActivities();
+      await loadDashboardActivities(userCity);
 
       // 4. Launch the new activity directly
       const newActivity: DashboardActivity = {
