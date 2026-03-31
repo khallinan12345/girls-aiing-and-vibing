@@ -142,13 +142,14 @@ const ArtifactPanelView: React.FC<{ artifact: ArtifactPanel; onClose: () => void
   );
 };
 
+const MODEL_OPTIONS = [
+  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+];
+
 const getModelDisplayName = (modelId: string): string => {
-  if (modelId.includes('sonnet-4-6')) return 'Sonnet 4.6';
-  if (modelId.includes('sonnet-4-5')) return 'Sonnet 4.5';
-  if (modelId.includes('haiku-4-5')) return 'Haiku 4.5';
-  if (modelId.includes('opus-4-6')) return 'Opus 4.6';
-  if (modelId.includes('opus-4-5')) return 'Opus 4.5';
-  return modelId;
+  const match = MODEL_OPTIONS.find((m) => m.value === modelId);
+  return match ? match.label : modelId;
 };
 
 const AIPlaygroundPage: React.FC = () => {

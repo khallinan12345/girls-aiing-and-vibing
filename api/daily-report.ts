@@ -193,6 +193,23 @@ async function fetchMetrics(logDate: string, cohortIds: string[], city: string):
 
 // ─── Email HTML ───────────────────────────────────────────────────────────────
 
+function catRow(label: string, count: number, total: number): string {
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+  const w = Math.min(pct * 1.2, 120);
+  const active = count > 0;
+  return `
+  <tr style="border-top:1px solid #e5e7eb;">
+    <td style="padding:6px 10px;font-size:11px;color:#374151;">${label}</td>
+    <td style="padding:6px 10px;text-align:center;font-size:12px;font-weight:700;color:${active ? "#1a3d2b" : "#9ca3af"};">${count}</td>
+    <td style="padding:6px 16px;">
+      <span style="display:inline-block;background:#e5e7eb;border-radius:3px;width:120px;height:7px;vertical-align:middle;">
+        <span style="display:inline-block;background:${active ? "#2d6a4f" : "#e5e7eb"};border-radius:3px;height:7px;width:${w}px;"></span>
+      </span>
+      <span style="font-size:10px;color:#6b7280;margin-left:6px;">${pct}%</span>
+    </td>
+  </tr>`;
+}
+
 function buildCohortPanel(m: DailyMetrics): string {
   const participationPct = m.totalAfricaUsers > 0
     ? Math.round((m.activeUsers / m.totalAfricaUsers) * 100)
