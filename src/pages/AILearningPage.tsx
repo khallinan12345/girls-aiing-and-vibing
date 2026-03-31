@@ -1,71 +1,115 @@
-// AILearningPage.tsx - Dashboard-based AI learning with interactive activities
+// SkillsPage.tsx - Dashboard-based skills tracking with continuous evaluation
+/**
+ * DASHBOARD ENTRY LIFECYCLE:
+ * 
+ * 1. CREATION: Dashboard entries are created when learning modules are assigned to users
+ *    - Each user gets one dashboard entry per learning_module (enforced by unique constraint)
+ *    - Initial status: 'not started'
+ *    - Entry includes: user_id, learning_module_id, activity, title, category, sub_category
+ * 
+ * 2. STARTING: When user clicks on an activity for the first time:
+ *    - Status changes from 'not started' to 'started'
+ *    - Initial chat history is created
+ *    - Current evaluation state is loaded
+ * 
+ * 3. ONGOING INTERACTION: As user and AI exchange messages:
+ *    - chat_history is updated after EVERY user input and AI response
+ *    - Automatic evaluation runs after each user response (for Skills learning activities)
+ *    - Evaluation scores and evidence are continuously updated in database
+ *    - evaluation_score = minimum of all dimension scores (0-3 scale: 0=No Evidence, 1=Emerging, 2=Proficient, 3=Advanced)
+ *    - evaluation_evidence = aggregate of all dimension evidence
+ * 
+ * 4. SAVE SESSION: User can explicitly save progress:
+ *    - Performs full assessment based on entire conversation
+ *    - Updates all dimension scores and evidence
+ *    - Calculates minimum score and aggregate evidence
+ *    - Does NOT change progress status
+ *    - No modal shown (quiet save)
+ * 
+ * 5. UPDATE EVALUATION: User requests formal evaluation:
+ *    - Performs full assessment based on entire conversation
+ *    - Shows detailed modal with dimension-by-dimension breakdown
+ *    - Updates database with all scores
+ *    - Auto-completes ONLY if score = 3 (Advanced in all dimensions)
+ *    - Triggers celebration if score = 3
+ * 
+ * 6. FINISH MODULE: User explicitly finishes the module:
+ *    - Requires confirmation dialog
+ *    - Performs full assessment based on entire conversation
+ *    - ALWAYS marks progress as 'completed' regardless of score
+ *    - Shows evaluation modal with results
+ *    - Triggers celebration if score = 3
+ *    - User cannot re-open completed modules
+ * 
+ * 7. COMPLETION: Activity is marked as 'completed' when:
+ *    - User clicks "Finish Module" button (any score), OR
+ *    - Automatic completion when evaluation_score = 3 (Advanced in all dimensions)
+ *    - Status changes to 'completed'
+ *    - Activity no longer clickable in overview
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { chatText, chatJSON, ChatMessage as ClientChatMessage } from '../lib/chatClient';
 import AppLayout from '../components/layout/AppLayout';
 import Button from '../components/ui/Button';
-import { useSupabaseClient } from '@supabase/auth-helpers-react';
-import SpellCheckTextarea from '../components/ui/SpellCheckTextarea';
+import { VibeCodingWorkflow } from '../components/learning/VibeCodingWorkflow';
 import {
-  Brain,
-  Music,
+  Code,
+  Monitor, 
+  Keyboard,
+  Lightbulb,
   Wand2,
-  Shield,
-  Edit,
-  Eye,
-  BookOpen,
   Palette,
+  MessageSquare,
+  Puzzle,
+  Brain,
   CheckCircle,
   Clock,
   Circle,
   Target,
   RefreshCw,
   ArrowLeft,
-  Mic,
   Send,
+  Mic,
   Bot,
   User,
   Star,
   Save,
   Plus,
   PlusCircle,
+  Play,
+  Terminal,
+  Copy,
+  Code2,
+  BookOpen,
   X
 } from 'lucide-react';
 import classNames from 'classnames';
 import { useAuth } from '../hooks/useAuth';
 import { useVoice } from '../hooks/useVoice';
 import { VoiceFallback } from '../components/VoiceFallback';
-// Helper function to check and trigger baseline assessment
-// Helper function to check and trigger baseline assessment
-async function checkAndTriggerBaseline(userId: string, userToken: string): Promise<void> {
-  try {
-    // Use the existing supabase instance, not createClient
-    const { data: baseline } = await supabase
-      .from('user_personality_baseline')
-      .select('user_id')
-      .eq('user_id', userId)
-      .maybeSingle();
 
-    if (baseline) return;
 
-    const { count } = await supabase
-      .from('dashboard')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId);
-
-    if (count && count >= 10) {
-      fetch('/api/assess-baseline', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${userToken}`,
-          'Content-Type': 'application/json'
-        }
-      }).catch(() => {});
-    }
-  } catch (error) {
-    // Silent fail - baseline is optional
-  }
+interface CodeExecution {
+  id: string;
+  code: string;
+  language: 'python' | 'javascript';
+  output?: string;
+  error?: string;
+  executionTime?: number;
+  timestamp: Date;
 }
+
+// Enhanced ChatMessage to support code execution context
+interface ChatMessage {
+  role: 'assistant' | 'user';
+  content: string;
+  timestamp: Date;
+  codeExecution?: CodeExecution;  // NEW: Attach code execution to messages
+}
+
+
+
 // Simple markdown renderer component
 // ── Rich markdown helpers ─────────────────────────────────────────────────────
 const parseInline = (text: string, key: string): React.ReactNode => {
@@ -82,6 +126,33 @@ const parseInline = (text: string, key: string): React.ReactNode => {
   return parts.length > 0 ? <>{parts}</> : text;
 };
 
+
+
+// Helper function to normalize certification scores to 0-3 scale
+// 
+// IMPORTANT: Run the SQL migration script FIRST to convert 0-4 scale scores in database!
+// 
+// This function handles runtime normalization for any legacy percentage data (0-100)
+// that might still exist. After SQL migration, most/all scores will be in correct 0-3 format.
+//
+// Mapping:
+// - 0-3 scores: Use as-is (already correct)
+// - 0-100 percentage: Convert to 0-3 (76-100→3, 51-75→2, 26-50→1, 0-25→0)
+//
+const normalizeCertificationScore = (score: number | null | undefined): number => {
+  if (score == null) return 0;
+  
+  // If score is already in 0-3 range, return as-is (correct format)
+  if (score >= 0 && score <= 3) return score;
+  
+  // Convert from percentage (0-100) to 0-3 scale
+  // This handles legacy percentage data that may still exist
+  if (score <= 25) return 0;
+  if (score <= 50) return 1;
+  if (score <= 75) return 2;
+  return 3;
+};
+
 const rubricScoreColor = (s: number) =>
   s === 3 ? 'bg-green-100 text-green-800 border-green-300' :
   s === 2 ? 'bg-blue-100 text-blue-800 border-blue-300' :
@@ -90,19 +161,6 @@ const rubricScoreColor = (s: number) =>
 
 const rubricScoreLabel = (s: number) =>
   ['No Evidence', 'Emerging', 'Proficient ✓', 'Advanced ✓'][s] ?? '?';
-
-// UNESCO competency scores are 1–4 (not 0–3)
-const unescoScoreColor = (s: number) =>
-  s === 4 ? 'bg-green-100 text-green-800 border-green-300' :
-  s === 3 ? 'bg-blue-100 text-blue-800 border-blue-300' :
-  s === 2 ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
-            'bg-red-100 text-red-800 border-red-300';
-
-const unescoScoreLabel = (s: number) =>
-  s === 4 ? 'Advanced' :
-  s === 3 ? 'Competent' :
-  s === 2 ? 'Developing' :
-  s === 1 ? 'Emerging' : '?';
 
 const MarkdownText: React.FC<{ text: string }> = ({ text }) => {
   const renderParagraph = (paragraph: string, pIndex: number) => {
@@ -117,17 +175,14 @@ const MarkdownText: React.FC<{ text: string }> = ({ text }) => {
 
       return (
         <div key={pIndex} className="mt-3 rounded-xl overflow-hidden border border-indigo-200 bg-indigo-50 text-xs">
-          {/* Header row */}
           <div className="px-3 py-2 bg-indigo-100 border-b border-indigo-200 flex items-center justify-between flex-wrap gap-1">
             <span className="font-bold text-indigo-700 uppercase tracking-wide">📊 {headerTitle}</span>
             <span className="text-indigo-500">
               0 No Evidence · 1 Emerging · <strong>2 Proficient ✓</strong> · <strong>3 Advanced ✓</strong>
             </span>
           </div>
-          {/* Criterion lines */}
           <div className="px-3 py-2 space-y-2.5">
             {lines.slice(1).map((line, li) => {
-              // Match: "Label: score — Evidence: ... — Improve/What to improve: ..."
               const sm = line.match(
                 /^(.+?):\s*([0-3])\s*[—–-]+\s*Evidence:\s*(.+?)\s*[—–-]+\s*(?:What to improve|To improve|Improve):\s*(.+)$/i
               );
@@ -146,7 +201,6 @@ const MarkdownText: React.FC<{ text: string }> = ({ text }) => {
                   </div>
                 );
               }
-              // "Biggest improvement lever:", "Weakest area:", "Next question..."
               const km = line.match(/^(Biggest improvement lever|Weakest area|Next question[^:]*):\s*(.+)$/i);
               if (km) {
                 const isQ = /next question/i.test(km[1]);
@@ -165,10 +219,10 @@ const MarkdownText: React.FC<{ text: string }> = ({ text }) => {
 
     // ── Heading ───────────────────────────────────────────────────────────
     const hm = lines[0].match(/^(#{1,3})\s+(.+)$/);
-    if (lines.length === 1 && hm) {
-      const cls = hm[1].length === 1 ? 'text-base font-bold text-gray-900 mt-3'
-                : hm[1].length === 2 ? 'text-sm font-bold text-gray-800 mt-2'
-                : 'text-sm font-semibold text-gray-700 mt-2';
+    if (hm) {
+      const cls = hm[1].length === 1 ? 'text-2xl font-bold text-gray-900 mt-4'
+                : hm[1].length === 2 ? 'text-xl font-bold text-gray-800 mt-3'
+                : 'text-lg font-semibold text-indigo-700 mt-2';
       return <div key={pIndex} className={cls}>{parseInline(hm[2], `h-${pIndex}`)}</div>;
     }
 
@@ -177,7 +231,7 @@ const MarkdownText: React.FC<{ text: string }> = ({ text }) => {
       return (
         <ul key={pIndex} className="mt-1.5 space-y-1">
           {lines.map((line, li) => (
-            <li key={li} className="flex items-start gap-1.5 text-sm">
+            <li key={li} className="flex items-start gap-1.5 text-base">
               <span className="text-indigo-400 mt-0.5 flex-shrink-0 font-bold">•</span>
               <span>{parseInline(line.replace(/^[-*]\s+/, ''), `${pIndex}-${li}`)}</span>
             </li>
@@ -193,7 +247,7 @@ const MarkdownText: React.FC<{ text: string }> = ({ text }) => {
           {lines.map((line, li) => {
             const nm = line.match(/^(\d+)[.)]\s+(.+)$/);
             return (
-              <li key={li} className="flex items-start gap-1.5 text-sm">
+              <li key={li} className="flex items-start gap-1.5 text-base">
                 <span className="text-indigo-600 font-semibold flex-shrink-0 min-w-[1.1rem]">{nm?.[1]}.</span>
                 <span>{parseInline(nm?.[2] || line, `${pIndex}-${li}`)}</span>
               </li>
@@ -207,7 +261,7 @@ const MarkdownText: React.FC<{ text: string }> = ({ text }) => {
     return (
       <div key={pIndex} className={pIndex > 0 ? 'mt-2' : ''}>
         {lines.map((line, li) => (
-          <div key={li} className="text-sm">{parseInline(line, `${pIndex}-${li}`)}</div>
+          <div key={li} className="text-base">{parseInline(line, `${pIndex}-${li}`)}</div>
         ))}
       </div>
     );
@@ -222,10 +276,10 @@ const MarkdownText: React.FC<{ text: string }> = ({ text }) => {
 
 // Confetti Component
 const ConfettiAnimation: React.FC = () => {
-  const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff'];
+  const colors = ['#8B5CF6', '#EC4899', '#F59E0B']; // Purple, Pink, Yellow (bright)
   
   return (
-    <>
+    <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
       <style>{`
         @keyframes confetti-fall {
           0% {
@@ -237,31 +291,28 @@ const ConfettiAnimation: React.FC = () => {
             opacity: 0;
           }
         }
-        .confetti-piece {
-          animation: confetti-fall 4s linear forwards;
-        }
       `}</style>
-      <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
-        {Array.from({ length: 50 }).map((_, i) => (
-          <div
-            key={i}
-            className="absolute w-2 h-2 opacity-80 confetti-piece"
-            style={{
-              backgroundColor: colors[i % colors.length],
-              left: `${Math.random() * 100}%`,
-              animationDelay: `${Math.random() * 3}s`,
-              animationDuration: `${3 + Math.random() * 2}s`,
-              transform: `rotate(${Math.random() * 360}deg)`,
-            }}
-          />
-        ))}
-      </div>
-    </>
+      {Array.from({ length: 50 }).map((_, i) => (
+        <div
+          key={i}
+          className="absolute w-3 h-3 opacity-90"
+          style={{
+            backgroundColor: colors[i % colors.length],
+            left: `${Math.random() * 100}%`,
+            top: '-10px',
+            borderRadius: '2px',
+            animation: `confetti-fall ${3 + Math.random() * 2}s linear forwards`,
+            animationDelay: `${Math.random() * 1}s`,
+            transform: `rotate(${Math.random() * 360}deg)`,
+          }}
+        />
+      ))}
+    </div>
   );
 };
 
-
-// Background with the same color filtering + transparency style as HomePage,
+// Distorted Background Component with cursor-driven ripple effect
+// Adds visual interest with a subtle ripple distortion that follows the cursor,
 // plus cursor-driven ripple distortion "spotlight".
 const DistortedBackground: React.FC<{ imageUrl: string }> = ({ imageUrl }) => {
   const [mousePixels, setMousePixels] = useState({ x: 0, y: 0 });
@@ -311,7 +362,7 @@ const DistortedBackground: React.FC<{ imageUrl: string }> = ({ imageUrl }) => {
       {/* SVG filter definition (kept tiny + hidden) */}
       <svg className="absolute w-0 h-0" aria-hidden="true">
         <defs>
-          <filter id="ai-learning-ripple-distortion" x="0%" y="0%" width="100%" height="100%">
+          <filter id="skills-ripple-distortion" x="0%" y="0%" width="100%" height="100%">
             <feTurbulence
               type="fractalNoise"
               baseFrequency="0.01"
@@ -343,9 +394,9 @@ const DistortedBackground: React.FC<{ imageUrl: string }> = ({ imageUrl }) => {
           zIndex: 0,
         }}
       >
-        {/* Same gradient overlays as HomePage */}
-        <div className="absolute inset-0 bg-gradient-to-br from-purple-900/80 via-pink-800/70 to-blue-900/80" />
-        <div className="absolute inset-0 bg-black/20" />
+        {/* Purple gradient overlays - stronger tint for visibility */}
+        <div className="absolute inset-0 bg-gradient-to-br from-purple-900/60 via-pink-800/50 to-blue-900/60" />
+        <div className="absolute inset-0 bg-black/30" />
       </div>
 
       {/* Distorted layer - only visible during mouse movement */}
@@ -358,21 +409,31 @@ const DistortedBackground: React.FC<{ imageUrl: string }> = ({ imageUrl }) => {
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',
             zIndex: 1,
-            filter: 'url(#ai-learning-ripple-distortion)',
+            filter: 'url(#skills-ripple-distortion)',
             WebkitMaskImage: `radial-gradient(circle 150px at ${mousePixels.x}px ${mousePixels.y}px, black 0%, black 50%, transparent 100%)`,
             maskImage: `radial-gradient(circle 150px at ${mousePixels.x}px ${mousePixels.y}px, black 0%, black 50%, transparent 100%)`,
             maskSize: '100% 100%',
             WebkitMaskSize: '100% 100%',
           }}
         >
-          <div className="absolute inset-0 bg-gradient-to-br from-purple-900/80 via-pink-800/70 to-blue-900/80" />
-          <div className="absolute inset-0 bg-black/20" />
+          <div className="absolute inset-0 bg-gradient-to-br from-purple-900/60 via-pink-800/50 to-blue-900/60" />
+          <div className="absolute inset-0 bg-black/30" />
         </div>
       )}
     </>
   );
 };
 
+// Code Execution Interface for E2B
+interface CodeExecution {
+  id: string;
+  code: string;
+  language: 'python' | 'javascript';
+  output?: string;
+  error?: string;
+  executionTime?: number;
+  timestamp: Date;
+}
 
 interface DashboardActivity {
   id: string;
@@ -383,19 +444,17 @@ interface DashboardActivity {
   progress: 'not started' | 'started' | 'completed';
   certification_evaluation_score?: number | null;
   certification_evaluation_evidence?: string | null;
-  // UNESCO competency scores (1–4 scale) — column name = semantic meaning:
-  certification_evaluation_UNESCO_1_score?: number | null;      // Understanding of AI
-  certification_evaluation_UNESCO_1_evidence?: string | null;
-  certification_evaluation_UNESCO_2_score?: number | null;      // Human-Centred Mindset
-  certification_evaluation_UNESCO_2_evidence?: string | null;
-  certification_evaluation_UNESCO_3_score?: number | null;      // Application of AI Tools
-  certification_evaluation_UNESCO_3_evidence?: string | null;
-  certification_evaluation_UNESCO_4_score?: number | null;      // Critical Evaluation
-  certification_evaluation_UNESCO_4_evidence?: string | null;
   learning_module_id?: string;
   chat_history?: string;
   updated_at: string;
+  learning_modules?: {
+    category?: string;
+    sub_category?: string;
+    learning_or_certification?: string;
+    public?: number | boolean;
+  };
   isPublic?: boolean;   // false = user-created private, true = shared/canned
+  [key: string]: any; // For dynamic evaluation columns
 }
 
 interface LearningModule {
@@ -404,140 +463,556 @@ interface LearningModule {
   description: string;
   category: string;
   sub_category: string;
+  learning_or_certification?: string;
   ai_facilitator_instructions?: string;
   ai_assessment_instructions?: string;
-  metrics_for_success?: string;
-  outcomes: string;
+  success_metrics?: string;
+  outcomes?: string;
 }
 
 interface ChatMessage {
   role: 'assistant' | 'user';
   content: string;
   timestamp: Date;
+  codeExecution?: CodeExecution;  // ADD THIS LINE
 }
 
-const aiLearningCategories = [
+// Rubric evaluation interfaces
+interface RubricDimension {
+  dimension: string;
+  score: number;
+  evidence: string;
+}
+
+interface SkillsRubricEvaluation {
+  dimensions: RubricDimension[];
+  improvementAdvice?: string; // Optional improvement advice
+}
+
+// Current evaluation state for AI facilitation
+interface CurrentEvaluationState {
+  dimensions: {
+    [key: string]: {
+      score: number;
+      evidence: string;
+    };
+  };
+  overallScore: number;
+  weakestDimension: string | null;
+}
+
+// Define rubric dimensions for each sub-category
+const RUBRIC_DEFINITIONS: Record<string, string[]> = {
+  'Vibe Coding': [
+    'problem_decomposition',
+    'prompt_engineering',
+    'ai_output_evaluation',
+    'metacognitive_control'
+  ],
+  'Critical Thinking': [
+    'logical_reasoning',
+    'reflection'
+  ],
+  'Problem-Solving': [
+    'problem_definition',
+    'iteration'
+  ],
+  'Creativity': [
+    'originality',
+    'risk_and_exploration'
+  ],
+  'Communication': [
+    'clarity',
+    'listening_and_response'
+  ],
+  'Digital Fluency': [
+    'device_familiarity_and_control',
+    'typing_and_text_entry',
+    'file_and_application_management',
+    'internet_navigation',
+    'online_research_and_information_use',
+    'digital_safety_and_responsibility',
+    'basic_troubleshooting_and_resilience'
+  ]
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXACT database column names for every rubric dimension score + evidence.
+// Many names are Postgres-truncated at 63 characters — this map is the single
+// source of truth; never generate them dynamically to avoid mismatches.
+// ─────────────────────────────────────────────────────────────────────────────
+const RUBRIC_COLUMN_MAP: Record<string, Record<string, { score: string; evidence: string }>> = {
+  'Vibe Coding': {
+    problem_decomposition: {
+      score:    'certification_evaluation_vibe_coding_problem_decomposition_scor',
+      evidence: 'certification_evaluation_vibe_coding_problem_decomposition_evid',
+    },
+    prompt_engineering: {
+      score:    'certification_evaluation_vibe_coding_prompt_engineering_score',
+      evidence: 'certification_evaluation_vibe_coding_prompt_engineering_evidenc',
+    },
+    ai_output_evaluation: {
+      score:    'certification_evaluation_vibe_coding_ai_output_evaluation_score',
+      evidence: 'certification_evaluation_vibe_coding_ai_output_evaluation_evide',
+    },
+    metacognitive_control: {
+      score:    'certification_evaluation_vibe_coding_metacognitive_control_scor',
+      evidence: 'certification_evaluation_vibe_coding_metacognitive_control_evid',
+    },
+  },
+  'Critical Thinking': {
+    logical_reasoning: {
+      score:    'certification_evaluation_critical_thinking_logical_reasoning_sc',
+      evidence: 'certification_evaluation_critical_thinking_logical_reasoning_ev',
+    },
+    reflection: {
+      score:    'certification_evaluation_critical_thinking_reflection_score',
+      evidence: 'certification_evaluation_critical_thinking_reflection_evidence',
+    },
+  },
+  'Problem-Solving': {
+    problem_definition: {
+      score:    'certification_evaluation_problem_solving_problem_definition_sco',
+      evidence: 'certification_evaluation_problem_solving_problem_definition_evi',
+    },
+    iteration: {
+      score:    'certification_evaluation_problem_solving_iteration_score',
+      evidence: 'certification_evaluation_problem_solving_iteration_evidence',
+    },
+  },
+  Creativity: {
+    originality: {
+      score:    'certification_evaluation_creativity_originality_score',
+      evidence: 'certification_evaluation_creativity_originality_evidence',
+    },
+    risk_and_exploration: {
+      score:    'certification_evaluation_creativity_risk_and_exploration_score',
+      evidence: 'certification_evaluation_creativity_risk_and_exploration_eviden',
+    },
+  },
+  Communication: {
+    clarity: {
+      score:    'certification_evaluation_communication_clarity_score',
+      evidence: 'certification_evaluation_communication_clarity_evidence',
+    },
+    listening_and_response: {
+      score:    'certification_evaluation_communication_listening_and_response_s',
+      evidence: 'certification_evaluation_communication_listening_and_response_e',
+    },
+  },
+  'Digital Fluency': {
+    device_familiarity_and_control: {
+      score:    'certification_evaluation_device_familiarity_and_control_score',
+      evidence: 'certification_evaluation_device_familiarity_and_control_evidenc',
+    },
+    typing_and_text_entry: {
+      score:    'certification_evaluation_typing_and_text_entry_score',
+      evidence: 'certification_evaluation_typing_and_text_entry_evidence',
+    },
+    file_and_application_management: {
+      score:    'certification_evaluation_file_and_application_management_score',
+      evidence: 'certification_evaluation_file_and_application_management_eviden',
+    },
+    internet_navigation: {
+      score:    'certification_evaluation_internet_navigation_score',
+      evidence: 'certification_evaluation_internet_navigation_evidence',
+    },
+    online_research_and_information_use: {
+      score:    'certification_evaluation_online_research_and_information_use_sc',
+      evidence: 'certification_evaluation_online_research_and_information_use_ev',
+    },
+    digital_safety_and_responsibility: {
+      score:    'certification_evaluation_digital_safety_and_responsibility_scor',
+      evidence: 'certification_evaluation_digital_safety_and_responsibility_evid',
+    },
+    basic_troubleshooting_and_resilience: {
+      score:    'certification_evaluation_basic_troubleshooting_and_resilience_s',
+      evidence: 'certification_evaluation_basic_troubleshooting_and_resilience_e',
+    },
+  },
+};
+
+// Rubric evidence definitions
+const RUBRIC_EVIDENCE_DEFINITIONS = `
+### Vibe Coding – Evidence Definitions
+
+**Problem Decomposition**
+- 0 – No Evidence: Learner provides a solution or code without identifying sub-tasks. No breakdown of steps, inputs, or outputs is visible in prompts or explanations.
+- 1 – Emerging (Unclear): Learner names components (e.g., 'first fetch data, then display') but lacks sequencing, dependencies, or rationale. Steps may be missing or logically disconnected.
+- 2 – Proficient: Learner explicitly decomposes the task into ordered steps, identifies inputs/outputs for each step, and explains why steps are needed.
+- 3 – Advanced: Learner decomposes, prioritizes, and restructures the problem, identifying optional paths, edge cases, and performance considerations.
+
+**Prompt Engineering**
+- 0 – No Evidence: Prompts are vague, copied, or irrelevant to the task.
+- 1 – Emerging (Unclear): Prompts specify a goal but omit constraints, context, inputs, or success criteria. AI output requires heavy correction.
+- 2 – Proficient: Prompts clearly specify task, constraints, inputs, expected format, and revision goals.
+- 3 – Advanced: Prompts anticipate failure modes, request alternatives, and strategically guide iterative refinement.
+
+**AI Output Evaluation**
+- 0 – No Evidence: Learner accepts AI output without review or modification.
+- 1 – Emerging (Unclear): Learner states output is 'wrong' or 'not working' without identifying why.
+- 2 – Proficient: Learner evaluates output against requirements and identifies specific issues.
+- 3 – Advanced: Learner identifies logical flaws, inefficiencies, edge cases, and proposes improvements.
+
+**Metacognitive Control**
+- 0 – No Evidence: No reflection or awareness of understanding.
+- 1 – Emerging (Unclear): Learner notes confusion but does not act strategically.
+- 2 – Proficient: Learner identifies knowledge gaps and asks targeted clarification questions.
+- 3 – Advanced: Learner chooses between experimenting, prompting, researching, or simplifying strategically.
+
+### Critical Thinking – Evidence Definitions
+
+**Logical Reasoning**
+- 0 – No Evidence: Reasoning is inconsistent or unsupported.
+- 1 – Emerging (Unclear): Reasoning is partially logical but includes leaps, contradictions, or missing evidence.
+- 2 – Proficient: Reasoning follows a clear logical structure supported by evidence.
+- 3 – Advanced: Reasoning anticipates counterarguments and integrates multiple perspectives.
+
+**Reflection**
+- 0 – No Evidence: No reflection on reasoning.
+- 1 – Emerging (Unclear): Reflection restates conclusions without examining reasoning.
+- 2 – Proficient: Explains how conclusions were reached.
+- 3 – Advanced: Refines conclusions based on reflection and feedback.
+
+### Problem-Solving – Evidence Definitions
+
+**Problem Definition**
+- 0 – No Evidence: Problem is vague or misidentified.
+- 1 – Emerging (Unclear): Problem identified but constraints and root causes are missing.
+- 2 – Proficient: Problem is clearly defined with constraints and goals.
+- 3 – Advanced: Problem is reframed insightfully to reveal leverage points.
+
+**Iteration**
+- 0 – No Evidence: Single attempt only.
+- 1 – Emerging (Unclear): Minor revisions without explanation.
+- 2 – Proficient: Revisions based on feedback or testing.
+- 3 – Advanced: Continuous optimization with rationale.
+
+### Creativity – Evidence Definitions
+
+**Originality**
+- 0 – No Evidence: Copied or template-based work.
+- 1 – Emerging (Unclear): Minor variation on existing ideas.
+- 2 – Proficient: Distinct idea with personal contribution.
+- 3 – Advanced: Highly novel synthesis of ideas.
+
+**Risk & Exploration**
+- 0 – No Evidence: Avoids experimentation.
+- 1 – Emerging (Unclear): Limited exploration within safe bounds.
+- 2 – Proficient: Explores alternatives intentionally.
+- 3 – Advanced: Pushes boundaries and iterates creatively.
+
+### Communication – Evidence Definitions
+
+**Clarity**
+- 0 – No Evidence: Message is incoherent.
+- 1 – Emerging (Unclear): Message is understandable but poorly organized or ambiguous.
+- 2 – Proficient: Clear, structured, and audience-appropriate.
+- 3 – Advanced: Compelling, adaptive, and precise.
+
+**Listening & Response**
+- 0 – No Evidence: Ignores others' input.
+- 1 – Emerging (Unclear): Acknowledges input without integration.
+- 2 – Proficient: Responds accurately and respectfully.
+- 3 – Advanced: Builds on others' ideas and synthesizes discussion.
+
+### Digital Fluency – Evidence Definitions
+
+**Device Familiarity & Control**
+- 0 – No Evidence: Learner cannot independently power on/off the device, use input tools (keyboard, mouse, touch), or navigate the interface. Requires continuous assistance.
+- 1 – Emerging (Unclear): Learner can perform basic actions (clicking, tapping, typing) but movement is hesitant, error-prone, or inconsistent. Interface navigation lacks intent or understanding.
+- 2 – Proficient: Learner confidently uses keyboard, mouse, or touch controls; navigates the operating system to open, switch, and close applications independently.
+- 3 – Advanced: Learner adapts quickly to new devices or interfaces, uses shortcuts, and assists peers with device navigation.
+
+**Typing & Text Entry**
+- 0 – No Evidence: Cannot type words or sentences without assistance.
+- 1 – Emerging (Unclear): Types short text slowly with frequent errors; relies heavily on looking at keys; struggles with spacing, capitalization, or punctuation.
+- 2 – Proficient: Types complete sentences accurately at a functional speed; edits text using basic commands (backspace, enter, select).
+- 3 – Advanced: Types fluently with minimal errors; formats text clearly and efficiently for readability.
+
+**File & Application Management**
+- 0 – No Evidence: Cannot locate, open, or save files.
+- 1 – Emerging (Unclear): Can open files or apps when guided but does not understand file locations or naming conventions.
+- 2 – Proficient: Creates, saves, names, and retrieves files; opens and closes applications independently.
+- 3 – Advanced: Organizes files into folders, renames files strategically, and manages multiple documents effectively.
+
+**Internet Navigation**
+- 0 – No Evidence: Cannot open a browser or navigate web pages.
+- 1 – Emerging (Unclear): Can open websites via direct links but struggles with navigation, scrolling, or tabs.
+- 2 – Proficient: Uses a browser independently, navigates pages, opens tabs, and follows links purposefully.
+- 3 – Advanced: Efficiently navigates across sites, manages tabs, and adapts to unfamiliar web layouts.
+
+**Online Research & Information Use**
+- 0 – No Evidence: Cannot perform searches or interpret results.
+- 1 – Emerging (Unclear): Performs basic searches but selects results randomly or without understanding relevance.
+- 2 – Proficient: Uses search terms effectively, selects relevant sources, and extracts needed information.
+- 3 – Advanced: Refines searches, compares sources, and evaluates basic credibility and relevance.
+
+**Digital Safety & Responsibility**
+- 0 – No Evidence: No awareness of digital safety or appropriate behavior.
+- 1 – Emerging (Unclear): Recognizes some safety rules but applies them inconsistently.
+- 2 – Proficient: Demonstrates safe behaviors (password awareness, avoiding suspicious links, respectful communication).
+- 3 – Advanced: Explains safety principles clearly and models responsible digital behavior for others.
+
+**Basic Troubleshooting & Resilience**
+- 0 – No Evidence: Stops working when encountering errors.
+- 1 – Emerging (Unclear): Attempts random fixes without understanding the issue.
+- 2 – Proficient: Identifies common issues (frozen app, lost cursor, connectivity) and applies basic fixes.
+- 3 – Advanced: Systematically diagnoses problems and explains solutions to peers.
+`;
+
+const skillCategories = [
+  // Row 1: Digital Fluency, Critical Thinking, Problem-Solving
   {
-    id: 'understanding-ai',
-    title: 'Understanding AI',
-    subCategory: 'Understanding AI: Core Concepts & Capabilities',
+    id: 'digital-fluency',
+    title: 'Digital Fluency',
+    subCategory: 'Digital Fluency',
+    icon: <Monitor className="h-6 w-6" />,
+    description: 'Navigate digital tools and AI systems confidently'
+  },
+  {
+    id: 'critical-thinking',
+    title: 'Critical Thinking',
+    subCategory: 'Critical Thinking',
     icon: <Brain className="h-6 w-6" />,
-    description: 'Learn fundamental AI concepts and capabilities'
+    description: 'Evaluate claims, analyze evidence, construct logical arguments'
   },
   {
-    id: 'prompt-engineering',
-    title: 'Prompt Engineering',
-    subCategory: 'Prompt Engineering: Effective AI Communication',
-    icon: <Edit className="h-6 w-6" />,
-    description: 'Master effective communication with AI tools'
+    id: 'problem-solving',
+    title: 'Problem-Solving',
+    subCategory: 'Problem-Solving',
+    icon: <Puzzle className="h-6 w-6" />,
+    description: 'Design, test, and refine solutions to complex challenges'
+  },
+  // Row 2: Creativity, Communication
+  {
+    id: 'creativity',
+    title: 'Creativity',
+    subCategory: 'Creativity',
+    icon: <Lightbulb className="h-6 w-6" />,
+    description: 'Generate original ideas and innovative solutions'
   },
   {
-    id: 'evaluating-outputs',
-    title: 'Evaluating AI Outputs',
-    subCategory: 'Evaluating AI Outputs: Critical Analysis',
-    icon: <Eye className="h-6 w-6" />,
-    description: 'Critically analyze AI-generated content'
-  },
-  {
-    id: 'ai-ethics',
-    title: 'AI Ethics & Responsible Use',
-    subCategory: 'AI Ethics & Responsible Use',
-    icon: <Shield className="h-6 w-6" />,
-    description: 'Understand ethical implications of AI'
-  },
-  {
-    id: 'applications',
-    title: 'AI Applications',
-    subCategory: 'Applications',
-    icon: <BookOpen className="h-6 w-6" />,
-    description: 'Apply AI to solve real-world problems'
+    id: 'communication',
+    title: 'Communication',
+    subCategory: 'Communication',
+    icon: <MessageSquare className="h-6 w-6" />,
+    description: 'Express ideas clearly for real-world impact'
   },
 ];
 
-// ── AI Learning Session Builder facilitator prompt ────────────────────────────
-const AI_SESSION_BUILDER_PROMPT = `AI Learning Session Builder + Constructivist Mastery Coach
+// ── Create-Your-Own Skills session helpers ────────────────────────────────────
+const SKILLS_SESSION_CATEGORIES = [
+  { id: 'vibe-coding',       label: 'Vibe Coding',       subCategory: 'Vibe Coding' },
+  { id: 'critical-thinking', label: 'Critical Thinking', subCategory: 'Critical Thinking' },
+  { id: 'creativity',        label: 'Creativity',        subCategory: 'Creativity' },
+  { id: 'problem-solving',   label: 'Problem-Solving',   subCategory: 'Problem-Solving' },
+  { id: 'digital-fluency',   label: 'Digital Fluency',   subCategory: 'Digital Fluency' },
+  { id: 'communication',     label: 'Communication',     subCategory: 'Communication' },
+];
 
-You are an AI Learning Coach helping a learner design and complete a personalized learning session. Your job is to guide them one step at a time to master one AI Proficiency category, using a constructivist approach (ask questions, elicit thinking, do not lecture).
+// Code Execution Service for E2B integration
+class CodeExecutionService {
+  private static apiUrl = '/api/execute-code';
 
-Non-negotiable operating rules:
-- One step at a time: Ask one question or instruction per turn. No multi-part questions.
-- Constructivist: Prefer questions that make the learner generate the content. Only short targeted hints if stuck.
-- Rubric-based critique after every response: score each criterion 0–3, evidence-based feedback, single biggest improvement lever, one guiding question.
-- No skipping: don't advance until the learner reaches ≥2 (Competent) on criteria relevant to that step.
-- No doing the work for them: you may model structure but do not write their full solution.
-- Tone: Clear, motivating, direct.
-- ANSWER DIRECT QUESTIONS FIRST: If the learner asks a genuine question (e.g. "What does X mean?", "Can you explain Y?", "I don't understand Z"), answer it clearly and concisely before returning to the guiding flow. Never respond to a direct question with another question. A learner who doesn't get answers will disengage.
+  static async executeCode(code: string, language: 'python' | 'javascript'): Promise<CodeExecution> {
+    const executionId = Date.now().toString();
+    
+    try {
+      console.log(`Executing ${language} code via E2B...`);
+      
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code,
+          language,
+        }),
+      });
 
-IMPORTANT: The session context (title, description, location, constraints, stakeholders, entrepreneurial angle, and chosen category) is already embedded in the MODULE DESCRIPTION below. Proceed directly to Step 3 — Run category mastery loop. Do NOT ask the learner to re-enter context.
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`API Error: ${response.status} - ${errorData.error || 'Unknown error'}`);
+      }
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ENTREPRENEURIAL & PUE LENS (APPLY IN EVERY STEP)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-This learner's topic has an entrepreneurial or productive-use dimension. Throughout the session, you MUST weave in questions and critiques that push the learner to reason about:
+      const result = await response.json();
+      
+      console.log(`Execution completed in ${result.executionTime}ms`);
+      
+      return {
+        id: executionId,
+        code,
+        language,
+        output: result.output,
+        error: result.error,
+        executionTime: result.executionTime,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      console.error('Code execution error:', error);
+      return {
+        id: executionId,
+        code,
+        language,
+        error: `Execution failed: ${error.message}`,
+        timestamp: new Date(),
+      };
+    }
+  }
+}
 
-1. COSTS & BENEFITS — What does this AI solution cost to set up and run? What concrete value does it create (money saved, income earned, time freed, risk reduced)? Is the benefit bigger than the cost?
+// ── Personality baseline type (mirrors user_personality_baseline columns) ──────
+interface PersonalityBaseline {
+  communicationStrategy: {
+    preferred_tone?: string;
+    interaction_style?: string;
+    detail_level?: string;
+    recommendations?: string[];
+  } | null;
+  learningStrategy: {
+    learning_style?: string;
+    motivation_approach?: string;
+    pacing_preference?: string;
+    recommendations?: string[];
+  } | null;
+}
 
-2. TRADEOFFS — What do you give up by choosing this approach over another? Who benefits and who bears the burden? What is the opportunity cost?
+const buildSkillsFacilitatorPrompt = (
+  subCategory: string,
+  context: string,
+  baseline?: PersonalityBaseline,
+  communicationLevel: number = 1
+): string => {
+  const cs = baseline?.communicationStrategy;
+  const ls = baseline?.learningStrategy;
+  const personalizedBlock = (cs || ls) ? `
+PERSONALIZED LEARNER PROFILE (from prior AI-assessed baseline):
+${cs ? `- Communication Style: tone=${cs.preferred_tone ?? 'n/a'}, interaction=${cs.interaction_style ?? 'n/a'}, detail level=${cs.detail_level ?? 'n/a'}` : ''}
+${cs?.recommendations?.length ? `  Communication Tips: ${cs.recommendations.join('; ')}` : ''}
+${ls ? `- Learning Approach: style=${ls.learning_style ?? 'n/a'}, motivation=${ls.motivation_approach ?? 'n/a'}, pacing=${ls.pacing_preference ?? 'n/a'}` : ''}
+${ls?.recommendations?.length ? `  Learning Tips: ${ls.recommendations.join('; ')}` : ''}
 
-3. LONG-TERM THINKING — Will this still be useful or profitable in 2–5 years? What could change (technology, market, weather, policy)? How do you make it sustainable?
+IMPORTANT: Adapt your tone, questioning style, pacing, and feedback delivery to match this profile in every response.
+` : '';
 
-4. PRODUCTIVE USE OF ENERGY (PUE) — If energy (electricity, solar, fuel) is involved, push them to connect it to productive economic activity: earning income, saving money, increasing output, reducing losses. Idle consumption is waste; productive consumption creates value.
+  // ── Communication Level block — mandatory language register ───────────────
+  // Takes precedence over grade-level assumptions. Applied to every response.
+  const commLevelGuidance = communicationLevel <= 0 ? `
 
-5. BUSINESS VIABILITY — Can this actually work as a business or livelihood? Who would pay for it? What would make it grow or fail?
+═══════════════════════════════════════════════
+COMMUNICATION LEVEL: 0 — PRE-LITERATE / VERY BASIC
+This learner writes in single words, short fragments, or severely broken sentences.
+Spelling and grammar errors are frequent and sometimes obscure meaning.
+═══════════════════════════════════════════════
 
-Do NOT turn the session into a business class — maintain the AI Proficiency rubric at the core. But every guiding question, hint, and critique should GROUND the AI thinking in this entrepreneurial reality. If the learner gives a technically correct answer that ignores the economic dimension, push them with: "That's a solid technical answer — now, what's the business case for it?"
+LANGUAGE RULES (mandatory — apply to every single response):
+- Use ONLY the simplest everyday words. If a simpler word exists, always use it.
+- Maximum 1–2 short sentences per response. Never write a paragraph.
+- Never use technical terms without immediately defining them in plain words.
+- Use emojis sparingly to anchor meaning (e.g. "Critical thinking means asking 'why?' 🤔").
+- If their message is unclear, respond with "I did not understand. Can you try again?" — never guess.
+- Celebrate every attempt: "Good try! 👏" before any correction.
+- Ask questions so simple they need only one or two words to answer: "Is this good or bad?"
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Rubrics:
+EXAMPLE response style:
+"Good try! 👏 Let us think about this step by step. You said the problem is money. Good. Now — who has the money problem? You, or your customer?"
+` : communicationLevel === 1 ? `
 
-A) Understanding AI: Core Concepts & Capabilities
-- AI Mechanism Understanding (data→model→patterns→output)
-- Contextual Performance (where AI works well vs poorly for this task)
-- Limitations & Failure Modes (bias, hallucination, data gaps; cause+consequence)
-- Terminology Accuracy (correct + integrated)
+═══════════════════════════════════════════════
+COMMUNICATION LEVEL: 1 — EMERGING
+This learner writes in simple short sentences with frequent grammar and spelling errors,
+but meaning is usually recoverable. Basic vocabulary. First-generation digital learner.
+═══════════════════════════════════════════════
 
-B) Prompt Engineering: Effective AI Communication
-- Goal & Constraints (clear goal + constraints: audience/format/context)
-- Iteration Strategy (why prompts changed; what was learned)
-- Output Sensitivity (how changes altered outputs; quality criteria)
+LANGUAGE RULES (mandatory — apply to every single response):
+- Use short, clear sentences. One idea per sentence.
+- Avoid all jargon. If you must use a skill-related term, explain it immediately in plain language.
+  Example: "Critical thinking means asking good questions about what you see or hear."
+- Ask ONE question per turn, never two or three.
+- Keep your full response under 60 words.
+- When the learner gives a short or unclear answer, say "Can you tell me a little more?" — do not move to a new question until they have answered.
+- Celebrate effort warmly: "That is a great answer!" or "Well done for trying!"
+- Use examples from farming, markets, family, or community — not abstract business scenarios.
 
-C) AI Ethics & Responsible Use
-- Risk & Bias Reasoning (who harmed/advantaged + why; tradeoffs)
-- Privacy Judgment (sensitive data + protection strategies)
-- Ethical Action (mitigation steps + reasoning)
+EXAMPLE response style:
+"Good answer! You identified the problem clearly. That is the first step in problem-solving.
+Here is the next question: What do you think is causing this problem? Give me one reason."
+` : communicationLevel === 2 ? `
 
-D) Evaluating AI Outputs: Critical Analysis
-- Verification Process (facts/tests/trusted sources; triangulation for advanced)
-- Error & Bias Detection (flaws/assumptions/misleading content; correction)
-- Reflective Judgment (when AI should/should not be trusted; why)
+═══════════════════════════════════════════════
+COMMUNICATION LEVEL: 2 — DEVELOPING
+This learner writes multi-sentence responses with errors, but meaning is clear.
+Growing vocabulary. Can follow structured explanation and reason with guidance.
+═══════════════════════════════════════════════
 
-E) Real-World Applications & Problem Solving
-- Problem Decomposition (components; causal structure for advanced)
-- AI Suitability (justify AI vs alternatives; limits)
-- Outcome Measurement (define success; measurable indicators)
+LANGUAGE RULES:
+- Use clear, direct language. You may use skill-related terms but always explain them briefly.
+- Keep responses focused — 2–3 short paragraphs maximum.
+- Ask one guiding question per turn. It may be slightly more complex than level 1.
+- Build on what the learner said — reference their words before extending the idea.
+- Encourage structured thinking: "Can you explain why?" or "What would happen if…?"
+` : `
 
-Scoring: 0=No Evidence, 1=Emerging, 2=Competent, 3=Advanced
+═══════════════════════════════════════════════
+COMMUNICATION LEVEL: 3 — PROFICIENT
+This learner communicates complex ideas clearly with mostly correct grammar.
+Extended vocabulary. Can handle abstract reasoning and multi-step arguments.
+═══════════════════════════════════════════════
 
-Session flow:
+LANGUAGE RULES:
+- You may use standard skill-domain vocabulary with concise definitions where helpful.
+- Responses can be fuller — but still aim for concision.
+- Push for precision: "Can you be more specific?" or "What evidence supports that?"
+- Challenge the learner to compare, evaluate, and synthesise across dimensions.
+`;
 
-Step 3 — Category mastery loop
-For each criterion: ask one guiding question using the learner's context → Rubric Critique Block → one improvement question → repeat until ≥2.
+  return `You are a skills coach helping a learner develop their "${subCategory}" skills through a real-world scenario they have chosen.
 
-IMPORTANT: At least ONE guiding question per criterion must connect to the entrepreneurial/PUE dimension (costs, benefits, tradeoffs, long-term viability, income generation, or productive energy use). Do not allow a learner to complete a criterion by describing AI in the abstract only — they must ground their answer in the real economic or productive context of their scenario.
+LEARNER'S CONTEXT:
+${context}
+${commLevelGuidance}
+${personalizedBlock}
+YOUR PRIMARY ROLE — ${subCategory} MASTERY:
+Your core job is to develop the learner's "${subCategory}" skills using a constructivist, Socratic approach. Every question, hint, and critique must be anchored in the rubric dimensions below. The learner must reach Proficient (2/3) on every dimension before the session closes.
 
-Step 4 — Integrated mastery artifact (when all criteria ≥2)
-A) Plain-language explanation + failure modes + key terms + how this AI capability affects the economics of the learner's scenario
-B) Prompt set: baseline + 2 iterations + comparison notes + which iteration produced the most commercially useful output and why
-C) Ethical risk register + privacy plan + mitigations — include at least one risk specific to a small business or agricultural/community setting
-D) Evaluation plan: verification + bias checks + trust rules — include at least one check for whether AI output could lead to a bad business or financial decision
-E) Solution plan: decomposition + AI suitability + metrics — metrics must include at least one economic indicator (revenue, cost saving, yield increase, time saving with monetary value, etc.)
+- Guide them constructively: ask one question at a time, no multi-part questions.
+- After every learner response, give a rubric-based critique: score each dimension 0–3, cite evidence from their text, name the weakest dimension, and ask one targeted improvement question.
+- Do not lecture or do the work for them. Use Socratic questioning.
+- ANSWER DIRECT QUESTIONS: If the learner asks a genuine question ("What does X mean?", "Can you explain Y?", "I don't understand Z"), answer it clearly and concisely first, then return to guiding. Never respond to a direct question with another question.
+- Tone: clear, encouraging, specific.${(cs || ls) ? ' Adapt tone and pacing to the learner\'s profile above.' : ''}
 
-Step 5 — Reflection (REQUIRED before final scores)
+RUBRIC DIMENSIONS for ${subCategory}:
+${(RUBRIC_DEFINITIONS[subCategory] || []).map(d => `- ${d.replace(/_/g, ' ')}`).join('\n')}
 
-Before providing final scores, you MUST prompt the learner with this reflection sequence.
-Do not skip this step even if the learner asks to finish early.
+Scoring: 0=No Evidence, 1=Emerging, 2=Proficient, 3=Advanced
 
-Deliver this reflection prompt exactly:
+─────────────────────────────────────────
+SECONDARY LENS — ENTREPRENEURIAL & PUE GROUNDING:
+─────────────────────────────────────────
+The learner's scenario has a real-world productive or entrepreneurial dimension. Where it fits naturally within the skill-building flow, deepen the learning by connecting ${subCategory} to:
+
+- Costs & benefits: what value does applying this skill well actually create?
+- Tradeoffs: what do you give up by choosing one approach over another?
+- Long-term thinking: will this still work or be valuable in 2–5 years?
+- Productive use of resources: does this create real economic value, or just consume time and energy?
+- Business viability: could this become a service, livelihood, or competitive advantage?
+
+Apply this lens selectively — when the learner's answer is technically sound but misses the "so what does this achieve in the real world?" dimension. A natural prompt when this happens: "Good work on the skill — now, what's the real-world payoff of doing this well here? Who benefits and what does it cost?"
+
+Do NOT force a business framing onto every exchange. Some turns will be purely about developing the skill. The productive-use lens sharpens the learning, it does not replace it.
+─────────────────────────────────────────
+
+SESSION FLOW:
+1. Acknowledge their scenario warmly (one sentence).
+2. Ask one opening question focused on the first ${subCategory} rubric dimension, using the learner's scenario as context.
+3. After each response: Rubric Critique Block → one improvement question targeting the weakest dimension.
+4. When all dimensions reach ≥2 (Proficient), transition to Step 5.
+
+Step 5 — Reflection (REQUIRED before final summary):
+Prompt the learner with this reflection sequence — do not skip even if they ask to finish:
+
 "Before we wrap up, I want you to take a moment to reflect on this session.
 
 Please respond to these three questions — be as honest and specific as you can:
@@ -548,118 +1023,59 @@ Please respond to these three questions — be as honest and specific as you can
 
 Take your time — your reflection matters."
 
-After the learner responds to the reflection, acknowledge it briefly (1–2 sentences), then proceed to Step 6.
+After the learner responds, acknowledge briefly (1–2 sentences), then proceed to Step 6.
 
-Step 6 — Final scores + peer diffusion activation
+Step 6 — Final summary + peer diffusion activation:
+Summarise their demonstrated skills across all dimensions. Where the learner connected their skill work to a real productive or business outcome, highlight it as an example of the skill at its most powerful.
 
-Provide final scores across all criteria.
+Then add ONE teach-back prompt:
+- "If you were going to explain this skill to a friend who has never tried it before, what would you say first?"
+- "Imagine you are teaching this to someone in your community — a farmer, trader, or clinic worker — tomorrow. What are the three most important things they need to know?"
+- "How would you explain to a family member why getting good at this skill could help them in their daily work or livelihood?"
 
-Then add ONE of these teach-back prompts based on the learner's strongest artifact:
-- "If you were going to explain this to a friend who wants to start a small business using AI, what would you tell them first?"
-- "Imagine you are explaining this AI skill to a farmer, shop owner, or clinic worker in your community tomorrow. What are the three most important things they need to know to use it productively?"
-- "How would you explain to a family member why mastering this AI skill could help them earn more, save money, or run their work better?"
-
-This teach-back is not assessed. Its purpose is to consolidate learning through social articulation with a PUE lens.
-Respond to their teach-back with ONE reinforcing observation that connects the AI skill to real productive value, then close the session.
-
-Also suggest 1–2 next-step activities based on the learner's progress.
+Respond to their teach-back with ONE reinforcing observation, then close the session.
 
 Rubric Critique Block format:
-Rubric critique (Category: <A–E>)
-Criterion 1: <0–3> — Evidence: <quote/paraphrase> — What to improve: <1 sentence>
-Criterion 2: <0–3> — Evidence: <...> — What to improve: <...>
-Criterion 3: <0–3> — Evidence: <...> — What to improve: <...>
-(Criterion 4 if category A)
-Biggest improvement lever: <single sentence>
-Next question (one only): <one guiding question — must connect to entrepreneurial/PUE dimension if the learner has not yet addressed it>`;
+Rubric (${subCategory})
+${(RUBRIC_DEFINITIONS[subCategory] || []).map(d => `${d.replace(/_/g, ' ')}: <0–3> — Evidence: <...> — Improve: <1 sentence>`).join('\n')}
+Weakest area: <dimension>
+Next question: <one question only — focused on the weakest rubric dimension; connect to real-world productive context where natural>`;
+};
 
-// Maps category letter → sub_category in learning_modules
-const SESSION_CATEGORIES = [
-  { id: 'A', label: 'Understanding AI: Core Concepts & Capabilities',
-    subCategory: 'Understanding AI: Core Concepts & Capabilities' },
-  { id: 'B', label: 'Prompt Engineering: Effective AI Communication',
-    subCategory: 'Prompt Engineering: Effective AI Communication' },
-  { id: 'C', label: 'AI Ethics & Responsible Use',
-    subCategory: 'AI Ethics & Responsible Use' },
-  { id: 'D', label: 'Evaluating AI Outputs: Critical Analysis',
-    subCategory: 'Evaluating AI Outputs: Critical Analysis' },
-  { id: 'E', label: 'Real-World Applications & Problem Solving',
-    subCategory: 'Applications' },
-];
 
-const AILearningPage: React.FC = () => {
+const SkillsPage: React.FC = () => {
   const { user } = useAuth();
   const [voiceInputEnabled, setVoiceInputEnabled] = useState(false);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(true);
-  const [isImproving, setIsImproving] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechRecognition, setSpeechRecognition] = useState<any>(null);
   const [wasListeningBeforeSubmit, setWasListeningBeforeSubmit] = useState(false);
-  const [activeCategory, setActiveCategory] = useState('what-is-ai');
-  const [allAIActivities, setAllAIActivities] = useState<DashboardActivity[]>([]);
+  const [activeCategory, setActiveCategory] = useState('digital-fluency');
+  const [allSkillsActivities, setAllSkillsActivities] = useState<DashboardActivity[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<DashboardActivity | null>(null);
-  const [currentDashboardId, setCurrentDashboardId] = useState<string | null>(null);
   const [activityDescription, setActivityDescription] = useState<string>('');
   const [moduleTitle, setModuleTitle] = useState<string>('');
   const [aiFacilitatorInstructions, setAiFacilitatorInstructions] = useState<string>('');
   const [aiAssessmentInstructions, setAiAssessmentInstructions] = useState<string>('');
   const [successMetrics, setSuccessMetrics] = useState<string>('');
+  const [learningOutcomes, setLearningOutcomes] = useState<string>('');
+  const [moduleDescription, setModuleDescription] = useState<string>('');
+  const [currentModuleCategory, setCurrentModuleCategory] = useState<string>('');
+  const [currentModuleSubCategory, setCurrentModuleSubCategory] = useState<string>('');
+  const [currentModuleLearningOrCert, setCurrentModuleLearningOrCert] = useState<string>('');
+  const [currentEvaluationState, setCurrentEvaluationState] = useState<CurrentEvaluationState | null>(null);
   const [userGradeLevel, setUserGradeLevel] = useState<number | null>(null);
   const [userContinent, setUserContinent] = useState<string | null>(null);
-  const [communicationStrategy, setCommunicationStrategy] = useState<any>(null);
-  const [learningStrategy, setLearningStrategy] = useState<any>(null);
-  const [communicationLevel, setCommunicationLevel] = useState<number>(1);
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]); // kept for UI compat — hook manages actual selection
-  const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin');
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [userInput, setUserInput] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [evaluating, setEvaluating] = useState(false);
-  const [showEvaluationModal, setShowEvaluationModal] = useState(false);
-  const [evaluationResult, setEvaluationResult] = useState<{
-    score: number, 
-    evidence: string, 
-    improvementAdvice?: string,
-    unescoScores?: {
-      competency_1_score: number;
-      competency_1_evidence: string;
-      competency_2_score: number;
-      competency_2_evidence: string;
-      competency_3_score: number;
-      competency_3_evidence: string;
-      competency_4_score: number;
-      competency_4_evidence: string;
-    }
-  } | null>(null);
-  const [showConfetti, setShowConfetti] = useState(false);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-
-  // ── Reflection gate state ────────────────────────────────────────────────
-  const [hasReflection, setHasReflection] = useState(false);
-  const [reflectionValidating, setReflectionValidating] = useState(false);
-  const [reflectionText, setReflectionText] = useState('');
-  const [reflectionAttempts, setReflectionAttempts] = useState(0);
-  const [awaitingReflection, setAwaitingReflection] = useState(false);
-  const [userSessionCount, setUserSessionCount] = useState(0);
-
-  // ── Create-Your-Own-Activity state ────────────────────────────────────────
-  const [showCreateActivity, setShowCreateActivity] = useState(false);
-  const [isCreatingModule, setIsCreatingModule] = useState(false);
-  const [createForm, setCreateForm] = useState({
-    title: '', description: '', location: '', constraints: '', stakeholders: '',
-    entrepreneurialContext: '', category: 'A'
+  const [userCity, setUserCity] = useState<string | null>(null);
+  const [personalityBaseline, setPersonalityBaseline] = useState<PersonalityBaseline>({
+    communicationStrategy: null,
+    learningStrategy: null
   });
-
-  // ── Complete Session modal state ───────────────────────────────────────────
-  const [showCompleteSessionModal, setShowCompleteSessionModal] = useState(false);
-  const [sessionReflectionInput, setSessionReflectionInput] = useState('');
-  const [completingSession, setCompletingSession] = useState(false);
+  const [communicationLevel, setCommunicationLevel] = useState<number>(1);
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]); // stub — hook manages selection
+  const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin');
 
   // ── useVoice hook — Nigeria-aware TTS with offline fallback ───────────────
-  // voiceMode === 'pidgin' → en-NG priority (local on Chromebook, works offline)
-  // voiceMode === 'english' → en-GB priority
   const {
     speak: hookSpeak,
     cancel: cancelSpeech,
@@ -669,9 +1085,54 @@ const AILearningPage: React.FC = () => {
     recognitionLang,
     selectedVoice,
   } = useVoice(voiceMode === 'pidgin');
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [userInput, setUserInput] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
+  const [isImproving, setIsImproving] = useState(false);
+  const [savingSession, setSavingSession] = useState(false);
+  const [finishingModule, setFinishingModule] = useState(false);
+
+  // Vibe Coding — prompt injected from chat into VibeCodingWorkflow instructions box
+  const [vibeCodingInjectedPrompt, setVibeCodingInjectedPrompt] = useState<string | null>(null);
+  const [generatingVibePromptFromChat, setGeneratingVibePromptFromChat] = useState(false);
+  const [showEvaluationModal, setShowEvaluationModal] = useState(false);
+  const [evaluationResult, setEvaluationResult] = useState<{score: number, evidence: string} | SkillsRubricEvaluation | null>(null);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // ── Reflection gate state ────────────────────────────────────────────────
+  const [hasReflection, setHasReflection] = useState(false);
+  const [reflectionValidating, setReflectionValidating] = useState(false);
+  const [reflectionText, setReflectionText] = useState('');
+  const [reflectionAttempts, setReflectionAttempts] = useState(0);
+  const [awaitingReflection, setAwaitingReflection] = useState(false);
+
+  // ── Create-Your-Own-Activity state ────────────────────────────────────────
+  const [showCreateActivity, setShowCreateActivity] = useState(false);
+  const [isCreatingModule, setIsCreatingModule] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    title: '', description: '', location: '', constraints: '', stakeholders: '',
+    entrepreneurialContext: '', category: 'vibe-coding'
+  });
+
+  // ── Complete Session modal state ───────────────────────────────────────────
+  const [showCompleteSessionModal, setShowCompleteSessionModal] = useState(false);
+  const [sessionReflectionInput, setSessionReflectionInput] = useState('');
+  const [completingSession, setCompletingSession] = useState(false);
+
+  const [codeEditorContent, setCodeEditorContent] = useState<string>('');
+  const [selectedLanguage, setSelectedLanguage] = useState<'python' | 'javascript'>('python');
+  const [codeHistory, setCodeHistory] = useState<CodeExecution[]>([]);
+  const [latestExecution, setLatestExecution] = useState<CodeExecution | null>(null);
+  const [isExecutingCode, setIsExecutingCode] = useState(false);
+  const [showConsole, setShowConsole] = useState(false);
+
 
   // Initialize speech recognition
-  // Note: voice selection and TTS are handled by useVoice hook above
+  // Note: voice selection and TTS are handled by useVoice hook
   useEffect(() => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -695,12 +1156,15 @@ const AILearningPage: React.FC = () => {
       
       recognition.onresult = (event: any) => {
         let finalTranscript = '';
+        let interimTranscript = '';
         
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript;
           
           if (event.results[i].isFinal) {
             finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
           }
         }
         
@@ -725,7 +1189,7 @@ const AILearningPage: React.FC = () => {
     }
   }, [recognitionLang]);
 
-  // Voice restart after TTS ends (voice input resumes when speech output finishes)
+  // Voice input restarts after TTS finishes (mirrors AILearningPage pattern)
   const prevIsSpeaking = useRef(false);
   useEffect(() => {
     const wasSpeaking = prevIsSpeaking.current;
@@ -742,782 +1206,581 @@ const AILearningPage: React.FC = () => {
     }
   }, [isSpeaking, wasListeningBeforeSubmit, voiceInputEnabled, speechRecognition]);
 
-  // Voice input function
-  const startVoiceInput = () => {
+  // Toggle voice input
+  const toggleVoiceInput = () => {
     if (!speechRecognition) {
-      alert('Voice input is not supported in your browser. Please use Chrome, Edge, or Safari.');
+      alert('Voice input is not supported in your browser.');
       return;
     }
-    
+
     if (isListening) {
       speechRecognition.stop();
-      setWasListeningBeforeSubmit(false);
-      return;
-    }
-    
-    try {
-      speechRecognition.start();
-    } catch (error) {
-      console.error('Error starting voice input:', error);
-      alert('Could not start voice input. Please try again.');
+      setIsListening(false);
+    } else {
+      try {
+        speechRecognition.start();
+        setIsListening(true);
+      } catch (error) {
+        console.error('Error starting voice input:', error);
+        alert('Failed to start voice input. Please try again.');
+      }
     }
   };
 
-  // Auto-scroll chat to bottom when new messages are added
+  // Toggle voice output
+  const toggleVoiceOutput = () => {
+    setVoiceOutputEnabled(!voiceOutputEnabled);
+    if (!voiceOutputEnabled) {
+      cancelSpeech();
+    }
+  };
+
+  // Auto-scroll chat to bottom
   useEffect(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [chatHistory]);
 
-  const getProgressIcon = (progress: string) => {
-    switch (progress) {
-      case 'completed':
-        return <CheckCircle className="h-5 w-5 text-green-600" />;
-      case 'started':
-        return <Clock className="h-5 w-5 text-yellow-600" />;
-      default:
-        return <Circle className="h-5 w-5 text-gray-400" />;
-    }
-  };
-
-  const getProgressColor = (progress: string) => {
-    switch (progress) {
-      case 'completed':
-        return 'bg-green-100 text-green-800 border-green-200';
-      case 'started':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      default:
-        return 'bg-gray-100 text-gray-600 border-gray-200';
-    }
-  };
-
-  const isActivitySelectable = (activity: DashboardActivity): boolean => {
-    return activity.progress === 'not started' || activity.progress === 'started';
-  };
-
-  // Fetch user's grade level and continent from profiles
+  // Fetch user profile
   const fetchUserProfile = async (userId: string) => {
     try {
-      console.log('[AI Profile] Fetching profile for user:', userId);
-      
-      // Fetch profile data
-      const { data: profileData, error: profileError } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
-        .select('grade_level, continent')
+        .select('grade_level, continent, city')
         .eq('id', userId)
         .single();
-  
-      if (profileError) {
-        console.error('[AI Profile] Error fetching profile:', profileError);
-      }
-  
-      // Fetch baseline data (communication and learning strategies + communication level)
-      const { data: baselineData, error: baselineError } = await supabase
-        .from('user_personality_baseline')
-        .select('communication_strategy, learning_strategy, communication_level')
-        .eq('user_id', userId)
-        .maybeSingle();
-  
-      if (baselineError) {
-        console.log('[AI Profile] No baseline found yet (normal for new users)');
-      } else if (baselineData?.communication_strategy && baselineData?.learning_strategy) {
-        console.log('[AI Profile] Baseline strategies loaded and will be applied');
-      } else {
-        console.log('[AI Profile] Baseline row missing or strategies not yet generated — personalization skipped');
-      }
-  
-    // Check and trigger baseline assessment (optional - won't break if it fails)
-    try {
-      supabase.auth.getSession()
-        .then(({ data: { session } }) => {
-          if (session?.access_token) {
-            checkAndTriggerBaseline(userId, session.access_token).catch(err => {
-              console.log('Baseline check skipped:', err);
-            });
-          }
-        })
-        .catch(() => {}); // Silently fail - baseline is optional
-    } catch (err) {
-      // Ignore - baseline check is optional
-    }
-      
-      return {
-        gradeLevel: profileData?.grade_level || null,
-        continent: profileData?.continent || null,
-        communicationStrategy: baselineData?.communication_strategy || null,
-        learningStrategy: baselineData?.learning_strategy || null,
-        communicationLevel: baselineData?.communication_level ?? 1,
-      };
-    } catch (err) {
-      console.error('[AI Profile] Error fetching user profile:', err);
-      return { 
-        gradeLevel: null, 
-        continent: null,
-        communicationStrategy: null,
-        learningStrategy: null,
-        communicationLevel: 1,
-      };
-    }
-  };
 
-// Get personalized learning instructions based on grade level AND baseline strategies
-const getPersonalizedInstructions = (
-  gradeLevel: number | null,
-  communicationStrategy: any,
-  learningStrategy: any,
-  sessionCount: number = 0,
-  communicationLevel: number = 1
-): string => {
-  const commonGuidance = `CRITICAL: Your role is to GUIDE learning. 
-If the situation calls for presenting options to students - such as with Human or AI - give them a response that can either be human or AI. Ask them which it is and why? 
-Do not ask them what topic they'd like to explore. 
-If the situation calls for evaluating a prompt, or a potentially biased AI comment, or a potentially incorrect AI response, give them real cases to see. 
-If the situation calls for a student to critique the accuracy of an AI response, give them a prompt that could possibly lead to an inaccurate AI response and ask the student to test the prompt to see what the AI delivers. Then ask them to evaluate whether the response is accurate or not. The student should be challenged to consider the efficacy of the response and even conjecture why it may not be accurate. You should help them in this case to understand how to verify the accuracy. 
-If the situation calls for a student to spar with AI, ask them to make a claim about something in their world. In this case, the AI should be a devil's advocate, challenging every idea that the student has. When a student has to defend their idea, their stance and position is strengthened. 
-
-ANSWER QUESTIONS DIRECTLY: If the learner asks a genuine question — "What does X mean?", "Can you explain Y?", "I don't understand Z", "How does this work?" — answer it clearly and concisely first, then return to guiding. Never respond to a direct question with another question. Learners who don't get answers will disengage and stop trying.
-
-RESPONSE LENGTH: Keep responses to 75 words maximum unless it's absolutely essential to provide more information for understanding. Be concise while maintaining effectiveness.`;
-
-  // ── Communication Level block — always applied, overrides defaults ────────
-  // This reflects the learner's actual English reading/writing maturity.
-  // It takes precedence over grade-level assumptions.
-  const commLevelGuidance = communicationLevel <= 0 ? `
-
-═══════════════════════════════════════════════
-COMMUNICATION LEVEL: 0 — PRE-LITERATE / VERY BASIC
-This learner writes in single words, short fragments, or severely broken sentences.
-Spelling and grammar errors are frequent and sometimes obscure meaning.
-═══════════════════════════════════════════════
-
-LANGUAGE RULES (mandatory — apply to every single response):
-- Use ONLY the simplest everyday words. If a word has a simpler version, always use the simpler one.
-- Maximum 1–2 short sentences per response. Never write a paragraph.
-- Never use technical terms without immediately defining them in plain words.
-- Use emojis sparingly to anchor meaning (e.g. "AI is a computer brain 🤖").
-- If their message is unclear, respond with "I did not understand. Can you try again?" — never guess.
-- Celebrate every attempt: "Good try! 👏" before any correction.
-- Ask questions so simple they need only one or two words to answer: "Is this good or bad?"
-
-EXAMPLE response style:
-"Good try! 👏 AI learns from data. Data means information — like numbers or words. Does your phone have AI? Yes or no?"
-` : communicationLevel === 1 ? `
-
-═══════════════════════════════════════════════
-COMMUNICATION LEVEL: 1 — EMERGING
-This learner writes in simple short sentences with frequent grammar and spelling errors,
-but meaning is usually recoverable. Basic vocabulary. First-generation digital learner.
-═══════════════════════════════════════════════
-
-LANGUAGE RULES (mandatory — apply to every single response):
-- Use short, clear sentences. One idea per sentence.
-- Avoid all jargon. If you must use a technical word, explain it immediately in plain language.
-  Example: "AI uses training data — that means lots of examples it has already seen."
-- Ask ONE question per turn, never two or three.
-- Keep your full response under 60 words.
-- When the learner gives a short or unclear answer, say "Can you tell me a little more?" — do not ask a new question until they have answered this one.
-- Celebrate effort warmly: "That is a great answer!" or "Well done for trying!"
-- Use examples from farming, markets, family, or community — not tech industry examples.
-
-EXAMPLE response style:
-"Good answer! AI learns from examples, just like you learn from practice.
-Here is a question: Can you think of one problem on your farm that AI might help with?"
-` : communicationLevel === 2 ? `
-
-═══════════════════════════════════════════════
-COMMUNICATION LEVEL: 2 — DEVELOPING
-This learner writes multi-sentence responses with errors, but meaning is clear.
-Growing vocabulary. Can follow structured explanation and reason with guidance.
-═══════════════════════════════════════════════
-
-LANGUAGE RULES:
-- Use clear, direct language. You may use technical terms but always explain them briefly.
-- Keep responses focused — 2–3 short paragraphs maximum.
-- Ask one guiding question per turn. It may be slightly more complex than level 1.
-- Build on what the learner said — reference their words before extending the idea.
-- Encourage structured thinking: "Can you explain why?" or "What would happen if…?"
-` : `
-
-═══════════════════════════════════════════════
-COMMUNICATION LEVEL: 3 — PROFICIENT
-This learner communicates complex ideas clearly with mostly correct grammar.
-Extended vocabulary. Can handle abstract reasoning and multi-step arguments.
-═══════════════════════════════════════════════
-
-LANGUAGE RULES:
-- You may use standard technical vocabulary with concise definitions where helpful.
-- Responses can be fuller — but still honour the 75-word guideline unless depth is essential.
-- Push for precision: "Can you be more specific?" or "What evidence would support that claim?"
-- Challenge the learner to compare, evaluate, and synthesise across concepts.
-`;
-
-  // Add personalized strategies if baseline exists, otherwise use level-1 defaults
-  let personalizedGuidance = '';
-  if (communicationStrategy && learningStrategy) {
-    personalizedGuidance = `
-
-═══════════════════════════════════════════════
-PERSONALIZED LEARNER PROFILE
-═══════════════════════════════════════════════
-
-COMMUNICATION STYLE (adapt your tone and interaction):
-- Preferred Tone: ${communicationStrategy.preferred_tone}
-- Interaction Style: ${communicationStrategy.interaction_style}  
-- Detail Level: ${communicationStrategy.detail_level}
-- Key Recommendations: ${communicationStrategy.recommendations?.join('; ')}
-
-LEARNING APPROACH (adapt your teaching method):
-- Learning Style: ${learningStrategy.learning_style}
-- Motivation Approach: ${learningStrategy.motivation_approach}
-- Pacing Preference: ${learningStrategy.pacing_preference}
-- Key Recommendations: ${learningStrategy.recommendations?.join('; ')}
-
-IMPORTANT: Use this profile to personalize EVERY response. Match their preferred communication tone, interaction style, and teaching approach. This is critical for effective learning.
-
-═══════════════════════════════════════════════
-`;
-  } else {
-    // No baseline yet — apply level-1 (Emerging) defaults so the AI coach
-    // communicates simply and accessibly until a real profile is built.
-    personalizedGuidance = `
-
-═══════════════════════════════════════════════
-DEFAULT COMMUNICATION STRATEGY — LEVEL 1 (Emerging)
-No personalised profile available yet for this learner.
-═══════════════════════════════════════════════
-
-COMMUNICATION STYLE:
-- Use simple, short sentences. Avoid technical jargon and complex vocabulary.
-- Be warm, patient, and encouraging. Validate every attempt, even partial ones.
-- Ask one question at a time. Do not combine multiple questions into a single turn.
-- If the learner's response is short or unclear, gently prompt for more with "Can you say a bit more about that?"
-
-LEARNING APPROACH:
-- Keep steps small and concrete. Explain one idea before moving to the next.
-- Connect every concept to something familiar from the learner's daily life or community.
-- Celebrate small wins explicitly — "That's a great start!" or "Well done for trying."
-- Do not assume prior knowledge. Briefly re-explain terms if a learner seems unsure.
-
-═══════════════════════════════════════════════
-`;
-  }
-  
-  // Grade-specific guidance
-  let gradeGuidance = '';
-  
-  if (gradeLevel === 1) {
-    gradeGuidance = `
-GRADE LEVEL: Elementary School (Grades 3-5, Ages 8-11)
-
-LANGUAGE: Use simple, clear language. Use shorter sentences, avoid complex vocabulary, and be extra encouraging and patient.
-
-TEACHING APPROACH: Ask simple guiding questions like "What do you think might happen if...?" or "Can you tell me what you notice about...?" Break complex ideas into smaller steps. Use examples from their daily life like family, pets, games, or school activities. Celebrate their thinking process, not just correct answers. Make learning feel like a fun puzzle to solve together!`;
-  } else if (gradeLevel === 2) {
-    gradeGuidance = `
-GRADE LEVEL: Middle School (Grades 6-8, Ages 11-14)
-
-LANGUAGE: Use age-appropriate language. You can use slightly more complex vocabulary but still keep explanations clear and relatable.
-
-TEACHING APPROACH: Ask thought-provoking questions that build on their developing critical thinking skills. Use questions like "Why do you think that happened?" or "What evidence supports that idea?" Help them make connections between concepts. Use examples from school life, friends, technology, and current events they might relate to. Encourage them to explain their reasoning and challenge them to think deeper.`;
-  } else if (gradeLevel === 3) {
-    gradeGuidance = `
-GRADE LEVEL: High School (Grades 9-12, Ages 14-18)
-
-LANGUAGE: You can use more sophisticated language and concepts. They can handle complex ideas and abstract thinking.
-
-TEACHING APPROACH: Use advanced questioning techniques that promote analytical and critical thinking. Ask questions like "How would you analyze this situation?" or "What are the implications of this concept?" Encourage them to evaluate different perspectives, make predictions, and synthesize information. Connect learning to their future goals, college prep, career interests, and real-world applications. Challenge them to defend their reasoning and consider alternative viewpoints.`;
-  } else {
-    gradeGuidance = `
-TEACHING APPROACH: Adapt your communication style to be clear and age-appropriate. Use encouraging language and check for understanding frequently. Focus on guiding the student to discover answers through thoughtful questioning rather than providing direct solutions.`;
-  }
-
-  // ── Scaffolding tier: reduce support as learner gains experience ─────────
-  const scaffoldingGuidance = sessionCount <= 3
-    ? `
-SCAFFOLDING TIER 1 — EMERGING LEARNER (sessions 1–3):
-Provide generous scaffolding. Offer partial examples if the learner is stuck. Validate attempts openly.
-Break down every criterion into a single guiding question. Expect short, definitional answers — this is normal.`
-    : sessionCount <= 10
-    ? `
-SCAFFOLDING TIER 2 — DEVELOPING LEARNER (sessions 4–10):
-Reduce scaffolding. Withhold partial examples — ask a follow-up question instead.
-Expect structured reasoning, not just definitions. If learner responds definitionally,
-prompt: "Can you walk me through WHY that happens, not just WHAT it is?"
-Do not re-explain concepts already covered in earlier sessions.`
-    : `
-SCAFFOLDING TIER 3 — ADVANCED LEARNER (10+ sessions):
-Minimal scaffolding. Do not offer hints unless the learner explicitly asks.
-Expect integrated, causal reasoning. Push toward synthesis: "How does this connect to what
-you already know about [prior topic]?" If the learner gives a correct answer quickly,
-go deeper immediately — do not praise and move on.`;
-
-  return `${commonGuidance}${commLevelGuidance}${personalizedGuidance}${gradeGuidance}${scaffoldingGuidance}`;
-};
-
-  // Fetch all dashboard activities with category = 'AI Learning'
-  const fetchAllAIActivities = async () => {
-    if (!user?.id) return;
-  
-    try {
-      // 1. Fetch all relevant learning modules
-      const { data, error } = await supabase
-        .from('learning_modules')
-        .select('*')
-        .eq('category', 'AI Proficiency')
-        .eq('learning_or_certification', 'learning')
-        .or(`public.eq.1,user_id.eq.${user.id}`)
-        .order('sub_category', { ascending: true });
-  
       if (error) throw error;
-      
-      // 2. Fetch this user's dashboard rows for those modules (progress + all scores)
-      const moduleIds = (data || []).map(m => m.learning_module_id);
-      let dashMap = new Map<string, any>();
 
-      if (moduleIds.length > 0) {
-        const { data: dashRows, error: dashErr } = await supabase
-          .from('dashboard')
-          .select(`
-            learning_module_id, progress, updated_at,
-            certification_evaluation_score, certification_evaluation_evidence,
-            certification_evaluation_UNESCO_1_score, certification_evaluation_UNESCO_1_evidence,
-            certification_evaluation_UNESCO_2_score, certification_evaluation_UNESCO_2_evidence,
-            certification_evaluation_UNESCO_3_score, certification_evaluation_UNESCO_3_evidence,
-            certification_evaluation_UNESCO_4_score, certification_evaluation_UNESCO_4_evidence
-          `)
-          .eq('user_id', user.id)
-          .in('learning_module_id', moduleIds);
-
-        if (dashErr) {
-          console.warn('[AI Activities] Could not load dashboard scores:', dashErr.message);
-        } else {
-          dashMap = new Map((dashRows || []).map(d => [d.learning_module_id, d]));
-        }
-      }
-
-      // 3. Merge — module metadata + user's saved progress & scores
-      const activities: DashboardActivity[] = (data || []).map(module => {
-        const dash = dashMap.get(module.learning_module_id);
-        return {
-          id: module.learning_module_id,
-          user_id: user.id,
-          category_activity: 'AI Learning',
-          sub_category: module.sub_category,
-          learning_module_id: module.learning_module_id,
-          title: module.title,
-          description: module.description,
-          activity: module.title,
-          progress: (dash?.progress ?? 'not started') as 'not started' | 'started' | 'completed',
-          certification_evaluation_score:           dash?.certification_evaluation_score           ?? null,
-          certification_evaluation_evidence:        dash?.certification_evaluation_evidence        ?? null,
-          certification_evaluation_UNESCO_1_score:  dash?.certification_evaluation_UNESCO_1_score  ?? null,
-          certification_evaluation_UNESCO_1_evidence: dash?.certification_evaluation_UNESCO_1_evidence ?? null,
-          certification_evaluation_UNESCO_2_score:  dash?.certification_evaluation_UNESCO_2_score  ?? null,
-          certification_evaluation_UNESCO_2_evidence: dash?.certification_evaluation_UNESCO_2_evidence ?? null,
-          certification_evaluation_UNESCO_3_score:  dash?.certification_evaluation_UNESCO_3_score  ?? null,
-          certification_evaluation_UNESCO_3_evidence: dash?.certification_evaluation_UNESCO_3_evidence ?? null,
-          certification_evaluation_UNESCO_4_score:  dash?.certification_evaluation_UNESCO_4_score  ?? null,
-          certification_evaluation_UNESCO_4_evidence: dash?.certification_evaluation_UNESCO_4_evidence ?? null,
-          created_at: module.created_at,
-          updated_at: dash?.updated_at ?? module.updated_at,
-          isPublic: module.public === 1 || module.public === true,
-        };
-      });
-      
-      setAllAIActivities(activities);
+      return {
+        gradeLevel: data?.grade_level || null,
+        continent: data?.continent || null,
+        city: data?.city || null,
+      };
     } catch (err) {
-      console.error('Error fetching AI learning activities:', err);
-      setAllAIActivities([]);
+      console.error('Error fetching user profile:', err);
+      return {
+        gradeLevel: null,
+        continent: null,
+        city: null,
+      };
     }
   };
 
-  // Create or get dashboard entry for learning activity
-  const getOrCreateDashboardEntry = async (activity: DashboardActivity, userId: string, gradeLevel: number | null, continent: string | null) => {
-    try {
-      // Check if dashboard entry exists
-      const { data: existing, error: checkError } = await supabase
-        .from('dashboard')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('learning_module_id', activity.learning_module_id)
-        .maybeSingle();
+  // Load current evaluation state for activity
+  const loadCurrentEvaluationState = async (activity: DashboardActivity, subCategory: string): Promise<CurrentEvaluationState> => {
+    const dimensions = RUBRIC_DEFINITIONS[subCategory] || [];
+    const colMap = RUBRIC_COLUMN_MAP[subCategory] || {};
+    
+    const evaluationState: CurrentEvaluationState = {
+      dimensions: {},
+      overallScore: normalizeCertificationScore(activity.certification_evaluation_score),
+      weakestDimension: null
+    };
 
-      if (checkError) {
-        console.error('[Dashboard] Error checking for existing entry:', checkError);
-        throw checkError;
-      }
+    let minScore = 3;
+    let weakestDim = null;
 
-      if (existing) {
-        console.log('[Dashboard] Existing entry found:', existing.id);
-        return existing.id;
-      }
+    for (const dim of dimensions) {
+      const dimensionKey = dim.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      const cols = colMap[dimensionKey];
 
-      // Create new dashboard entry
-      console.log('[Dashboard] Creating new entry for module:', activity.learning_module_id);
+      const score    = cols ? (activity[cols.score]    || 0) : 0;
+      const evidence = cols ? (activity[cols.evidence] || 'Not yet evaluated') : 'Not yet evaluated';
       
-      const { data: newEntry, error: createError } = await supabase
-        .from('dashboard')
-        .insert({
-          user_id: userId,
-          learning_module_id: activity.learning_module_id,
-          title: activity.title,
-          activity: activity.title,
-          category_activity: 'AI Learning',
-          sub_category: activity.sub_category,
-          progress: 'started',
-          grade_level: gradeLevel,
-          continent: continent || null,
-          chat_history: '[]',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-
-      if (createError) {
-        console.error('[Dashboard] Error creating entry:', createError);
-        throw createError;
+      evaluationState.dimensions[dim] = { score, evidence };
+      
+      if (score < minScore) {
+        minScore = score;
+        weakestDim = dim;
       }
-
-      console.log('[Dashboard] New entry created:', newEntry.id);
-      return newEntry.id;
-
-    } catch (error) {
-      console.error('[Dashboard] Error in getOrCreateDashboardEntry:', error);
-      throw error;
     }
+
+    evaluationState.weakestDimension = weakestDim;
+    
+    console.log('[Evaluation State] Loaded:', evaluationState);
+    return evaluationState;
   };
 
-  // Build UNESCO assessment instructions
-  const buildUNESCOAssessmentInstructions = () => {
-    return `You are evaluating learner responses against the UNESCO AI Competency Framework for Learners.
+  // Build contextual facilitation prompt based on current evaluation state
+  const buildContextualFacilitationPrompt = (
+    baseFacilitatorInstructions: string,
+    subCategory: string,
+    evalState: CurrentEvaluationState | null
+  ): string => {
+    // Build personalized profile block if baseline data exists
+    const cs = personalityBaseline.communicationStrategy;
+    const ls = personalityBaseline.learningStrategy;
+    const personalizedBlock = (cs || ls) ? `
+PERSONALIZED LEARNER PROFILE (from prior AI-assessed baseline):
+${cs ? `- Communication Style: tone=${cs.preferred_tone ?? 'n/a'}, interaction=${cs.interaction_style ?? 'n/a'}, detail level=${cs.detail_level ?? 'n/a'}` : ''}
+${cs?.recommendations?.length ? `  Communication Tips: ${cs.recommendations.join('; ')}` : ''}
+${ls ? `- Learning Approach: style=${ls.learning_style ?? 'n/a'}, motivation=${ls.motivation_approach ?? 'n/a'}, pacing=${ls.pacing_preference ?? 'n/a'}` : ''}
+${ls?.recommendations?.length ? `  Learning Tips: ${ls.recommendations.join('; ')}` : ''}
 
-You must assess FOUR competencies. For EACH competency, provide:
-1. A score from 1-4
-2. Specific evidence from the learner's response
+IMPORTANT: Adapt your tone, questioning style, pacing, and feedback delivery to match this profile in every response.
+` : '';
 
-COMPETENCY 1: Understanding of AI Principles and Limitations
-UNESCO Standard: Learners understand, at an appropriate level, how AI systems work, including their capabilities, limitations, and potential risks.
+    if (!evalState || Object.keys(evalState.dimensions).length === 0) {
+      // No evaluation yet - use base instructions
+      return `${baseFacilitatorInstructions}
+${personalizedBlock}
+GOAL: Your primary goal is to help the learner improve their skills in ${subCategory} based on the following rubric dimensions:
+${(RUBRIC_DEFINITIONS[subCategory] || []).map(d => `- ${d.replace(/_/g, ' ')}`).join('\n')}
 
-Evidence MUST show:
-- Accurate description of what the AI system can and cannot do
-- Identification of at least one limitation or risk (e.g., bias, error, data dependence)
-Quality threshold: No anthropomorphizing (e.g., "AI knows," "AI decides")
+Since this learner is just starting, focus on building foundational understanding across all dimensions.`;
+    }
 
-COMPETENCY 2: Human-Centred Mindset
-UNESCO Standard: Learners recognize that AI systems should respect human dignity, rights, and agency, and that humans remain responsible for decisions made with AI systems.
+    // Build performance summary
+    const performanceSummary = Object.entries(evalState.dimensions)
+      .map(([dim, data]) => {
+        const level = data.score === 0 ? 'No Evidence' :
+                     data.score === 1 ? 'Emerging' :
+                     data.score === 2 ? 'Proficient' : 'Advanced';
+        return `- ${dim.replace(/_/g, ' ')}: ${level} (${data.score}/3) - ${data.evidence}`;
+      })
+      .join('\n');
 
-Evidence MUST show:
-- Learner explicitly identifies human responsibility for outcomes
-- AI is described as supporting, not replacing, human judgment
-- At least one human, ethical, or social consideration is named
-Quality threshold: Statements must be context-specific, not generic
+    const weakestArea = evalState.weakestDimension 
+      ? evalState.weakestDimension.replace(/_/g, ' ')
+      : 'overall performance';
 
-COMPETENCY 3: Application of AI Tools
-UNESCO Standard: Learners use AI systems purposefully and responsibly to support learning, problem-solving, creativity, and decision-making.
+    return `${baseFacilitatorInstructions}
+${personalizedBlock}
+CURRENT LEARNER PERFORMANCE IN ${subCategory}:
+Overall Score: ${evalState.overallScore}/3
 
-Evidence MUST show:
-- Clear purpose for AI use tied to the category goal
-- Learner-driven prompts or interactions
-- Human modification, selection, or refinement of AI output
-Quality threshold: AI use must be intentional, not incidental
+Dimension-by-Dimension Performance:
+${performanceSummary}
 
-COMPETENCY 4: Critical Evaluation and Societal Impact
-UNESCO Standard: Learners critically assess AI outputs and reflect on the broader social, ethical, and environmental implications of AI use.
+FACILITATION STRATEGY:
+- PRIMARY FOCUS: Help learner improve in "${weakestArea}" (their weakest area)
+- GOAL: Guide learner toward demonstrating Proficient (2/3) or Advanced (3/3) performance
+- APPROACH: Provide immediate, specific feedback after each response that helps them understand:
+  * What they did well relative to the rubric
+  * Exactly what would move them to the next level
+  * Concrete suggestions for their next response${(cs || ls) ? '\n  * Deliver feedback in a tone and style matching the learner\'s profile above' : ''}
 
-Evidence MUST show:
-- Evaluation of accuracy, usefulness, or appropriateness
-- Reflection on real-world or community impact
-Quality threshold: Must include judgment, not just description
+RUBRIC AWARENESS:
+Reference the specific rubric criteria naturally in your feedback. For example:
+- "That's good - you're showing emerging understanding of [dimension]. To reach proficient level, try..."
+- "Excellent! That response demonstrates proficient [dimension] because..."
+- "I notice you're still at the no evidence level for [dimension]. Let's work on that by..."
 
-SCORING RUBRIC (1-4 for each competency):
-Level 4 – Advanced: Meets competency with depth and coherence; demonstrates agency, judgment, and contextual awareness
-Level 3 – Competent: Meets competency at a functional level; minor gaps in depth or integration
-Level 2 – Developing: Meets competency inconsistently; limited evaluation or understanding
-Level 1 – Emerging: Minimal or superficial evidence; AI treated as authority or black box
-
-RESPONSE FORMAT:
-You MUST respond with ONLY valid JSON in this exact structure:
-{
-  "competency_1_score": <number 1-4>,
-  "competency_1_evidence": "<specific quote or description from learner's work>",
-  "competency_2_score": <number 1-4>,
-  "competency_2_evidence": "<specific quote or description from learner's work>",
-  "competency_3_score": <number 1-4>,
-  "competency_3_evidence": "<specific quote or description from learner's work>",
-  "competency_4_score": <number 1-4>,
-  "competency_4_evidence": "<specific quote or description from learner's work>"
-}
-
-CRITICAL: Return ONLY the JSON object. No preamble, no explanation, no markdown formatting.`;
+Remember: Every response is an opportunity to help them improve. Be specific, encouraging, and always tie feedback back to the rubric dimensions.`;
   };
 
-  // Build UNESCO AI Competency Framework guidance (enriched with all improvements)
-  const buildUNESCOGuidance = (subCategory: string, scores: any, sessionCount: number = 0) => {
-    const baseGuidance = `INTERNAL GUIDANCE (DO NOT SHARE WITH LEARNER):
-You are facilitating AI Proficiency learning aligned to the UNESCO AI Competency Framework for Learners.
+  // Load dashboard activities
+  const loadDashboardActivities = async (city?: string | null) => {
+    if (!user?.id) return;
 
-LEARNER'S CURRENT PERFORMANCE (INTERNAL ONLY - DO NOT MENTION TO LEARNER):
-- Competency 1 – Understanding of AI: Score ${scores.score1 || 'Not evaluated'} | Evidence: ${scores.evidence1 || 'None'}
-- Competency 2 – Human-Centred Mindset: Score ${scores.score2 || 'Not evaluated'} | Evidence: ${scores.evidence2 || 'None'}
-- Competency 3 – Application of AI Tools: Score ${scores.score3 || 'Not evaluated'} | Evidence: ${scores.evidence3 || 'None'}
-- Competency 4 – Critical Evaluation: Score ${scores.score4 || 'Not evaluated'} | Evidence: ${scores.evidence4 || 'None'}
-
-YOUR FACILITATION APPROACH:
-1. Identify which competency area has the lowest score (internal use only)
-2. Focus your guidance on improving that specific area
-3. NEVER mention scores, competencies, or UNESCO to the learner
-4. NEVER evaluate or score the learner's work
-5. NEVER provide direct answers or solutions
-6. Use natural, supportive questions to guide improvement
-7. Frame everything as helping them strengthen their work, not fixing a "low score"
-
-Your role:
-- Acknowledge what's working well in their response
-- Use questions to guide them toward deeper thinking in the weakest area
-- Help them see what could be clearer, more thorough, or more thoughtful
-- Invite them to revise and expand their work
-- Maintain a supportive, encouraging tone that reinforces their agency`;
-
-    // Determine lowest score
-    const validScores = [
-      { num: 1, score: scores.score1 },
-      { num: 2, score: scores.score2 },
-      { num: 3, score: scores.score3 },
-      { num: 4, score: scores.score4 }
-    ].filter(s => s.score !== null);
-
-    let lowestCompetency: number | null = null;
-    if (validScores.length > 0) {
-      lowestCompetency = validScores.reduce((min, curr) =>
-        curr.score < min.score ? curr : min
-      ).num;
-    }
-
-    // Sub-category specific guidance
-    let categoryGuidance = '';
-    if (subCategory === 'Understanding AI: Core Concepts & Capabilities') {
-      categoryGuidance = `\n\nFOCUS AREA FOR ${subCategory}:\nHelp the learner deepen their understanding of how AI systems work and their limitations.\n\nGuide them with questions like:\n- What is this AI system designed to do in this activity?\n- What is something it cannot do reliably?\n- Where does a human still need to make decisions or check the output?\n- How would you explain this AI's capabilities and limits to someone else?\n\nEncourage them to make their explanation clearer and more specific about AI limitations and human responsibility.`;
-    } else if (subCategory === 'Prompt Engineering: Effective AI Communication') {
-      categoryGuidance = `\n\nFOCUS AREA FOR ${subCategory}:\nHelp the learner reflect more deeply on how they directed the AI and made choices.\n\nGuide them with questions like:\n- What was your goal when you wrote this prompt?\n- How did the AI's response change when you adjusted the prompt?\n- What choices did you make after seeing the AI's output?\n- What made you decide to use the AI's suggestion (or not use it)?\n\nEncourage them to describe their intentional choices and decision-making process more explicitly.`;
-    } else if (subCategory === 'AI Ethics & Responsible Use') {
-      categoryGuidance = `\n\nFOCUS AREA FOR ${subCategory}:\nHelp the learner think more concretely about responsibility and real-world consequences.\n\nGuide them with questions like:\n- Who might be affected by using AI in this way?\n- What could go wrong if this output were used without checking it carefully?\n- What responsibility does a human have in this situation?\n- What would responsible use look like here?\n\nEncourage them to add specific, real-world ethical considerations connected to this activity.`;
-    } else if (subCategory === 'Evaluating AI Outputs: Critical Analysis') {
-      categoryGuidance = `\n\nFOCUS AREA FOR ${subCategory}:\nHelp the learner strengthen their critical judgment of AI output quality.\n\nGuide them with questions like:\n- How do you know this output is accurate or appropriate?\n- What might the AI have misunderstood or missed?\n- If someone trusted this output without checking, what could happen?\n- What would you need to verify before using this?\n\nEncourage them to add clearer critique, correction, or justification of the AI's output.`;
-    } else if (subCategory === 'Applications') {
-      categoryGuidance = `\n\nFOCUS AREA FOR ${subCategory} (Real-World Applications & Problem Solving):\nHelp the learner strengthen their reasoning about AI use in real contexts.\n\nGuide them with questions like:\n- Why is AI helpful here, and why is it not enough on its own?\n- What decisions must a human still make?\n- What risks or tradeoffs could appear in a real-world setting?\n- How would this work in practice outside of this activity?\n\nEncourage them to demonstrate clearer reasoning about human responsibility, evaluation, and real-world awareness.`;
-    }
-
-    let focusGuidance = '';
-    if (lowestCompetency) {
-      focusGuidance = `\n\nPRIORITY FOCUS (INTERNAL): The learner's work is weakest in Competency Area ${lowestCompetency}. Use the category-specific questions above to guide them toward improvement in this area. Remember: be natural and supportive - never mention competencies, scores, or the framework.`;
-    }
-
-    // ── PUE Application Bridge (for returning learners, 5+ sessions) ─────────
-    const pueBridge = sessionCount >= 5
-      ? `\n\nPUE APPLICATION BRIDGE (INTERNAL — do NOT use terms like "PUE" or "framework" with learner):
-This learner has enough session experience to begin connecting AI competencies to real productive activity.
-Where natural in the conversation, weave in a bridging question such as:
-- "How might someone use this in a small business or farm in your community?"
-- "If a clinic worker or local teacher needed this AI skill, how would they apply it?"
-- "Can you think of a local service or product where this AI capability would help?"
-This is NOT a separate step — fold it naturally into the mastery loop as a context-grounding move.
-If the learner generates an application scenario, affirm it and deepen it — do not redirect back to the abstract.`
-      : '';
-
-    // ── Certification Proximity Framing ────────────────────────────────────
-    const allScoresPresent = scores.score1 && scores.score2 && scores.score3 && scores.score4;
-    const avgScore = allScoresPresent
-      ? (scores.score1 + scores.score2 + scores.score3 + scores.score4) / 4
-      : null;
-    const proximityNote = avgScore !== null && avgScore >= 2.5
-      ? `\n\nCERTIFICATION PROXIMITY (INTERNAL ONLY — do NOT mention scores to learner):
-This learner is performing at a high level. Use goal-proximate language to amplify momentum:
-- "You're getting very close to showing mastery of this whole topic."
-- "One more clear example in this area would really round out your understanding."
-- "You've come a long way — let's push for the clearest explanation you've given yet."
-This is a motivational amplifier. The learner should feel momentum and near-completion, not pressure.`
-      : '';
-
-    // ── Reasoning Mode Signal ──────────────────────────────────────────────
-    const evidenceText = [scores.evidence1, scores.evidence2, scores.evidence3, scores.evidence4]
-      .filter(Boolean).join(' ');
-    const isDefinitional = !scores.score1 || evidenceText.length < 80 ||
-      /^(AI is|AI means|AI can|AI helps|this is|this means)/i.test(evidenceText.trim());
-    const reasoningModeNote = scores.score1
-      ? `\n\nREASONING MODE SIGNAL (INTERNAL ONLY):
-${isDefinitional
-  ? `This learner is in DEFINITIONAL mode — responses describe what things are, not how or why.
-STRATEGY: Push past definitions immediately. If they define a term, ask: "Good — now tell me WHY that happens" or "What would break that if it were wrong?" Never accept a definition as a complete answer.`
-  : `This learner is in STRUCTURED REASONING mode — responses include cause, consequence, and context.
-STRATEGY: Do not re-prompt for basic definitions. Start at analysis level. Ask them to compare, predict, or synthesize. If they give a structured answer, push for a counter-case or edge condition.`}`
-      : '';
-
-    return baseGuidance + categoryGuidance + focusGuidance + pueBridge + proximityNote + reasoningModeNote;
-  };
-
-  // Fetch previous session summary for cross-session memory stub
-  const fetchPreviousSessionSummary = async (userId: string, moduleId: string): Promise<string> => {
     try {
-      const { data } = await supabase
+      setLoading(true);
+
+      // Resolve which city_town to show: Ibiade users see Ibiade modules, everyone else sees Oloibiri
+      const cityTown = city === 'Ibiade' ? 'Ibiade' : 'Oloibiri';
+
+      console.log('[Skills Activities] Querying with JOIN to learning_modules');
+      console.log('[Skills Activities] User ID:', user.id);
+      console.log('[Skills Activities] Filtering by city_town:', cityTown);
+      
+      // Join with learning_modules to get the actual category
+      const { data: dashboardData, error } = await supabase
         .from('dashboard')
-        .select('chat_history, certification_evaluation_evidence, updated_at')
-        .eq('user_id', userId)
-        .eq('learning_module_id', moduleId)
-        .maybeSingle();
-
-      if (!data?.chat_history) return '';
-      const history = JSON.parse(data.chat_history);
-      if (!Array.isArray(history) || history.length < 4) return '';
-
-      const lastLearnerMessages = history
-        .filter((m: any) => m.role === 'user')
-        .slice(-2)
-        .map((m: any) => m.content)
-        .join(' / ');
-
-      if (!lastLearnerMessages) return '';
-
-      return `
-PREVIOUS SESSION MEMORY (INTERNAL — do NOT share verbatim, use only to personalise):
-This learner has visited this module before. Their last responses indicated: "${lastLearnerMessages.slice(0, 300)}..."
-Evidence note from last evaluation: ${data.certification_evaluation_evidence || 'None recorded'}
-
-USE THIS TO:
-- Reference prior thinking naturally: "Last time you were exploring X — let's build on that."
-- Skip re-introducing concepts the learner has already demonstrated understanding of.
-- Start from where they left off, not from the beginning.
-- Do NOT recap the previous session to them — just use it to calibrate depth and continuity.`;
-    } catch {
-      return '';
-    }
-  };
-
-  // Fetch user's total session count across all modules (for scaffolding tier)
-  const fetchUserSessionCount = async (userId: string): Promise<number> => {
-    try {
-      const { count } = await supabase
-        .from('dashboard')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .not('chat_history', 'is', null);
-      return count || 0;
-    } catch {
-      return 0;
-    }
-  };
-
-  // Fetch learning module description and AI instructions
-  const fetchActivityDetails = async (activity: DashboardActivity, userId: string) => {
-    try {
-      console.log('[AI Learning] Fetching activity details for:', activity.learning_module_id);
-
-      if (!activity.learning_module_id) {
-        throw new Error('No learning_module_id in activity');
-      }
-
-      // Fetch learning module details
-      const { data, error } = await supabase
-        .from('learning_modules')
-        .select('*')
-        .eq('learning_module_id', activity.learning_module_id)
-        .single();
+        .select(`
+          *,
+          learning_modules:learning_module_id (
+            category,
+            sub_category,
+            learning_or_certification,
+            public,
+            city_town
+          )
+        `)
+        .eq('user_id', user.id)
+        .not('learning_module_id', 'is', null)
+        .order('sub_category', { ascending: true })
+        .order('activity', { ascending: true });
 
       if (error) {
-        console.error('[AI Learning] Error fetching module details:', error);
+        console.error('[Skills Activities] Query error:', error);
         throw error;
       }
 
-      console.log('[AI Learning] Details fetched successfully:', data?.title);
+      // Filter for Skills category, correct city_town, excluding Vibe Coding
+      const skillsActivities = (dashboardData?.filter(activity => {
+        const module = activity.learning_modules;
+        return (
+          module &&
+          module.category === 'Skills' &&
+          module.sub_category !== 'Vibe Coding' &&
+          (module.city_town === cityTown || module.city_town == null)
+        );
+      }) || []).map(activity => ({
+        ...activity,
+        isPublic: activity.learning_modules?.public === 1 ||
+                  activity.learning_modules?.public === true,
+      }));
 
-      // Fetch UNESCO evaluation scores from dashboard
-      const { data: dashboardData, error: dashboardError } = await supabase
-        .from('dashboard')
-        .select('certification_evaluation_UNESCO_1_score, certification_evaluation_UNESCO_1_evidence, certification_evaluation_UNESCO_2_score, certification_evaluation_UNESCO_2_evidence, certification_evaluation_UNESCO_3_score, certification_evaluation_UNESCO_3_evidence, certification_evaluation_UNESCO_4_score, certification_evaluation_UNESCO_4_evidence')
+      console.log('[Skills Activities] Loaded', dashboardData?.length || 0, 'total activities');
+      console.log('[Skills Activities] Filtered to', skillsActivities.length, 'Skills activities');
+      
+      if (skillsActivities.length > 0) {
+        console.log('[Skills Activities] Sample activity:', skillsActivities[0]);
+        console.log('[Skills Activities] All sub-categories found:', 
+          [...new Set(skillsActivities.map(a => a.learning_modules?.sub_category).filter(Boolean))]);
+      } else {
+        console.log('[Skills Activities] No Skills activities found.');
+        
+        if (dashboardData && dashboardData.length > 0) {
+          console.log('[Skills Activities] Available categories from learning_modules:', 
+            [...new Set(dashboardData.map(a => a.learning_modules?.category).filter(Boolean))]);
+          console.log('[Skills Activities] Sample activities:', dashboardData.slice(0, 3));
+        }
+      }
+      
+      setAllSkillsActivities(skillsActivities);
+    } catch (err) {
+      console.error('[Skills Activities] Error loading:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Refresh dashboard
+  const refreshDashboard = async () => {
+    setRefreshing(true);
+    await loadDashboardActivities(userCity);
+    setRefreshing(false);
+  };
+
+  // Initial load — fetch profile first so city_town filter is applied immediately
+  useEffect(() => {
+    if (user?.id) {
+      fetchUserProfile(user.id).then(profile => {
+        setUserGradeLevel(profile.gradeLevel);
+        setUserContinent(profile.continent);
+        setUserCity(profile.city);
+        if (profile.continent === 'Africa') setVoiceMode('pidgin');
+        else setVoiceMode('english');
+        return loadDashboardActivities(profile.city);
+      });
+      fetchPersonalityBaseline(user.id);
+    }
+  }, [user]);
+
+  const fetchPersonalityBaseline = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('user_personality_baseline')
+        .select('communication_strategy, learning_strategy, communication_level')
         .eq('user_id', userId)
-        .eq('learning_module_id', activity.learning_module_id)
-        .maybeSingle();
+        .single();
 
-      if (dashboardError) {
-        console.warn('[AI Learning] Dashboard fetch warning:', dashboardError);
+      if (error) {
+        console.log('[Skills] No personality baseline found yet (normal for new users)');
+        return;
       }
 
-      const unescoScores = {
-        score1: dashboardData?.certification_evaluation_UNESCO_1_score || null,
-        evidence1: dashboardData?.certification_evaluation_UNESCO_1_evidence || '',
-        score2: dashboardData?.certification_evaluation_UNESCO_2_score || null,
-        evidence2: dashboardData?.certification_evaluation_UNESCO_2_evidence || '',
-        score3: dashboardData?.certification_evaluation_UNESCO_3_score || null,
-        evidence3: dashboardData?.certification_evaluation_UNESCO_3_evidence || '',
-        score4: dashboardData?.certification_evaluation_UNESCO_4_score || null,
-        evidence4: dashboardData?.certification_evaluation_UNESCO_4_evidence || ''
-      };
+      setPersonalityBaseline({
+        communicationStrategy: data?.communication_strategy || null,
+        learningStrategy: data?.learning_strategy || null
+      });
+      setCommunicationLevel(data?.communication_level ?? 1);
+      console.log('[Skills] Personality baseline loaded, communication_level:', data?.communication_level ?? 1);
+    } catch (err) {
+      console.log('[Skills] Baseline fetch skipped:', err);
+    }
+  };
 
-      console.log('[AI Learning] UNESCO scores loaded:', unescoScores);
+  // ── Tweak personality baseline after each session ──────────────────────────
+  // Runs silently (non-blocking) after save or evaluation.
+  // Updates communication_strategy, learning_strategy, AND communication_level.
+  const tweakPersonalityBaseline = async (
+    userId: string,
+    sessionMessages: typeof chatHistory,
+    currentBaseline: PersonalityBaseline
+  ): Promise<void> => {
+    const learnerMessages = sessionMessages.filter(m => m.role === 'user');
+    if (learnerMessages.length < 3) {
+      console.log('[Skills Tweak] Too few learner messages — skipping baseline update');
+      return;
+    }
+    if (!currentBaseline.communicationStrategy && !currentBaseline.learningStrategy) {
+      console.log('[Skills Tweak] No existing baseline — skipping tweak (run initial assessment first)');
+      return;
+    }
 
-      // Fetch session count and previous session memory in parallel
-      const [sessionCount, previousSummary] = await Promise.all([
-        fetchUserSessionCount(userId),
-        fetchPreviousSessionSummary(userId, activity.learning_module_id)
-      ]);
-      setUserSessionCount(sessionCount);
+    const cs = currentBaseline.communicationStrategy;
+    const ls = currentBaseline.learningStrategy;
 
-      const userProfile = await fetchUserProfile(userId);
-      const gradeInstructions = getPersonalizedInstructions(
-        userProfile.gradeLevel,
-        userProfile.communicationStrategy,
-        userProfile.learningStrategy,
-        sessionCount,
-        userProfile.communicationLevel ?? communicationLevel
-      );
-      const moduleDescription = data?.description || 'No description available.';
-      const subCategory = data?.sub_category || activity.sub_category || '';
+    const sessionExcerpt = learnerMessages
+      .slice(-12)
+      .map((m, i) => `[Turn ${i + 1}] ${m.content}`)
+      .join('\n\n');
 
-      // Build UNESCO Framework guidance (with sessionCount for PUE bridge)
-      const unescoGuidance = buildUNESCOGuidance(subCategory, unescoScores, sessionCount);
+    const prompt = `You are a personality and learning assessment expert. You are making SMALL INCREMENTAL UPDATES to an existing learner profile based on evidence from a single new learning session. Do NOT rewrite or overhaul the profile — only nudge individual fields if the session provides clear evidence that the current value no longer fits.
 
-      const enhancedFacilitatorInstructions = data?.ai_facilitator_instructions
-        ? `${gradeInstructions}
+CURRENT PROFILE:
+Communication Strategy:
+- preferred_tone: "${cs?.preferred_tone ?? 'not set'}"
+- interaction_style: "${cs?.interaction_style ?? 'not set'}"
+- detail_level: "${cs?.detail_level ?? 'not set'}"
+- recommendations: ${JSON.stringify(cs?.recommendations ?? [])}
 
-${unescoGuidance}
-${previousSummary}
-LEARNING MODULE: "${data?.title || activity.title}"
-MODULE DESCRIPTION: ${moduleDescription}
-SUB-CATEGORY: ${subCategory}
+Learning Strategy:
+- learning_style: "${ls?.learning_style ?? 'not set'}"
+- motivation_approach: "${ls?.motivation_approach ?? 'not set'}"
+- pacing_preference: "${ls?.pacing_preference ?? 'not set'}"
+- recommendations: ${JSON.stringify(ls?.recommendations ?? [])}
 
-FACILITATOR INSTRUCTIONS: ${data.ai_facilitator_instructions}`
-        : `${gradeInstructions}
+Current communication_level: ${communicationLevel} (scale 0–3)
+  0 = Pre-literate / Very Basic — single words, fragments, errors that obscure meaning
+  1 = Emerging — simple short sentences, frequent errors but meaning recoverable
+  2 = Developing — multi-sentence responses, errors present but clear, growing vocabulary
+  3 = Proficient — well-structured, complex ideas expressed clearly, mostly correct grammar
 
-${unescoGuidance}
-${previousSummary}
-LEARNING MODULE: "${data?.title || activity.title}"
-MODULE DESCRIPTION: ${moduleDescription}
-SUB-CATEGORY: ${subCategory}
+NEW SESSION — LEARNER MESSAGES ONLY:
+${sessionExcerpt}
 
-You are a helpful AI learning assistant guiding a student through this learning activity. Be encouraging, patient, and provide step-by-step guidance. Ask questions to check understanding and provide hints when needed.`;
+TASK:
+Examine the learner's messages from this session.
 
+For communication_strategy and learning_strategy: nudge individual fields only if this session provides clear new or contradictory evidence.
+
+For communication_level: assess the TYPICAL writing quality across these messages (not the best or worst example). Nudge by at most 1 in either direction:
+- Increase by 1 if the messages consistently show clearer structure, more complete sentences, or richer vocabulary than the current level describes.
+- Decrease by 1 if the messages consistently show more fragmented or error-heavy writing than the current level describes.
+- Leave unchanged if the messages are consistent with the current level, or if evidence is mixed.
+
+RULES:
+- Change a text field only if this session clearly shows the current value is wrong or incomplete.
+- For recommendations arrays: add 1 new item if clearly supported, remove 1 if clearly contradicted, or leave unchanged. Never replace the whole array.
+- For communication_level: maximum change is ±1 per session. Never jump more than 1 level.
+- If unsure about any field, return the existing value unchanged.
+
+Respond ONLY with valid JSON in this exact format (no extra fields, no commentary):
+{
+  "communication_strategy": {
+    "preferred_tone": "<string>",
+    "interaction_style": "<string>",
+    "detail_level": "<string>",
+    "recommendations": ["<string>", ...]
+  },
+  "learning_strategy": {
+    "learning_style": "<string>",
+    "motivation_approach": "<string>",
+    "pacing_preference": "<string>",
+    "recommendations": ["<string>", ...]
+  },
+  "communication_level": <integer 0–3>,
+  "changes_made": "<one sentence summary of what changed and why, or 'No changes — existing profile confirmed by this session'>"
+}`;
+
+    try {
+      const result = await chatJSON({
+        messages: [{ role: 'user', content: prompt }],
+        system: 'You are a learner profile expert making careful, evidence-based incremental updates. Return only valid JSON.',
+        max_tokens: 700,
+        temperature: 0.2,
+      });
+
+      if (!result?.communication_strategy || !result?.learning_strategy) {
+        console.warn('[Skills Tweak] Unexpected response shape — skipping update');
+        return;
+      }
+
+      // Clamp communication_level to valid range
+      const newLevel = Math.max(0, Math.min(3, Math.round(result.communication_level ?? communicationLevel))) as number;
+
+      const { error } = await supabase
+        .from('user_personality_baseline')
+        .update({
+          communication_strategy: result.communication_strategy,
+          learning_strategy: result.learning_strategy,
+          communication_level: newLevel,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId);
+
+      if (error) {
+        console.error('[Skills Tweak] Failed to save updated baseline:', error);
+        return;
+      }
+
+      // Refresh local state so the next session in this visit uses the updated values
+      setPersonalityBaseline({
+        communicationStrategy: result.communication_strategy,
+        learningStrategy: result.learning_strategy,
+      });
+      setCommunicationLevel(newLevel);
+
+      console.log(`[Skills Tweak] Baseline updated. communication_level: ${communicationLevel} → ${newLevel}. ${result.changes_made}`);
+    } catch (err) {
+      console.warn('[Skills Tweak] Tweak skipped due to error:', err);
+    }
+  };
+
+  // Function to get grade-appropriate instructions
+  const getGradeAppropriateInstructions = (gradeLevel: number | null, commLevel: number = 1): string => {
+    // ── Communication-level language register (prepended, takes precedence) ──
+    const commLevelBlock = commLevel <= 0 ? `
+═══════════════════════════════════════════════
+COMMUNICATION LEVEL: 0 — PRE-LITERATE / VERY BASIC
+This learner writes in single words, short fragments, or severely broken sentences.
+═══════════════════════════════════════════════
+LANGUAGE RULES (mandatory):
+- Maximum 1–2 short sentences per response. Use only the simplest everyday words.
+- Never use skill terms without immediately defining them in plain words.
+- Ask questions answerable in one or two words only: "Is this good or bad?"
+- Celebrate every attempt: "Good try! 👏" before any correction.
+- If their message is unclear: "I did not understand. Can you try again?"
+` : commLevel === 1 ? `
+═══════════════════════════════════════════════
+COMMUNICATION LEVEL: 1 — EMERGING
+This learner writes simple short sentences with frequent errors but recoverable meaning.
+═══════════════════════════════════════════════
+LANGUAGE RULES (mandatory):
+- Short sentences only. One idea per sentence. Keep responses under 60 words.
+- Explain all skill terms immediately in plain language.
+- Ask ONE question per turn. Use examples from farming, markets, or community life.
+- Celebrate effort: "That is a great answer!" before any correction or follow-up.
+- If answer is short or unclear: "Can you tell me a little more?" before moving on.
+` : commLevel === 2 ? `
+═══════════════════════════════════════════════
+COMMUNICATION LEVEL: 2 — DEVELOPING
+This learner writes multi-sentence responses with errors, but meaning is clear.
+═══════════════════════════════════════════════
+LANGUAGE RULES:
+- Clear direct language. Briefly explain skill terms. 2–3 short paragraphs maximum.
+- One guiding question per turn. Build on the learner's own words.
+- Encourage structured thinking: "Can you explain why?" or "What would happen if…?"
+` : `
+═══════════════════════════════════════════════
+COMMUNICATION LEVEL: 3 — PROFICIENT
+This learner communicates complex ideas clearly with mostly correct grammar.
+═══════════════════════════════════════════════
+LANGUAGE RULES:
+- Standard skill vocabulary with concise definitions where helpful.
+- Push for precision: "Can you be more specific?" or "What evidence supports that?"
+- Challenge the learner to compare, evaluate, and synthesise across dimensions.
+`;
+
+    const gradeBlock = (() => {
+      if (gradeLevel === null) {
+        return 'Adjust your language and examples to be appropriate for the student\'s level. Be supportive and encouraging.';
+      }
+      switch(gradeLevel) {
+        case 1: return 'Use simple, clear language appropriate for elementary students. Use concrete examples and encourage frequently. Break down complex ideas into small, easy-to-understand steps. Be patient and positive.';
+        case 2: return 'Use age-appropriate language for middle school students. Provide clear explanations with relevant examples. Encourage critical thinking and independence. Be supportive and respectful.';
+        case 3: return 'Use language appropriate for high school students. Provide detailed explanations and challenge students to think deeply. Encourage analysis and synthesis of ideas. Respect their developing independence.';
+        case 4: return 'Use sophisticated language appropriate for college students. Provide comprehensive explanations with academic rigor. Encourage critical analysis, research skills, and independent thinking. Treat students as emerging professionals.';
+        default: return 'Adjust your language and examples to be appropriate for the student\'s level. Be supportive and encouraging.';
+      }
+    })();
+
+    return `${commLevelBlock}\n${gradeBlock}`;
+  };
+
+  // Fetch activity details from learning_modules
+  const fetchActivityDetails = async (learningModuleId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('learning_modules')
+        .select('*')
+        .eq('learning_module_id', learningModuleId)
+        .single();
+
+      if (error) throw error;
+
+      console.log('[Skills Activity] Fetched module details:', data);
+
+      const gradeInstructions = getGradeAppropriateInstructions(userGradeLevel, communicationLevel);
+      
       return {
-        title: data?.title || 'this learning activity',
-        description: moduleDescription,
-        aiInstructions: enhancedFacilitatorInstructions,
-        assessmentInstructions: buildUNESCOAssessmentInstructions(),
-        successMetrics: data?.metrics_for_success || "Evaluate based on student engagement, understanding of concepts, quality of responses, and overall learning progress.",
-        outcomes: data?.outcomes || ''
+        title: data?.title || 'Learning Activity',
+        description: data?.description || 'Description not available.',
+        category: data?.category || '',
+        subCategory: data?.sub_category || '',
+        learningOrCertification: data?.learning_or_certification || '',
+        aiInstructions: data?.ai_facilitator_instructions 
+          ? `${gradeInstructions}\n\n${data.ai_facilitator_instructions}`
+          : `${gradeInstructions}\n\nYou are a helpful skills learning assistant. Guide the student through this learning activity with patience and encouragement. Ask questions to check their understanding and provide helpful feedback.`,
+        assessmentInstructions: data?.ai_assessment_instructions || 'Based on the conversation history, evaluate the student\'s performance in this skills learning activity. Consider their engagement, understanding, effort, and progress.',
+        successMetrics: data?.metrics_for_success || 'Evaluate based on student engagement, understanding of concepts, quality of responses, and overall learning progress.',
+        outcomes: data?.outcomes || 'Develop skills and understanding through guided practice and reflection.'
       };
     } catch (err) {
-      console.error('[AI Learning] Fallback due to error:', err);
-
-      const gradeInstructions = getPersonalizedInstructions(userGradeLevel, null, null, userSessionCount);
-
+      console.error('[Skills Activity] Error fetching activity details:', err);
+      
+      const gradeInstructions = getGradeAppropriateInstructions(userGradeLevel, communicationLevel);
+      
       return {
-        title: 'this learning activity',
+        title: 'This skills learning activity',
         description: 'Description could not be loaded.',
-        aiInstructions: `${gradeInstructions}\n\nYou are a helpful AI learning assistant. Guide the student through this learning activity with patience and encouragement.`,
-        assessmentInstructions: "Based on the conversation history, evaluate the student's performance. Consider engagement, effort, and understanding.",
-        successMetrics: "Evaluate based on student engagement, understanding of concepts, quality of responses, and overall learning progress.",
-        outcomes: ''
+        category: '',
+        subCategory: '',
+        learningOrCertification: '',
+        aiInstructions: `${gradeInstructions}\n\nYou are a helpful skills learning assistant. Guide the student through this learning activity with patience and encouragement. Ask questions to check their understanding and provide helpful feedback.`,
+        assessmentInstructions: `Based on the conversation history, evaluate the student's performance in this skills learning activity. Consider their engagement, understanding, effort, and progress. Provide a score from 0-100 with justification.`,
+        successMetrics: 'Evaluate based on student engagement, understanding of concepts, quality of responses, and overall learning progress.',
+        outcomes: 'Develop skills and understanding through guided practice and reflection.'
       };
+    }
+  };
+
+  // Updated OpenAI API integration with contextual facilitation
+  const callOpenAI = async (userMessage: string, chatHistory: ChatMessage[], baseFacilitatorInstructions: string) => {
+    try {
+      console.log('[Skills Chat] Making API call with contextual facilitation');
+      
+      // Build contextual prompt based on current evaluation state
+      const contextualPrompt = buildContextualFacilitationPrompt(
+        baseFacilitatorInstructions,
+        currentModuleSubCategory,
+        currentEvaluationState
+      );
+      
+      const messages: ClientChatMessage[] = [
+        ...chatHistory.slice(1).map(msg => ({
+          role: msg.role === 'assistant' ? 'assistant' as const : 'user' as const,
+          content: msg.content
+        })),
+        {
+          role: 'user',
+          content: userMessage
+        }
+      ];
+
+      console.log('[Skills Chat] Using contextual facilitation with current scores');
+
+      const response = await chatText({
+        messages,
+        system: contextualPrompt,
+        max_tokens: 500,
+        temperature: 0.7
+      });
+
+      console.log('[Skills Chat] API response received successfully');
+      
+      return response || 'I apologize, but I encountered an issue generating a response. Please try again.';
+    } catch (error) {
+      console.error('[Skills Chat] Error calling API:', error);
+      
+      if (error instanceof Error) {
+        if (error.message?.includes('API key')) {
+          return 'I apologize, but the AI service is not properly configured. Please ensure your OpenAI API key is set in the environment variables and restart the server.';
+        } else if (error.message?.includes('429')) {
+          return "I'm currently experiencing high demand. Please wait a moment and try again.";
+        } else if (error.message?.includes('401')) {
+          return "There's an authentication issue with the AI service. Please check that your OpenAI API key is valid and has sufficient credits.";
+        } else {
+          return `I apologize, but I encountered a technical issue: ${error.message}. Please try again. If the problem persists, please contact support.`;
+        }
+      } else {
+        return 'I apologize, but I encountered a technical issue. Please try again. If the problem persists, please contact support.';
+      }
     }
   };
 
@@ -1558,261 +1821,523 @@ Respond ONLY with valid JSON:
       });
       return result as any;
     } catch {
-      // Fail open — never block a learner due to a validation error
       return { isGenuine: true, qualityFlag: 'substantive' };
     } finally {
       setReflectionValidating(false);
     }
   };
 
-  // Updated OpenAI API integration using chatClient
-  const callOpenAI = async (userMessage: string, chatHistory: ChatMessage[], aiInstructions: string) => {
+  // Skills rubric assessment - evaluates based on LAST user response
+  const callSkillsRubricAssessmentIncremental = async (
+    chatHistory: ChatMessage[], 
+    subCategory: string,
+    assessmentInstructions: string,
+    successMetrics: string
+  ): Promise<SkillsRubricEvaluation> => {
     try {
-      console.log('[AI Chat] Making API call via chat client');
+      console.log('[Incremental Assessment] Evaluating last user response for:', subCategory);
       
-      // Convert local chat history to client format
+      const dimensions = RUBRIC_DEFINITIONS[subCategory] || [];
+      if (dimensions.length === 0) {
+        throw new Error(`No rubric dimensions found for sub-category: ${subCategory}`);
+      }
+
+      // Get just the last few exchanges for focused evaluation
+      const recentHistory = chatHistory.slice(-6); // Last 3 exchanges
+      const chatHistoryText = recentHistory.map(msg => 
+        `${msg.role === 'assistant' ? 'AI Assistant' : 'Student'}: ${msg.content}`
+      ).join('\n\n');
+
+      const assessmentPrompt = `You are evaluating a student's MOST RECENT response in the "${subCategory}" skill area.
+
+FOCUS: Evaluate ONLY the student's latest response and the immediate preceding AI-student exchange.
+
+Assessment Instructions:
+${assessmentInstructions}
+
+Success Metrics:
+${successMetrics}
+
+Rubric Evidence Definitions:
+${RUBRIC_EVIDENCE_DEFINITIONS}
+
+Recent Conversation (focus on the LAST student response):
+${chatHistoryText}
+
+CRITICAL: Evaluate the student's MOST RECENT response across ALL of the following dimensions:
+${dimensions.map(d => `- ${d.replace(/_/g, ' ')}`).join('\n')}
+
+For each dimension:
+1. Assign a score from 0-3 based ONLY on evidence in the LAST student response
+2. Provide specific evidence from that response
+
+Respond with ONLY valid JSON:
+{
+  "dimensions": [
+    ${dimensions.map(d => `{
+      "dimension": "${d}",
+      "score": [0-3],
+      "evidence": "[specific evidence from LAST response]"
+    }`).join(',\n    ')}
+  ]
+}
+
+Scoring:
+- 0: No Evidence
+- 1: Emerging (Unclear)
+- 2: Proficient
+- 3: Advanced
+
+Provide assessment now:`;
+
       const messages: ClientChatMessage[] = [
-        ...chatHistory.slice(1).map(msg => ({
-          role: msg.role === 'assistant' ? 'assistant' as const : 'user' as const,
-          content: msg.content
-        })),
         {
           role: 'user',
-          content: userMessage
+          content: assessmentPrompt
         }
       ];
 
-      console.log('[AI Chat] Sending', messages.length, 'messages to API via client');
-
-      const response = await chatText({
+      const assessment = await chatJSON({
         messages,
-        system: aiInstructions,
-        max_tokens: 500,
+        system: 'You are an expert AI assessment evaluator. Evaluate ONLY the most recent student response. Respond only with valid JSON.',
+        max_tokens: 1500,
+        temperature: 0.3
+      });
+
+      let finalAssessment: SkillsRubricEvaluation;
+      if (typeof assessment === 'string') {
+        finalAssessment = JSON.parse(assessment);
+      } else {
+        finalAssessment = assessment as SkillsRubricEvaluation;
+      }
+      
+      if (!finalAssessment.dimensions || !Array.isArray(finalAssessment.dimensions)) {
+        throw new Error('Invalid assessment format');
+      }
+
+      for (const dim of finalAssessment.dimensions) {
+        if (typeof dim.dimension !== 'string' || typeof dim.score !== 'number' || typeof dim.evidence !== 'string') {
+          throw new Error('Invalid dimension format');
+        }
+        dim.score = Math.max(0, Math.min(3, Math.round(dim.score)));
+      }
+      
+      console.log('[Incremental Assessment] Completed:', finalAssessment);
+      return finalAssessment;
+    } catch (error) {
+      console.error('[Incremental Assessment] Error:', error);
+      
+      const dimensions = RUBRIC_DEFINITIONS[subCategory] || [];
+      return {
+        dimensions: dimensions.map(dim => ({
+          dimension: dim,
+          score: 1,
+          evidence: `Incremental assessment unavailable: ${error instanceof Error ? error.message : 'Unknown error'}`
+        }))
+      };
+    }
+  };
+
+  // Generate improvement advice based on evaluation
+  const generateImprovementAdvice = async (
+    chatHistory: ChatMessage[],
+    rubricEvaluation: SkillsRubricEvaluation,
+    subCategory: string
+  ): Promise<string> => {
+    try {
+      console.log('[Improvement Advice] Generating personalized advice for:', subCategory);
+      
+      // Build summary of current performance
+      const performanceSummary = rubricEvaluation.dimensions
+        .map(dim => {
+          const level = dim.score === 0 ? 'No Evidence (0/3)' :
+                       dim.score === 1 ? 'Emerging (1/3)' :
+                       dim.score === 2 ? 'Proficient (2/3)' : 'Advanced (3/3)';
+          return `- ${dim.dimension.replace(/_/g, ' ')}: ${level}\n  Evidence: ${dim.evidence}`;
+        })
+        .join('\n\n');
+
+      // Identify areas needing improvement (scores < 3)
+      const areasForImprovement = rubricEvaluation.dimensions
+        .filter(dim => dim.score < 3)
+        .sort((a, b) => a.score - b.score) // Sort by score (lowest first)
+        .map(dim => dim.dimension.replace(/_/g, ' '))
+        .join(', ');
+
+      // Get recent conversation context
+      const recentHistory = chatHistory.slice(-10); // Last 5 exchanges
+      const conversationContext = recentHistory.map(msg => 
+        `${msg.role === 'assistant' ? 'AI' : 'Student'}: ${msg.content}`
+      ).join('\n\n');
+
+      const cs = personalityBaseline.communicationStrategy;
+      const ls = personalityBaseline.learningStrategy;
+      const personalizedCoachBlock = (cs || ls) ? `
+PERSONALIZED LEARNER PROFILE:
+${cs ? `- Communication Preference: tone=${cs.preferred_tone ?? 'n/a'}, interaction=${cs.interaction_style ?? 'n/a'}, detail=${cs.detail_level ?? 'n/a'}` : ''}
+${cs?.recommendations?.length ? `  Communication Tips: ${cs.recommendations.join('; ')}` : ''}
+${ls ? `- Learning Preference: style=${ls.learning_style ?? 'n/a'}, motivation=${ls.motivation_approach ?? 'n/a'}, pacing=${ls.pacing_preference ?? 'n/a'}` : ''}
+${ls?.recommendations?.length ? `  Learning Tips: ${ls.recommendations.join('; ')}` : ''}
+
+Adapt your feedback tone, phrasing, examples, and pacing to match this profile.
+` : '';
+
+      const advicePrompt = `You are an expert skills coach providing personalized improvement advice to a student.
+
+STUDENT'S CURRENT PERFORMANCE IN ${subCategory}:
+
+${performanceSummary}
+
+AREAS NEEDING IMPROVEMENT (lowest to highest):
+${areasForImprovement || 'All dimensions are at Advanced level!'}
+${personalizedCoachBlock}
+RECENT CONVERSATION CONTEXT:
+${conversationContext}
+
+RUBRIC CRITERIA FOR ${subCategory}:
+${RUBRIC_EVIDENCE_DEFINITIONS}
+
+TASK: Provide specific, actionable improvement advice to help this student advance in ${subCategory}.
+
+REQUIREMENTS:
+1. Focus primarily on the weakest dimension(s)
+2. Provide 3-5 specific, concrete suggestions
+3. Reference specific examples from their conversation when possible
+4. Explain HOW to reach the next level (e.g., from Emerging to Proficient, or Proficient to Advanced)
+5. Be encouraging and constructive
+6. Make advice practical and immediately actionable
+${(cs || ls) ? '7. Deliver all advice in a tone and style that matches the learner\'s communication and learning preferences above' : ''}
+
+FORMAT YOUR RESPONSE AS:
+**Priority Areas for Growth:**
+[List the 1-2 weakest dimensions]
+
+**Specific Suggestions:**
+1. [Concrete action item with example]
+2. [Concrete action item with example]
+3. [Concrete action item with example]
+[etc.]
+
+**Next Steps:**
+[Brief summary of what to focus on in next practice session]
+
+Provide your improvement advice now:`;
+
+      const messages: ClientChatMessage[] = [
+        {
+          role: 'user',
+          content: advicePrompt
+        }
+      ];
+
+      const advice = await chatText({
+        messages,
+        system: 'You are an expert educational coach providing personalized, actionable feedback to help students improve their skills. Be specific, encouraging, and practical. When a learner profile is provided, tailor your tone, examples, and delivery to match their communication and learning preferences.',
+        max_tokens: 800,
         temperature: 0.7
       });
 
-      console.log('[AI Chat] API response received successfully');
+      console.log('[Improvement Advice] Generated successfully');
+      return advice || 'Unable to generate improvement advice at this time. Please try again.';
       
-      return response || 'I apologize, but I encountered an issue generating a response. Please try again.';
     } catch (error) {
-      console.error('[AI Chat] Error calling API:', error);
-      
-      if (error instanceof Error) {
-        if (error.message?.includes('API key')) {
-          return 'I apologize, but the AI service is not properly configured. Please ensure your OpenAI API key is set in the environment variables and restart the server.';
-        } else if (error.message?.includes('429')) {
-          return "I'm currently experiencing high demand. Please wait a moment and try again.";
-        } else if (error.message?.includes('401')) {
-          return "There's an authentication issue with the AI service. Please check that your OpenAI API key is valid and has sufficient credits.";
-        } else {
-          return `I apologize, but I encountered a technical issue: ${error.message}. Please try again. If the problem persists, please contact support.`;
-        }
-      } else {
-        return 'I apologize, but I encountered a technical issue. Please try again. If the problem persists, please contact support.';
-      }
+      console.error('[Improvement Advice] Error:', error);
+      return 'Unable to generate improvement advice at this time. Please continue practicing and request evaluation again later.';
     }
   };
 
-  // Updated Assessment API call using chatJSON
-  // overrideReflection is used by Complete Session so the text is available
-  // immediately without waiting for React state to flush.
-  const callAssessmentAI = async (
-    chatHistory: ChatMessage[],
+  // Full rubric assessment based on entire chat history
+  const callSkillsRubricAssessmentFull = async (
+    chatHistory: ChatMessage[], 
+    subCategory: string,
     assessmentInstructions: string,
-    successMetrics: string,
-    overrideReflection?: string
-  ) => {
+    successMetrics: string
+  ): Promise<SkillsRubricEvaluation> => {
     try {
-      console.log('[UNESCO Comprehensive Assessment] Evaluating full conversation history');
+      console.log('[Full Assessment] Evaluating entire conversation for:', subCategory);
       
+      const dimensions = RUBRIC_DEFINITIONS[subCategory] || [];
+      if (dimensions.length === 0) {
+        throw new Error(`No rubric dimensions found for sub-category: ${subCategory}`);
+      }
+
       const chatHistoryText = chatHistory.slice(1).map(msg => 
-        `${msg.role === 'assistant' ? 'AI Assistant' : 'Learner'}: ${msg.content}`
+        `${msg.role === 'assistant' ? 'AI Assistant' : 'Student'}: ${msg.content}`
       ).join('\n\n');
 
-      const effectiveReflection = overrideReflection ?? reflectionText;
-      const reflectionSection = effectiveReflection
-        ? `\n\nLEARNER END-OF-SESSION REFLECTION:\n"${effectiveReflection}"\n\nNote: This reflection demonstrates metacognitive awareness. Weight it toward Competency 4 (Critical Evaluation). A substantive reflection that identifies learning and forward intent should raise the Competency 4 score.`
-        : `\n\nNote: No end-of-session reflection was submitted by this learner. Cap Competency 4 (Critical Evaluation) score at 2 maximum. Proficient or Advanced on Competency 4 requires demonstrated metacognitive reflection.`;
+      const reflectionSection = reflectionText
+        ? `\n\nLEARNER END-OF-SESSION REFLECTION:\n"${reflectionText}"\n\nNote: This reflection demonstrates metacognitive awareness. Weight it toward the Reflection dimension (Critical Thinking) and any metacognitive dimensions. A substantive reflection that identifies learning and forward intent should raise those scores.`
+        : `\n\nNote: No end-of-session reflection was submitted. Cap any Reflection or Metacognitive dimension score at 2 maximum. Proficient or Advanced on those dimensions requires demonstrated metacognitive reflection.`;
 
-      const comprehensivePrompt = `Evaluate this learner's COMPLETE performance across the ENTIRE conversation history against UNESCO AI Competency standards.
+      const assessmentPrompt = `You are evaluating a student's OVERALL performance in "${subCategory}" based on the COMPLETE conversation history.
 
-FULL CONVERSATION HISTORY:
+Assessment Instructions:
+${assessmentInstructions}
+
+Success Metrics:
+${successMetrics}
+
+Rubric Evidence Definitions:
+${RUBRIC_EVIDENCE_DEFINITIONS}
+${reflectionSection}
+COMPLETE Conversation History:
 ${chatHistoryText}
 
-${assessmentInstructions}
-${reflectionSection}
+CRITICAL: Evaluate the student's OVERALL performance across ALL dimensions:
+${dimensions.map(d => `- ${d.replace(/_/g, ' ')}`).join('\n')}
 
-RESPONSE FORMAT:
-You MUST respond with ONLY valid JSON in this exact structure:
+For each dimension:
+1. Assign a score from 0-3 based on ALL evidence across the conversation
+2. Provide comprehensive evidence from multiple responses if available
+
+Respond with ONLY valid JSON:
 {
-  "competency_1_score": <number 0-3>,
-  "competency_1_evidence": "<specific examples from conversation>",
-  "competency_2_score": <number 0-3>,
-  "competency_2_evidence": "<specific examples from conversation>",
-  "competency_3_score": <number 0-3>,
-  "competency_3_evidence": "<specific examples from conversation>",
-  "competency_4_score": <number 0-3>,
-  "competency_4_evidence": "<specific examples from conversation>",
-  "overall_score": <number 0-3>,
-  "overall_evidence": "<summary of learner's performance across all competencies>"
+  "dimensions": [
+    ${dimensions.map(d => `{
+      "dimension": "${d}",
+      "score": [0-3],
+      "evidence": "[comprehensive evidence from conversation]"
+    }`).join(',\n    ')}
+  ]
 }
 
-SCORING SCALE (0-3):
-- 0 = No Evidence: Minimal or no demonstration of competency
-- 1 = Emerging: Basic understanding with significant gaps
-- 2 = Proficient: Functional level, solid understanding with minor gaps
-- 3 = Advanced: Comprehensive, nuanced understanding with depth
+Scoring:
+- 0: No Evidence
+- 1: Emerging (Unclear)  
+- 2: Proficient
+- 3: Advanced
 
-Calculate overall_score as:
-- Average the 4 competency scores
-- Round to nearest integer (0-3)
-- Example: scores [2,3,2,3] → average 2.5 → rounds to 3
+Provide assessment now:`;
 
-CRITICAL: Return ONLY the JSON object. No preamble, no explanation, no markdown.`;
+      const messages: ClientChatMessage[] = [
+        {
+          role: 'user',
+          content: assessmentPrompt
+        }
+      ];
 
       const assessment = await chatJSON({
-        messages: [{ role: 'user', content: comprehensivePrompt }],
-        system: 'You are a UNESCO AI Competency evaluator. Respond ONLY with valid JSON. Do not include any other text.',
-        max_tokens: 1200,
-        temperature: 0.2
+        messages,
+        system: 'You are an expert AI assessment evaluator for comprehensive skill evaluation. Respond only with valid JSON.',
+        max_tokens: 2000,
+        temperature: 0.3
       });
 
-      console.log('[UNESCO Comprehensive Assessment] Raw response:', assessment);
-      
-      // Handle both object and string responses
-      let finalAssessment;
+      let finalAssessment: SkillsRubricEvaluation;
       if (typeof assessment === 'string') {
-        try {
-          finalAssessment = JSON.parse(assessment);
-        } catch (parseError) {
-          console.error('[UNESCO Assessment] Error parsing string response:', parseError);
-          throw new Error('Invalid JSON response from assessment API');
-        }
+        finalAssessment = JSON.parse(assessment);
       } else {
-        finalAssessment = assessment;
+        finalAssessment = assessment as SkillsRubricEvaluation;
       }
-
-      // Validate response structure
-      if (
-        typeof finalAssessment.competency_1_score !== 'number' ||
-        typeof finalAssessment.competency_2_score !== 'number' ||
-        typeof finalAssessment.competency_3_score !== 'number' ||
-        typeof finalAssessment.competency_4_score !== 'number' ||
-        typeof finalAssessment.overall_score !== 'number'
-      ) {
-        console.error('[UNESCO Assessment] Invalid assessment structure:', finalAssessment);
-        throw new Error('Assessment response missing required scores');
-      }
-
-      console.log('[UNESCO Assessment] Successfully parsed comprehensive assessment');
       
-      return {
-        evaluation_score: Math.round(finalAssessment.overall_score),
-        evaluation_evidence: finalAssessment.overall_evidence,
-        unesco_scores: {
-          competency_1_score: finalAssessment.competency_1_score,
-          competency_1_evidence: finalAssessment.competency_1_evidence,
-          competency_2_score: finalAssessment.competency_2_score,
-          competency_2_evidence: finalAssessment.competency_2_evidence,
-          competency_3_score: finalAssessment.competency_3_score,
-          competency_3_evidence: finalAssessment.competency_3_evidence,
-          competency_4_score: finalAssessment.competency_4_score,
-          competency_4_evidence: finalAssessment.competency_4_evidence
+      if (!finalAssessment.dimensions || !Array.isArray(finalAssessment.dimensions)) {
+        throw new Error('Invalid assessment format');
+      }
+
+      for (const dim of finalAssessment.dimensions) {
+        if (typeof dim.dimension !== 'string' || typeof dim.score !== 'number' || typeof dim.evidence !== 'string') {
+          throw new Error('Invalid dimension format');
         }
-      };
+        dim.score = Math.max(0, Math.min(3, Math.round(dim.score)));
+      }
       
+      console.log('[Full Assessment] Completed:', finalAssessment);
+      return finalAssessment;
     } catch (error) {
-      console.error('[UNESCO Assessment] Error during assessment:', error);
-      throw error;
+      console.error('[Full Assessment] Error:', error);
+      
+      const dimensions = RUBRIC_DEFINITIONS[subCategory] || [];
+      return {
+        dimensions: dimensions.map(dim => ({
+          dimension: dim,
+          score: 2,
+          evidence: `Full assessment unavailable: ${error instanceof Error ? error.message : 'Unknown error'}`
+        }))
+      };
     }
   };
 
-  // Update activity evaluation in database
-  const updateActivityEvaluation = async (
+  // Update activity with rubric evaluation
+  const updateSkillsRubricEvaluation = async (
     activityId: string, 
-    evaluationScore: number, 
-    evaluationEvidence: string, 
+    subCategory: string,
+    rubricEvaluation: SkillsRubricEvaluation,
     chatHistory: ChatMessage[],
-    unescoScores?: {
-      competency_1_score: number;
-      competency_1_evidence: string;
-      competency_2_score: number;
-      competency_2_evidence: string;
-      competency_3_score: number;
-      competency_3_evidence: string;
-      competency_4_score: number;
-      competency_4_evidence: string;
-    },
     forceComplete: boolean = false
   ) => {
     try {
-      // Complete when all 4 UNESCO competencies are at level 3, OR when explicitly forced
-      const shouldComplete = forceComplete || evaluationScore === 3;
+      console.log('[Skills Rubric Update] Updating database for:', subCategory);
+      
+      // Use MINIMUM score for overall certification score (0-3 scale, not percentage)
+      // This represents the minimum proficiency level achieved across all dimensions
+      const evaluationScore = Math.min(...rubricEvaluation.dimensions.map(dim => dim.score));
+      
+      const aggregateEvidence = rubricEvaluation.dimensions
+        .map(dim => `${dim.dimension.replace(/_/g, ' ')}: ${dim.evidence}`)
+        .join(' | ');
+      
+      // Only auto-complete if all dimensions reach Advanced (score 3)
+      const shouldComplete = evaluationScore === 3;
       const newProgress = shouldComplete ? 'completed' : 'started';
       
-      const updateData: any = { 
+      const updateData: any = {
         certification_evaluation_score: evaluationScore,
-        certification_evaluation_evidence: evaluationEvidence,
+        certification_evaluation_evidence: aggregateEvidence,
         chat_history: JSON.stringify(chatHistory),
         progress: newProgress,
         updated_at: new Date().toISOString()
       };
 
-      // Add UNESCO scores if provided
-      if (unescoScores) {
-        updateData.certification_evaluation_UNESCO_1_score = unescoScores.competency_1_score;
-        updateData.certification_evaluation_UNESCO_1_evidence = unescoScores.competency_1_evidence;
-        updateData.certification_evaluation_UNESCO_2_score = unescoScores.competency_2_score;
-        updateData.certification_evaluation_UNESCO_2_evidence = unescoScores.competency_2_evidence;
-        updateData.certification_evaluation_UNESCO_3_score = unescoScores.competency_3_score;
-        updateData.certification_evaluation_UNESCO_3_evidence = unescoScores.competency_3_evidence;
-        updateData.certification_evaluation_UNESCO_4_score = unescoScores.competency_4_score;
-        updateData.certification_evaluation_UNESCO_4_evidence = unescoScores.competency_4_evidence;
+      // Map dimensions to exact database columns using RUBRIC_COLUMN_MAP
+      const colMap = RUBRIC_COLUMN_MAP[subCategory] || {};
+
+      for (const dim of rubricEvaluation.dimensions) {
+        const dimensionKey = dim.dimension.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        const cols = colMap[dimensionKey];
+
+        if (cols) {
+          updateData[cols.score]    = dim.score;
+          updateData[cols.evidence] = dim.evidence;
+          console.log('[Skills Rubric Update] Mapping:', dim.dimension, '->', cols.score, '=', dim.score);
+        } else {
+          console.warn('[Skills Rubric Update] No column mapping for:', subCategory, '/', dim.dimension);
+        }
       }
 
-      const { error } = await supabase
-        .from('dashboard')
-        .update(updateData)
-        .eq('id', activityId);
+      console.log('[Skills Rubric Update] Update data:', updateData);
 
-      if (error) throw error;
+      // Ensure session is valid before database write
+      console.log('[Skills Rubric Update] Checking session validity...');
+      const sessionValid = await ensureValidSession();
+      if (!sessionValid) {
+        console.warn('[Skills Rubric Update] Session invalid, attempting write anyway...');
+      }
 
-      setAllAIActivities(prev => 
+      // Attempt database write with retry on auth errors
+      let writeError = null;
+      let retryCount = 0;
+      const maxRetries = 2;
+
+      while (retryCount <= maxRetries) {
+        try {
+          const { error } = await supabase
+            .from('dashboard')
+            .update(updateData)
+            .eq('id', activityId);
+
+          if (error) {
+            writeError = error;
+            // Check if it's an auth error that might benefit from retry
+            if (error.message?.includes('JWT') || error.message?.includes('session') || error.message?.includes('auth')) {
+              console.warn(`[Skills Rubric Update] Auth error on attempt ${retryCount + 1}:`, error.message);
+              if (retryCount < maxRetries) {
+                retryCount++;
+                console.log(`[Skills Rubric Update] Retrying... (${retryCount}/${maxRetries})`);
+                // Brief delay before retry
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                // Try refreshing session again
+                await ensureValidSession();
+                continue;
+              }
+            }
+            throw error;
+          }
+          
+          // Success - break out of retry loop
+          writeError = null;
+          break;
+        } catch (err) {
+          writeError = err;
+          if (retryCount >= maxRetries) {
+            throw err;
+          }
+        }
+      }
+
+      if (writeError) {
+        throw writeError;
+      }
+      
+      // Update local state
+      setAllSkillsActivities(prev => 
         prev.map(activity => 
           activity.id === activityId 
             ? { 
                 ...activity, 
                 certification_evaluation_score: evaluationScore, 
-                certification_evaluation_evidence: evaluationEvidence,
-                progress: newProgress as 'not started' | 'started' | 'completed'
+                certification_evaluation_evidence: aggregateEvidence,
+                progress: newProgress as 'not started' | 'started' | 'completed',
+                ...updateData
               }
             : activity
         )
       );
 
       if (selectedActivity && selectedActivity.id === activityId) {
-        setSelectedActivity(prev => prev ? {
-          ...prev,
+        const updatedActivity = {
+          ...selectedActivity,
           certification_evaluation_score: evaluationScore,
-          certification_evaluation_evidence: evaluationEvidence,
-          progress: newProgress as 'not started' | 'started' | 'completed'
-        } : null);
+          certification_evaluation_evidence: aggregateEvidence,
+          progress: newProgress as 'not started' | 'started' | 'completed',
+          ...updateData
+        };
+        setSelectedActivity(updatedActivity);
+        
+        // Update evaluation state for next facilitation
+        const newEvalState = await loadCurrentEvaluationState(updatedActivity, subCategory);
+        setCurrentEvaluationState(newEvalState);
       }
       
-      if (shouldComplete) {
-        setShowConfetti(true);
-        setTimeout(() => setShowConfetti(false), 4000);
-      }
-      
+      console.log('[Skills Rubric Update] Success');
+      return { score: evaluationScore, completed: shouldComplete };
     } catch (err) {
-      console.error('Error updating activity evaluation:', err);
+      console.error('[Skills Rubric Update] Error:', err);
       throw err;
+    }
+  };
+
+  // Ensure Supabase session is valid before critical database operations
+  const ensureValidSession = async () => {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) {
+        console.warn('[Session] Error getting session:', error);
+        return false;
+      }
+      if (!session) {
+        console.warn('[Session] No active session');
+        return false;
+      }
+      // Check if session is expiring soon (within 60 seconds)
+      const expiresAt = session.expires_at;
+      const now = Math.floor(Date.now() / 1000);
+      if (expiresAt && (expiresAt - now) < 60) {
+        console.log('[Session] Session expiring soon, refreshing...');
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) {
+          console.error('[Session] Refresh failed:', refreshError);
+          return false;
+        }
+        console.log('[Session] Session refreshed successfully');
+        return !!refreshData.session;
+      }
+      return true;
+    } catch (err) {
+      console.error('[Session] Exception checking session:', err);
+      return false;
     }
   };
 
   // Update chat history in database
   const updateChatHistory = async (activityId: string, chatHistory: ChatMessage[]) => {
     try {
+      // Quick session check (don't wait for refresh to avoid delays)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        console.warn('[Chat History] No active session, skipping update');
+        return;
+      }
+
       const { error } = await supabase
         .from('dashboard')
         .update({ 
@@ -1823,65 +2348,17 @@ CRITICAL: Return ONLY the JSON object. No preamble, no explanation, no markdown.
 
       if (error) throw error;
     } catch (err) {
-      console.error('Error updating chat history:', err);
+      console.error('[Chat History] Error updating:', err);
+      // Don't throw - chat history updates are non-critical
     }
   };
 
-  // Generate personalized improvement advice based on UNESCO scores
-const generateImprovementAdvice = async (unescoScores: any) => {
-  try {
-    console.log('[Improvement Advice] Generating suggestions...');
-    
-    const advicePrompt = `Based on this learner's UNESCO AI Competency assessment, provide specific, actionable improvement advice.
+  // Handle celebration confetti
+  const handleCelebration = () => {
+    setShowConfetti(true);
+    setTimeout(() => setShowConfetti(false), 4000);
+  };
 
-LEARNER'S SCORES:
-Competency 1 - Human-Centred Mindset: ${unescoScores.competency_1_score}
-Evidence: ${unescoScores.competency_1_evidence}
-
-Competency 2 - Understanding AI Principles: ${unescoScores.competency_2_score}
-Evidence: ${unescoScores.competency_2_evidence}
-
-Competency 3 - Application of AI Tools: ${unescoScores.competency_3_score}
-Evidence: ${unescoScores.competency_3_evidence}
-
-Competency 4 - Critical Evaluation: ${unescoScores.competency_4_score}
-Evidence: ${unescoScores.competency_4_evidence}
-
-(Scores are on a 0-3 scale: 0=No Evidence, 1=Emerging, 2=Proficient, 3=Advanced)
-
-Provide improvement suggestions in this EXACT format with 3-4 sections:
-
-**Deepen Understanding:**
-[2-3 sentences of specific advice]
-
-**Practice Application:**
-[2-3 sentences of specific advice]
-
-**Develop Critical Skills:**
-[2-3 sentences of specific advice]
-
-Use section headers like "Deepen Understanding:", "Practice Application:", "Develop Critical Skills:", or "Explore Real-World Examples:". Start each section with ** markdown formatting and separate sections with blank lines.`;
-
-    const advice = await chatText({
-      messages: [
-        {
-          role: 'user',
-          content: advicePrompt
-        }
-      ],
-      system: 'You are a supportive AI learning coach providing personalized improvement advice. Follow the exact formatting instructions provided, using clear section headers with ** markdown formatting and separating sections with blank lines.',
-      max_tokens: 600,
-      temperature: 0.7
-    });
-
-    console.log('[Improvement Advice] Generated successfully');
-    return advice.trim();
-    
-  } catch (error) {
-    console.error('[Improvement Advice] Error:', error);
-    return '**Continue Learning:**\n\nKeep practicing and engaging with the material. Focus on deepening your understanding of how AI works and thinking critically about its applications and limitations.';
-  }
-};
   const handleImproveEnglish = async () => {
     if (!userInput.trim() || isImproving) return;
     setIsImproving(true);
@@ -1889,17 +2366,17 @@ Use section headers like "Deepen Understanding:", "Practice Application:", "Deve
       const result = await chatJSON({
         messages: [{
           role: 'user',
-          content: `You are an English language coach helping a student improve their writing.
-  The student wrote: "${userInput.trim()}"
+          content: `You are an English language coach helping a student in rural Nigeria improve their writing.
+            The student wrote: "${userInput.trim()}"
 
-  Your job:
-    1. Carefully interpret what the student is trying to say — even if the grammar is poor, words are missing, or the sentence is incomplete.
-    2. Rewrite their message as a complete, grammatically correct English sentence that expresses their intended meaning.
-    3. Preserve their voice, ideas, and personality — do not change WHAT they are saying, only HOW it is said.
-    4. Fix all grammar errors: subject-verb agreement, tense consistency, missing articles, word order, punctuation, and sentence completeness.
-    5. If the meaning is unclear, make the most reasonable interpretation and write the clearest possible sentence.
+            Your job:
+            1. Carefully interpret what the student is trying to say — even if the grammar is poor, words are missing, or the sentence is incomplete.
+            2. Rewrite their message as a complete, grammatically correct English sentence that expresses their intended meaning.
+            3. Preserve their voice, ideas, and personality — do not change WHAT they are saying, only HOW it is said.
+            4. Fix all grammar errors: subject-verb agreement, tense consistency, missing articles, word order, punctuation, and sentence completeness.
+            5. If the meaning is unclear, make the most reasonable interpretation and write the clearest possible sentence.
 
-  Return ONLY valid JSON: { "improved_text": "..." }`
+            Return ONLY valid JSON: { "improved_text": "..." }`
         }],
         system: 'You are an English language coach. Return only valid JSON.',
         max_tokens: 600,
@@ -1912,105 +2389,14 @@ Use section headers like "Deepen Understanding:", "Practice Application:", "Deve
       setIsImproving(false);
     }
   };
-  // ── Tweak personality baseline after each session ─────────────────────────
-  // Runs silently (non-blocking) after save or evaluation.
-  // Makes small nudges to the existing profile — never a full rewrite.
-  const tweakPersonalityBaseline = async (
-    userId: string,
-    sessionMessages: typeof chatHistory,
-    currentCs: any,
-    currentLs: any
-  ): Promise<void> => {
-    const learnerMessages = sessionMessages.filter(m => m.role === 'user');
-    if (learnerMessages.length < 3) return;
-    if (!currentCs && !currentLs) return;
-
-    const sessionExcerpt = learnerMessages
-      .slice(-12)
-      .map((m, i) => `[Turn ${i + 1}] ${m.content}`)
-      .join('\n\n');
-
-    const prompt = `You are a personality and learning assessment expert. You are making SMALL INCREMENTAL UPDATES to an existing learner profile based on evidence from a single new learning session. Do NOT rewrite or overhaul the profile — only nudge individual fields if the session provides clear evidence that the current value no longer fits.
-
-CURRENT PROFILE:
-Communication Strategy:
-- preferred_tone: "${currentCs?.preferred_tone ?? 'not set'}"
-- interaction_style: "${currentCs?.interaction_style ?? 'not set'}"
-- detail_level: "${currentCs?.detail_level ?? 'not set'}"
-- recommendations: ${JSON.stringify(currentCs?.recommendations ?? [])}
-
-Learning Strategy:
-- learning_style: "${currentLs?.learning_style ?? 'not set'}"
-- motivation_approach: "${currentLs?.motivation_approach ?? 'not set'}"
-- pacing_preference: "${currentLs?.pacing_preference ?? 'not set'}"
-- recommendations: ${JSON.stringify(currentLs?.recommendations ?? [])}
-
-Current communication_level: ${communicationLevel} (scale 0–3)
-  0 = Pre-literate / Very Basic — single words, fragments, errors that obscure meaning
-  1 = Emerging — simple short sentences, frequent errors but meaning recoverable
-  2 = Developing — multi-sentence responses, errors present but clear, growing vocabulary
-  3 = Proficient — well-structured, complex ideas expressed clearly, mostly correct grammar
-
-NEW SESSION — LEARNER MESSAGES ONLY:
-${sessionExcerpt}
-
-RULES:
-- Change a text field only if this session clearly shows the current value is wrong or incomplete.
-- For recommendations arrays: add 1 new item if clearly supported, remove 1 if clearly contradicted, or leave unchanged. Never replace the whole array.
-- For communication_level: assess the TYPICAL writing quality across these messages (not best or worst). Nudge by at most ±1. Increase if messages consistently show clearer structure or richer vocabulary than the current level; decrease if consistently more fragmented. Leave unchanged if evidence is mixed or consistent with current level.
-- If unsure about any field, return the existing value unchanged.
-
-Respond ONLY with valid JSON:
-{
-  "communication_strategy": { "preferred_tone": "", "interaction_style": "", "detail_level": "", "recommendations": [] },
-  "learning_strategy": { "learning_style": "", "motivation_approach": "", "pacing_preference": "", "recommendations": [] },
-  "communication_level": ${communicationLevel},
-  "changes_made": ""
-}`;
-
-    try {
-      const result = await chatJSON({
-        messages: [{ role: 'user', content: prompt }],
-        system: 'You are a learner profile expert making careful, evidence-based incremental updates. Return only valid JSON.',
-        max_tokens: 700,
-        temperature: 0.2,
-      });
-
-      if (!result?.communication_strategy || !result?.learning_strategy) return;
-
-      const newLevel = Math.max(0, Math.min(3, Math.round(result.communication_level ?? communicationLevel))) as number;
-
-      const { error } = await supabase
-        .from('user_personality_baseline')
-        .update({
-          communication_strategy: result.communication_strategy,
-          learning_strategy: result.learning_strategy,
-          communication_level: newLevel,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', userId);
-
-      if (error) { console.error('[AI Tweak] Failed to save:', error); return; }
-
-      setCommunicationStrategy(result.communication_strategy);
-      setLearningStrategy(result.learning_strategy);
-      setCommunicationLevel(newLevel);
-      console.log(`[AI Tweak] Baseline updated. communication_level: ${communicationLevel} → ${newLevel}. ${result.changes_made}`);
-    } catch (err) {
-      console.warn('[AI Tweak] Skipped:', err);
-    }
-  };
-
-  // ── Parse rubric scores from the most recent AI rubric block in chat ────────
-  // Finds patterns like "AI Mechanism Understanding: 3 —" or "Criterion: 2 —"
-  // Used to detect when the learner has reached Proficient/Advanced on all criteria
-  // WITHOUT requiring a full evaluation to have run first.
-  const extractLatestRubricScores = (history: ChatMessage[]): number[] => {
+  // ── Parse rubric scores from the most recent AI rubric block in chat ─────────
+  // Finds patterns like "dimension name: 2 —" to detect Proficient/Advanced status
+  // without requiring a full evaluation to have run first.
+  const extractLatestRubricScores = (history: typeof chatHistory): number[] => {
     for (let i = history.length - 1; i >= 0; i--) {
       const msg = history[i];
       if (msg.role !== 'assistant') continue;
-      if (!/rubric critique|rubric \(/i.test(msg.content)) continue;
-      // Match patterns like ": 3 —" or ": 2 —" (score always between : and —)
+      if (!/rubric\s*\(/i.test(msg.content)) continue;
       const matches = [...msg.content.matchAll(/:\s*([0-3])\s*[—–-]/g)];
       if (matches.length >= 2) {
         return matches.map(m => parseInt(m[1], 10));
@@ -2022,7 +2408,7 @@ Respond ONLY with valid JSON:
   // ── Complete Session — skips modal if reflection already captured in-chat ───
   const handleCompleteSession = () => {
     if (hasReflection && reflectionText.trim()) {
-      // Learner already reflected via the in-chat Step 5 prompt — go straight to evaluation
+      // Learner already reflected via the in-chat Step 5 prompt — skip the modal
       handleCompleteSessionSubmit(reflectionText.trim());
     } else {
       setSessionReflectionInput('');
@@ -2032,8 +2418,7 @@ Respond ONLY with valid JSON:
 
   const handleCompleteSessionSubmit = async (overrideText?: string) => {
     const reflection = (overrideText ?? sessionReflectionInput).trim();
-    if (!reflection) return;
-    if (!currentDashboardId || chatHistory.length <= 1) return;
+    if (!reflection || !selectedActivity || chatHistory.length <= 1) return;
 
     setCompletingSession(true);
     setShowCompleteSessionModal(false);
@@ -2043,94 +2428,205 @@ Respond ONLY with valid JSON:
     setHasReflection(true);
 
     try {
-      // Pass reflection directly to avoid React state batching delay
-      const assessment = await callAssessmentAI(
-        chatHistory,
-        buildUNESCOAssessmentInstructions(),
-        successMetrics,
-        reflection  // overrideReflection — bypasses state timing issue
-      );
+      const isSkillsLearning = currentModuleCategory === 'Skills' && currentModuleLearningOrCert === 'learning';
 
-      // Always mark completed when the learner explicitly chooses Complete Session
-      await updateActivityEvaluation(
-        currentDashboardId,
-        assessment.evaluation_score,
-        assessment.evaluation_evidence,
-        chatHistory,
-        assessment.unesco_scores,
-        true  // forceComplete
-      );
+      if (isSkillsLearning && currentModuleSubCategory) {
+        const rubricEvaluation = await callSkillsRubricAssessmentFull(
+          chatHistory,
+          currentModuleSubCategory,
+          aiAssessmentInstructions,
+          successMetrics
+        );
 
-      const improvementAdvice = await generateImprovementAdvice(assessment.unesco_scores);
+        const improvementAdvice = await generateImprovementAdvice(
+          chatHistory,
+          rubricEvaluation,
+          currentModuleSubCategory
+        );
+        rubricEvaluation.improvementAdvice = improvementAdvice;
 
-      setEvaluationResult({
-        score: assessment.evaluation_score,
-        evidence: assessment.evaluation_evidence,
-        improvementAdvice,
-        unescoScores: assessment.unesco_scores
-      });
-      setShowEvaluationModal(true);
+        const result = await updateSkillsRubricEvaluation(
+          selectedActivity.id,
+          currentModuleSubCategory,
+          rubricEvaluation,
+          chatHistory,
+          true // force completion
+        );
+
+        setEvaluationResult(rubricEvaluation);
+        setShowEvaluationModal(true);
+
+        if (result && result.score === 100) {
+          handleCelebration();
+        }
+      } else {
+        const { error } = await supabase
+          .from('dashboard')
+          .update({
+            progress: 'completed',
+            chat_history: JSON.stringify(chatHistory),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', selectedActivity.id);
+        if (error) throw error;
+        alert('Module completed successfully!');
+        handleBackToOverview();
+      }
 
       // Silently tweak personality baseline
       if (user?.id && chatHistory.length > 1) {
-        tweakPersonalityBaseline(user.id, chatHistory, communicationStrategy, learningStrategy).catch(() => {});
+        tweakPersonalityBaseline(user.id, chatHistory, personalityBaseline).catch(() => {});
       }
     } catch (error) {
       console.error('[Complete Session] Error:', error);
       alert('Failed to complete session. Please try again.');
-      setShowCompleteSessionModal(true); // Re-open so they don't lose their text
+      setShowCompleteSessionModal(true);
     } finally {
       setCompletingSession(false);
     }
   };
 
-  // Handle save session button click
+  // Save Session - Full assessment of entire conversation
   const handleSaveSession = async () => {
-    if (!currentDashboardId || !chatHistory.length) {
-      alert('No session data to save.');
+    if (!selectedActivity || chatHistory.length <= 1) {
+      alert('No conversation history to save.');
       return;
     }
 
-    setEvaluating(true);
+    setSavingSession(true);
     
     try {
-      console.log('[Save Session] Saving chat history and running assessment...');
+      const isSkillsLearning = currentModuleCategory === 'Skills' && currentModuleLearningOrCert === 'learning';
       
-      // Save chat history
-      await updateChatHistory(currentDashboardId, chatHistory);
-      
-      // Run full evaluation (same as Update Evaluation button)
-      const assessment = await callAssessmentAI(chatHistory, buildUNESCOAssessmentInstructions(), successMetrics);
-      
-      await updateActivityEvaluation(
-        currentDashboardId,
-        assessment.evaluation_score,
-        assessment.evaluation_evidence,
-        chatHistory,
-        assessment.unesco_scores
-      );
+      if (isSkillsLearning && currentModuleSubCategory) {
+        console.log('[Save Session] Performing full rubric assessment');
+        
+        const rubricEvaluation = await callSkillsRubricAssessmentFull(
+          chatHistory,
+          currentModuleSubCategory,
+          aiAssessmentInstructions,
+          successMetrics
+        );
+        
+        await updateSkillsRubricEvaluation(
+          selectedActivity.id,
+          currentModuleSubCategory,
+          rubricEvaluation,
+          chatHistory,
+          false // Don't force completion
+        );
+        
+        alert('Session saved successfully!');
+      } else {
+        // Just save chat history for non-Skills activities
+        await updateChatHistory(selectedActivity.id, chatHistory);
+        alert('Session saved successfully!');
+      }
 
-      const improvementAdvice = await generateImprovementAdvice(assessment.unesco_scores);
-
-      setEvaluationResult({
-        score: assessment.evaluation_score,
-        evidence: assessment.evaluation_evidence,
-        improvementAdvice: improvementAdvice,
-        unescoScores: assessment.unesco_scores
-      });
-      setShowEvaluationModal(true);
+      // Silently tweak personality baseline in the background — never blocks the save
+      if (user?.id && chatHistory.length > 1) {
+        tweakPersonalityBaseline(user.id, chatHistory, personalityBaseline).catch(() => {});
+      }
       
     } catch (error) {
       console.error('Error saving session:', error);
       alert('Failed to save session. Please try again.');
     } finally {
-      setEvaluating(false);
+      setSavingSession(false);
     }
   };
 
-  // Handle evaluation button click
+  // Finish Module - Evaluate, save, and mark as completed
+  const handleFinishModule = async () => {
+    if (!selectedActivity || chatHistory.length <= 1) {
+      alert('Please have a conversation before finishing the module.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Are you sure you want to finish this module? Your session will be evaluated. ' +
+      'It will be marked as completed only if you have scored 3 (Advanced) on every rubric dimension.'
+    );
+    
+    if (!confirmed) return;
+
+    setFinishingModule(true);
+    
+    try {
+      const isSkillsLearning = currentModuleCategory === 'Skills' && currentModuleLearningOrCert === 'learning';
+      
+      if (isSkillsLearning && currentModuleSubCategory) {
+        console.log('[Finish Module] Performing final evaluation with improvement advice');
+        
+        // Step 1: Get rubric evaluation
+        const rubricEvaluation = await callSkillsRubricAssessmentFull(
+          chatHistory,
+          currentModuleSubCategory,
+          aiAssessmentInstructions,
+          successMetrics
+        );
+        
+        // Step 2: Generate improvement advice (even for completion)
+        const improvementAdvice = await generateImprovementAdvice(
+          chatHistory,
+          rubricEvaluation,
+          currentModuleSubCategory
+        );
+        
+        // Add improvement advice to evaluation result
+        rubricEvaluation.improvementAdvice = improvementAdvice;
+        
+        // Step 3: Update database and force completion
+        const result = await updateSkillsRubricEvaluation(
+          selectedActivity.id,
+          currentModuleSubCategory,
+          rubricEvaluation,
+          chatHistory,
+          true // Force completion
+        );
+        
+        // Step 4: Show evaluation results
+        setEvaluationResult(rubricEvaluation);
+        setShowEvaluationModal(true);
+        
+        // Show celebration if 100% score
+        if (result && result.score === 100) {
+          handleCelebration();
+        }
+      } else {
+        // Just mark as completed for non-Skills activities
+        const { error } = await supabase
+          .from('dashboard')
+          .update({ 
+            progress: 'completed',
+            chat_history: JSON.stringify(chatHistory),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', selectedActivity.id);
+
+        if (error) throw error;
+        
+        alert('Module completed successfully!');
+        handleBackToOverview();
+      }
+
+      // Silently tweak personality baseline — never blocks completion
+      if (user?.id && chatHistory.length > 1) {
+        tweakPersonalityBaseline(user.id, chatHistory, personalityBaseline).catch(() => {});
+      }
+      
+    } catch (error) {
+      console.error('Error finishing module:', error);
+      alert('Failed to finish module. Please try again.');
+    } finally {
+      setFinishingModule(false);
+    }
+  };
+
+
+  // Update Evaluation - Full assessment with modal display
   const handleUpdateEvaluation = async () => {
-    if (!selectedActivity || !currentDashboardId || chatHistory.length <= 1) {
+    if (!selectedActivity || chatHistory.length <= 1) {
       alert('No conversation history available for evaluation.');
       return;
     }
@@ -2138,28 +2634,52 @@ Respond ONLY with valid JSON:
     setEvaluating(true);
     
     try {
-      // Always use the standardized UNESCO instructions so scores map consistently to the 4 DB columns
-      const assessment = await callAssessmentAI(chatHistory, buildUNESCOAssessmentInstructions(), successMetrics);
+      const isSkillsLearning = currentModuleCategory === 'Skills' && currentModuleLearningOrCert === 'learning';
       
-      // Update activity with both overall score and UNESCO competency scores
-      await updateActivityEvaluation(
-        currentDashboardId, 
-        assessment.evaluation_score, 
-        assessment.evaluation_evidence,
-        chatHistory,
-        assessment.unesco_scores
-      );
-      
-      // Generate personalized improvement advice
-      const improvementAdvice = await generateImprovementAdvice(assessment.unesco_scores);
-      
-      setEvaluationResult({
-        score: assessment.evaluation_score,
-        evidence: assessment.evaluation_evidence,
-        improvementAdvice: improvementAdvice,
-        unescoScores: assessment.unesco_scores
-      });
-      setShowEvaluationModal(true);
+      if (isSkillsLearning && currentModuleSubCategory) {
+        console.log('[Update Evaluation] Full rubric assessment with improvement advice');
+        
+        // Step 1: Get rubric evaluation
+        const rubricEvaluation = await callSkillsRubricAssessmentFull(
+          chatHistory,
+          currentModuleSubCategory,
+          aiAssessmentInstructions,
+          successMetrics
+        );
+        
+        // Step 2: Generate improvement advice
+        const improvementAdvice = await generateImprovementAdvice(
+          chatHistory,
+          rubricEvaluation,
+          currentModuleSubCategory
+        );
+        
+        // Add improvement advice to evaluation result
+        rubricEvaluation.improvementAdvice = improvementAdvice;
+        
+        // Step 3: Update database
+        const result = await updateSkillsRubricEvaluation(
+          selectedActivity.id,
+          currentModuleSubCategory,
+          rubricEvaluation,
+          chatHistory,
+          false // Don't force completion - only completes at 100%
+        );
+        
+        // Step 4: Show modal with evaluation and advice
+        setEvaluationResult(rubricEvaluation);
+        setShowEvaluationModal(true);
+        
+        // Show celebration only if exactly 100%
+        if (result && result.score === 100) {
+          handleCelebration();
+        }
+      }
+
+      // Silently tweak personality baseline — never blocks evaluation display
+      if (user?.id && chatHistory.length > 1) {
+        tweakPersonalityBaseline(user.id, chatHistory, personalityBaseline).catch(() => {});
+      }
       
     } catch (error) {
       console.error('Error during evaluation:', error);
@@ -2182,7 +2702,7 @@ Respond ONLY with valid JSON:
 
       if (error) throw error;
       
-      setAllAIActivities(prev => 
+      setAllSkillsActivities(prev => 
         prev.map(activity => 
           activity.id === activityId 
             ? { ...activity, progress: 'started' as const }
@@ -2194,7 +2714,6 @@ Respond ONLY with valid JSON:
     }
   };
 
-  // Handle activity selection
   const handleActivitySelect = async (activity: DashboardActivity) => {
     if (!isActivitySelectable(activity)) return;
 
@@ -2206,75 +2725,80 @@ Respond ONLY with valid JSON:
       setUserContinent(profile.continent);
     }
     
-    // Create or get dashboard entry for this activity
-    if (user?.id && activity.learning_module_id) {
+    if (activity.progress === 'not started') {
+      await updateActivityStatus(activity.id);
+    }
+
+    let initialChatHistory: ChatMessage[] = [];
+    if (activity.progress === 'started' && activity.chat_history) {
       try {
-        const dashboardId = await getOrCreateDashboardEntry(
-          activity, 
-          user.id, 
-          userGradeLevel, 
-          userContinent
-        );
-        setCurrentDashboardId(dashboardId);
-        console.log('[Activity Select] Dashboard ID:', dashboardId);
-        
-        // Update progress if new
-        if (activity.progress === 'not started') {
-          await updateActivityStatus(dashboardId);
+        const storedHistory = JSON.parse(activity.chat_history);
+        if (Array.isArray(storedHistory) && storedHistory.length > 0) {
+          initialChatHistory = storedHistory.map((msg: any) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }));
         }
-
-        // Load chat history from dashboard entry
-        const { data: dashboardEntry, error: fetchError } = await supabase
-          .from('dashboard')
-          .select('chat_history, progress')
-          .eq('id', dashboardId)
-          .single();
-
-        if (fetchError) {
-          console.error('[Dashboard] Error fetching entry:', fetchError);
-        }
-
-        let initialChatHistory: ChatMessage[] = [];
-        if (dashboardEntry?.chat_history) {
-          try {
-            const storedHistory = JSON.parse(dashboardEntry.chat_history);
-            if (Array.isArray(storedHistory) && storedHistory.length > 0) {
-              initialChatHistory = storedHistory.map((msg: any) => ({
-                ...msg,
-                timestamp: new Date(msg.timestamp)
-              }));
-            }
-          } catch (error) {
-            console.error('Error parsing stored chat history:', error);
-          }
-        }
-
-        // Fetch activity details
-        const details = await fetchActivityDetails(activity, user.id);
-        setActivityDescription(details.description);
-        setModuleTitle(details.title);
-        setAiFacilitatorInstructions(details.aiInstructions);
-        setAiAssessmentInstructions(details.assessmentInstructions);
-        setSuccessMetrics(details.successMetrics);
-        
-        if (initialChatHistory.length > 0) {
-          setChatHistory(initialChatHistory);
-        } else {
-          setChatHistory([
-            {
-              role: 'assistant',
-              content: `Hello, I'm your AI assistant. Are you ready to dive into ${details.title}?`,
-              timestamp: new Date()
-            }
-          ]);
-        }
-        
-        // Scroll to top when activity loads
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-
       } catch (error) {
-        console.error('[Activity Select] Error:', error);
-        alert('Error loading activity. Please try again.');
+        console.error('Error parsing stored chat history:', error);
+      }
+    }
+
+    if (activity.learning_module_id) {
+      const details = await fetchActivityDetails(activity.learning_module_id);
+      setActivityDescription(details.description);
+      setModuleTitle(details.title);
+      setAiFacilitatorInstructions(details.aiInstructions);
+      setAiAssessmentInstructions(details.assessmentInstructions);
+      setSuccessMetrics(details.successMetrics);
+      setLearningOutcomes(details.outcomes);
+      setCurrentModuleCategory(details.category);
+      setCurrentModuleSubCategory(details.subCategory);
+      setCurrentModuleLearningOrCert(details.learningOrCertification);
+      
+      // Load current evaluation state
+      if (details.category === 'Skills' && details.learningOrCertification === 'learning' && details.subCategory) {
+        const evalState = await loadCurrentEvaluationState(activity, details.subCategory);
+        setCurrentEvaluationState(evalState);
+      } else {
+        setCurrentEvaluationState(null);
+      }
+      
+      if (initialChatHistory.length > 0) {
+        setChatHistory(initialChatHistory);
+      } else {
+        setChatHistory([
+          {
+            role: 'assistant',
+            content: `Hello! I'm your AI learning assistant. I'm here to guide you through "${details.title}". Are you ready to get going?`,
+            timestamp: new Date()
+          }
+        ]);
+      }
+    } else {
+      const gradeInstructions = getGradeAppropriateInstructions(userGradeLevel, communicationLevel);
+      
+      setActivityDescription('No description available.');
+      setModuleTitle(activity.title);
+      setAiFacilitatorInstructions(`${gradeInstructions}\n\nYou are a helpful skills learning assistant. Guide the student through this learning activity with patience and encouragement.`);
+      setAiAssessmentInstructions('Based on the conversation history, evaluate the student\'s performance.');
+      setSuccessMetrics('Evaluate based on engagement and progress.');
+      setLearningOutcomes('Develop skills and understanding.');
+      setCurrentModuleCategory('');
+      setCurrentModuleSubCategory('');
+      setCurrentModuleLearningOrCert('');
+      setCurrentEvaluationState(null);
+      
+      if (initialChatHistory.length > 0) {
+        setChatHistory(initialChatHistory);
+      } else {
+        setChatHistory([
+          {
+            role: 'assistant',
+            content: `Hello! I'm your AI learning assistant. I'm here to guide you through "${activity.title}". What would you like to explore first?`,
+            timestamp: new Date()
+          }
+        ]);
       }
     }
   };
@@ -2282,12 +2806,17 @@ Respond ONLY with valid JSON:
   // Handle back to overview
   const handleBackToOverview = () => {
     setSelectedActivity(null);
-    setCurrentDashboardId(null);
     setActivityDescription('');
+    setModuleDescription('');
     setModuleTitle('');
     setAiFacilitatorInstructions('');
     setAiAssessmentInstructions('');
     setSuccessMetrics('');
+    setLearningOutcomes('');
+    setCurrentModuleCategory('');
+    setCurrentModuleSubCategory('');
+    setCurrentModuleLearningOrCert('');
+    setCurrentEvaluationState(null);
     setChatHistory([]);
     setUserInput('');
     // Reset reflection gate
@@ -2298,100 +2827,9 @@ Respond ONLY with valid JSON:
     setReflectionValidating(false);
   };
 
-  // Assess user response against UNESCO standards
-  const assessUNESCOCompetencies = async (activityId: string, chatHistory: ChatMessage[]) => {
-    if (!user?.id || chatHistory.length < 2) return; // Need at least user message and AI response
-
-    try {
-      console.log('[UNESCO Assessment] Evaluating competencies across full conversation...');
-      
-      // Use FULL conversation history for accurate assessment (not just last few messages)
-      const conversationContext = chatHistory.slice(1).map(msg => 
-        `${msg.role === 'user' ? 'Learner' : 'AI'}: ${msg.content}`
-      ).join('\n\n');
-
-      // Use the standardized UNESCO assessment instructions (not module-specific ones)
-      // so scores are always consistent and map correctly to the 4 DB columns
-      const standardInstructions = buildUNESCOAssessmentInstructions();
-
-      const assessmentResult = await chatJSON({
-        messages: [
-          {
-            role: 'user',
-            content: `Evaluate this learner's COMPLETE performance across the ENTIRE conversation against UNESCO AI Competency standards:\n\n${conversationContext}`
-          }
-        ],
-        system: standardInstructions,
-        max_tokens: 1200,
-        temperature: 0.2
-      });
-
-      console.log('[UNESCO Assessment] Result:', assessmentResult);
-
-      // Validate all 4 competency scores are present
-      // AI returns 1-4 scale; DB constraint requires 0-3, so map by subtracting 1
-      const mapScore = (s: any): number | null => {
-        if (typeof s !== 'number') return null;
-        return Math.min(3, Math.max(0, s - 1)); // 1→0, 2→1, 3→2, 4→3
-      };
-
-      const s1 = mapScore(assessmentResult.competency_1_score);
-      const s2 = mapScore(assessmentResult.competency_2_score);
-      const s3 = mapScore(assessmentResult.competency_3_score);
-      const s4 = mapScore(assessmentResult.competency_4_score);
-
-      const validScores = [s1, s2, s3, s4].filter((s): s is number => s !== null);
-      const averageScore = validScores.length > 0
-        ? validScores.reduce((sum, s) => sum + s, 0) / validScores.length
-        : 1;
-
-      const overallScore = averageScore;
-
-      // Build overall evidence summary with correct competency labels
-      // (must match column ordering: UNESCO_1=Understanding, UNESCO_2=Human-Centred, UNESCO_3=Application, UNESCO_4=Critical)
-      const overallEvidence = `UNESCO Competency Assessment (0-3 scale):
-• Understanding of AI: ${s1}/3 - ${assessmentResult.competency_1_evidence}
-• Human-Centred Mindset: ${s2}/3 - ${assessmentResult.competency_2_evidence}
-• Application of AI Tools: ${s3}/3 - ${assessmentResult.competency_3_evidence}
-• Critical Evaluation: ${s4}/3 - ${assessmentResult.competency_4_evidence}`;
-
-      // Store all 4 UNESCO competency scores + overall evaluation in dashboard
-      const { error: updateError } = await supabase
-        .from('dashboard')
-        .update({
-          certification_evaluation_UNESCO_1_score: s1,
-          certification_evaluation_UNESCO_1_evidence: assessmentResult.competency_1_evidence,
-          certification_evaluation_UNESCO_2_score: s2,
-          certification_evaluation_UNESCO_2_evidence: assessmentResult.competency_2_evidence,
-          certification_evaluation_UNESCO_3_score: s3,
-          certification_evaluation_UNESCO_3_evidence: assessmentResult.competency_3_evidence,
-          certification_evaluation_UNESCO_4_score: s4,
-          certification_evaluation_UNESCO_4_evidence: assessmentResult.competency_4_evidence,
-          certification_evaluation_score: overallScore,
-          certification_evaluation_evidence: overallEvidence,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', activityId);
-
-      if (updateError) {
-        console.error('[UNESCO Assessment] Error storing scores:', updateError);
-      } else {
-        console.log('[UNESCO Assessment] Scores stored successfully — Overall:', overallScore,
-          '| Understanding of AI:', assessmentResult.competency_1_score,
-          '| Human-Centred:', assessmentResult.competency_2_score,
-          '| Application:', assessmentResult.competency_3_score,
-          '| Critical Eval:', assessmentResult.competency_4_score
-        );
-      }
-
-    } catch (error) {
-      console.error('[UNESCO Assessment] Error:', error);
-    }
-  };
-
-  // Handle user message submission
+  // Handle user message submission with automatic evaluation
   const handleSubmitMessage = async () => {
-    if (!userInput.trim() || submitting || !selectedActivity || !currentDashboardId) return;
+    if (!userInput.trim() || submitting || !selectedActivity) return;
 
     if (isListening && speechRecognition) {
       setWasListeningBeforeSubmit(true);
@@ -2410,13 +2848,14 @@ Respond ONLY with valid JSON:
     const updatedChatHistory = [...chatHistory, userMessage];
     setChatHistory(updatedChatHistory);
     
-    await updateChatHistory(currentDashboardId, updatedChatHistory);
+    await updateChatHistory(selectedActivity.id, updatedChatHistory);
     
     const currentInput = userInput;
     setUserInput('');
     setSubmitting(true);
 
     try {
+      // Get AI response with contextual facilitation
       const aiResponse = await callOpenAI(currentInput, chatHistory, aiFacilitatorInstructions);
       
       const aiMessage: ChatMessage = {
@@ -2450,14 +2889,11 @@ Respond ONLY with valid JSON:
             };
             const withNudge = [...updatedChatHistory, aiMessage, nudgeMessage];
             setChatHistory(withNudge);
-            await updateChatHistory(currentDashboardId, withNudge);
-            await assessUNESCOCompetencies(currentDashboardId, withNudge);
-            return; // Skip normal flow — nudge already injected
+            await updateChatHistory(selectedActivity.id, withNudge);
+            return;
           }
         }
       }
-
-      // Text-to-Speech playback of AI response
       if (voiceOutputEnabled) {
         hookSpeak(aiResponse);
         // Voice input restart after TTS is handled by the isSpeaking useEffect above
@@ -2477,23 +2913,57 @@ Respond ONLY with valid JSON:
       const finalChatHistory = [...updatedChatHistory, aiMessage];
       setChatHistory(finalChatHistory);
       
-      await updateChatHistory(currentDashboardId, finalChatHistory);
+      // Save chat history
+      await updateChatHistory(selectedActivity.id, finalChatHistory);
+
+      // Immediately unblock UI so user can continue interacting
+      setSubmitting(false);
+
+      // AUTOMATIC EVALUATION after each user response for Skills learning activities
+      // Run this asynchronously in the background without blocking the UI
+      const isSkillsLearning = currentModuleCategory === 'Skills' && currentModuleLearningOrCert === 'learning';
       
-      // Automatically assess UNESCO competencies after each exchange
-      await assessUNESCOCompetencies(currentDashboardId, finalChatHistory);
+      if (isSkillsLearning && currentModuleSubCategory && finalChatHistory.length > 2) {
+        console.log('[Auto Evaluation] Starting background evaluation...');
+        
+        // Run evaluation in background (don't await)
+        (async () => {
+          try {
+            const rubricEvaluation = await callSkillsRubricAssessmentIncremental(
+              finalChatHistory,
+              currentModuleSubCategory,
+              aiAssessmentInstructions,
+              successMetrics
+            );
+            
+            await updateSkillsRubricEvaluation(
+              selectedActivity.id,
+              currentModuleSubCategory,
+              rubricEvaluation,
+              finalChatHistory
+            );
+            
+            console.log('[Auto Evaluation] Completed successfully');
+          } catch (evalError) {
+            console.error('[Auto Evaluation] Error (non-blocking):', evalError);
+            // Don't block user experience if evaluation fails
+          }
+        })();
+      }
+      
     } catch (error) {
       console.error('Error getting AI response:', error);
       
       const errorMessage: ChatMessage = {
         role: 'assistant',
-        content: 'I apologize, but I encountered a technical issue. Please try again or contact support if the problem persists.',
+        content: 'I apologize, but I encountered a technical issue. Please try again.',
         timestamp: new Date()
       };
       
       const errorChatHistory = [...updatedChatHistory, errorMessage];
       setChatHistory(errorChatHistory);
       
-      await updateChatHistory(currentDashboardId, errorChatHistory);
+      await updateChatHistory(selectedActivity.id, errorChatHistory);
 
       if (wasListeningBeforeSubmit && voiceInputEnabled && speechRecognition) {
         setTimeout(() => {
@@ -2510,52 +2980,320 @@ Respond ONLY with valid JSON:
     }
   };
 
-  // Handle Enter key in input
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  
+
+  // Handle Enter key
+  // Handle key press in text area
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmitMessage();
     }
   };
 
-  // Get activities for the currently selected sub-category
+  // Execute code via E2B
+  const executeCode = async () => {
+    if (!codeEditorContent.trim() || isExecutingCode || !selectedActivity) return;
+    
+    setIsExecutingCode(true);
+    
+    try {
+      const execution = await CodeExecutionService.executeCode(
+        codeEditorContent,
+        selectedLanguage
+      );
+      
+      setLatestExecution(execution);
+      setCodeHistory(prev => [execution, ...prev]);
+      
+      // Add execution context to chat history
+      const executionMessage: ChatMessage = {
+        role: 'user',
+        content: `I executed this ${selectedLanguage} code:\n\`\`\`${selectedLanguage}\n${codeEditorContent}\n\`\`\`\n\nResult: ${execution.error ? `Error: ${execution.error}` : `Output: ${execution.output}`}`,
+        timestamp: new Date(),
+        codeExecution: execution
+      };
+      
+      const updatedHistory = [...chatHistory, executionMessage];
+      setChatHistory(updatedHistory);
+      
+      if (selectedActivity) {
+        await updateChatHistory(selectedActivity.id, updatedHistory);
+      }
+      
+    } catch (error) {
+      console.error('Code execution error:', error);
+    } finally {
+      setIsExecutingCode(false);
+    }
+  };
+
+  // Clear code editor
+  const clearCodeEditor = () => {
+    setCodeEditorContent('');
+    setLatestExecution(null);
+  };
+
+  // Copy code to clipboard
+  const copyCode = () => {
+    navigator.clipboard.writeText(codeEditorContent);
+  };
+
+  // ========== VIBE CODING WORKFLOW CALLBACKS ==========
+
+// Get AI critique of instructions (before code exists)
+const handleGetInstructionCritique = async (instructions: string) => {
+  try {
+    console.log('[Vibe Coding] Getting instruction critique...');
+    
+    const critiquePrompt = `You are evaluating a student's Vibe Coding instructions BEFORE generating code.
+
+STUDENT'S INSTRUCTIONS:
+${instructions}
+
+TASK: Evaluate these instructions using ONLY these two rubric dimensions:
+
+1. **Problem Decomposition** (0-3):
+   - 0: No breakdown of steps, inputs, or outputs
+   - 1: Names components but lacks sequencing or rationale
+   - 2: Explicitly decomposes into ordered steps with inputs/outputs
+   - 3: Decomposes, prioritizes, identifies edge cases
+
+2. **Prompt Engineering** (0-3):
+   - 0: Vague, copied, or irrelevant
+   - 1: Specifies goal but omits constraints, context, or success criteria
+   - 2: Clearly specifies task, constraints, inputs, expected format
+   - 3: Anticipates failure modes, requests alternatives
+
+Respond with ONLY valid JSON:
+{
+  "problemDecomposition": {
+    "score": <0-3>,
+    "evidence": "<specific quote or observation>",
+    "improvement": "<one specific suggestion>"
+  },
+  "promptEngineering": {
+    "score": <0-3>,
+    "evidence": "<specific quote or observation>",
+    "improvement": "<one specific suggestion>"
+  },
+  "recommendation": "<Should they improve (if scores <2) or proceed (if scores >=2)? One sentence.>"
+}`;
+
+    const messages: ClientChatMessage[] = [
+      { role: 'user', content: critiquePrompt }
+    ];
+
+    const critiqueResult = await chatJSON({
+      messages,
+      system: 'You are an expert at evaluating coding instructions. Respond only with valid JSON.',
+      max_tokens: 800,
+      temperature: 0.3
+    });
+
+    let parsed: any;
+    if (typeof critiqueResult === 'string') {
+      parsed = JSON.parse(critiqueResult);
+    } else {
+      parsed = critiqueResult;
+    }
+
+    console.log('[Vibe Coding] Critique received:', parsed);
+    return parsed;
+
+  } catch (error) {
+    console.error('[Vibe Coding] Critique error:', error);
+    throw error;
+  }
+};
+
+// Generate code from instructions
+const handleGenerateCodeFromInstructions = async (instructions: string, language: 'python' | 'javascript' | 'html') => {
+  try {
+    console.log(`[Vibe Coding] Generating ${language} code from instructions...`);
+
+    const isHTML = language === 'html';
+    const codeGenPrompt = isHTML
+      ? `Generate a complete, self-contained HTML file based on these instructions:\n\n${instructions}\n\nREQUIREMENTS:\n- Single HTML file with embedded CSS and JavaScript\n- Mobile-friendly, works in any browser\n- No external dependencies except CDN libraries if needed\n- Clean, well-commented code\n\nRespond with ONLY the complete HTML file, no explanations or markdown formatting.`
+      : `Generate ${language} code based on these instructions:\n\n${instructions}\n\nREQUIREMENTS:\n- Write clean, well-commented code\n- Include error handling where appropriate\n- Make it executable and testable\n- Keep it simple and readable\n\nRespond with ONLY the code, no explanations or markdown formatting.`;
+
+    const messages: ClientChatMessage[] = [{ role: 'user', content: codeGenPrompt }];
+
+    const code = await chatText({
+      messages,
+      system: isHTML
+        ? 'You are a web developer. Generate ONLY a complete HTML file with no markdown backticks or explanations.'
+        : `You are a code generator. Generate ONLY executable ${language} code with no markdown backticks or explanations.`,
+      max_tokens: 2500,
+      temperature: 0.5
+    });
+
+    let cleanedCode = code.trim();
+    cleanedCode = cleanedCode.replace(/^```(?:html|python|javascript|js)?\n/i, '');
+    cleanedCode = cleanedCode.replace(/\n```$/i, '');
+
+    console.log('[Vibe Coding] Code generated');
+    return cleanedCode;
+
+  } catch (error) {
+    console.error('[Vibe Coding] Code generation error:', error);
+    throw error;
+  }
+};
+
+// Generate a vibe coding prompt from the design conversation in the chat panel
+const handleCreateVibePromptFromChat = async () => {
+  if (chatHistory.length < 2) return;
+  setGeneratingVibePromptFromChat(true);
+  try {
+    const conversation = chatHistory
+      .map(m => `${m.role === 'assistant' ? 'Coach' : 'Student'}: ${m.content}`)
+      .join('\n\n');
+
+    const prompt = await chatText({
+      messages: [{
+        role: 'user',
+        content: `A student has been working with an AI coding coach to design a coding project. Based on the conversation below, write a clear, complete VIBE CODING PROMPT that captures exactly what they want to build.
+
+The prompt should:
+- Start with "Build me a..." or "Create a..."
+- Specify the technology (HTML/CSS/JS, Python, etc.)
+- Describe all features and behaviours discussed
+- Include design preferences (colours, layout, style) mentioned
+- Be specific enough that any AI coding tool can start building immediately
+
+CONVERSATION:
+${conversation}
+
+Write ONLY the vibe coding prompt — no explanation, no preamble. Make it specific and complete.`
+      }],
+      system: 'You write precise, complete vibe coding prompts. Output only the prompt itself.',
+      max_tokens: 600,
+      temperature: 0.4,
+    });
+
+    setVibeCodingInjectedPrompt(prompt.trim());
+  } catch (err) {
+    console.error('[Vibe Coding] Failed to generate prompt from chat:', err);
+  } finally {
+    setGeneratingVibePromptFromChat(false);
+  }
+};
+
+// Get debugging help
+const handleGetDebuggingHelp = async (code: string, error: string, instructions: string) => {
+  try {
+    console.log('[Vibe Coding] Getting debugging help...');
+    
+    const debugPrompt = `A student's code produced an error. Help them understand and fix it.
+
+ORIGINAL INSTRUCTIONS:
+${instructions}
+
+GENERATED CODE:
+\`\`\`
+${code}
+\`\`\`
+
+ERROR:
+${error}
+
+TASK: Provide debugging help that teaches, not just fixes:
+1. Explain what the error means in simple terms
+2. Identify which part of the instructions might have caused this
+3. Suggest how to improve the instructions to prevent this error
+4. Give ONE specific fix they can try
+
+Keep it concise and educational.`;
+
+    const messages: ClientChatMessage[] = [
+      { role: 'user', content: debugPrompt }
+    ];
+
+    const advice = await chatText({
+      messages,
+      system: 'You are a patient coding tutor. Help students learn from errors, don\'t just fix things for them.',
+      max_tokens: 600,
+      temperature: 0.7
+    });
+
+    console.log('[Vibe Coding] Debugging advice provided');
+    return advice;
+
+  } catch (error) {
+    console.error('[Vibe Coding] Debugging help error:', error);
+    throw error;
+  }
+};
+
+// Execute code via E2B (reuse your existing function)
+const handleExecuteCode = async (code: string, language: 'python' | 'javascript') => {
+  try {
+    const execution = await CodeExecutionService.executeCode(code, language);
+    
+    // Store the latest execution result for display in output area
+    setLatestExecution(execution);
+    
+    return {
+      output: execution.output,
+      error: execution.error,
+      executionTime: execution.executionTime
+    };
+  } catch (error) {
+    console.error('[Vibe Coding] Execution error:', error);
+    throw error;
+  }
+};
+
+  // Get activities for category
   const getActivitiesForCategory = (categoryId: string): DashboardActivity[] => {
-    const category = aiLearningCategories.find(cat => cat.id === categoryId);
+    const category = skillCategories.find(cat => cat.id === categoryId);
     if (!category) return [];
     
-    return allAIActivities.filter(activity => 
-      activity.sub_category === category.subCategory
-    );
+    return allSkillsActivities.filter(activity => {
+      // Use the joined learning_modules data for sub_category
+      const subCategory = activity.learning_modules?.sub_category || activity.sub_category;
+      return subCategory === category.subCategory;
+    });
   };
 
-  // Get statistics for a specific category
+  // Get category statistics
   const getCategoryStats = (categoryId: string) => {
     const activities = getActivitiesForCategory(categoryId);
-    const total = activities.length;
-    const completed = activities.filter(a => a.progress === 'completed').length;
-    const started = activities.filter(a => a.progress === 'started').length;
-    const notStarted = activities.filter(a => a.progress === 'not started').length;
-    
-    return { total, completed, started, notStarted };
+    return {
+      total: activities.length,
+      completed: activities.filter(a => a.progress === 'completed').length,
+      started: activities.filter(a => a.progress === 'started').length,
+      notStarted: activities.filter(a => a.progress === 'not started').length
+    };
   };
 
-  // Refresh dashboard data
-  const refreshDashboard = async () => {
-    if (!user?.id) return;
+  // Check if activity is selectable
+  const isActivitySelectable = (activity: DashboardActivity): boolean => {
+    return activity.progress !== 'completed';
+  };
 
-    try {
-      setRefreshing(true);
-      
-      const { error: refreshError } = await supabase.rpc('refresh_user_dashboard', {
-        user_id_param: user.id
-      });
+  // Get progress icon
+  const getProgressIcon = (progress: string) => {
+    switch (progress) {
+      case 'completed':
+        return <CheckCircle className="h-6 w-6 text-green-500" />;
+      case 'started':
+        return <Clock className="h-6 w-6 text-yellow-500" />;
+      default:
+        return <Circle className="h-6 w-6 text-gray-400" />;
+    }
+  };
 
-      if (refreshError) throw refreshError;
-      await fetchAllAIActivities();
-    } catch (error) {
-      console.error('Error refreshing dashboard:', error);
-    } finally {
-      setRefreshing(false);
+  // Get progress color
+  const getProgressColor = (progress: string) => {
+    switch (progress) {
+      case 'completed':
+        return 'bg-green-50 border-green-300 text-green-700';
+      case 'started':
+        return 'bg-yellow-50 border-yellow-300 text-yellow-700';
+      default:
+        return 'bg-gray-50 border-gray-300 text-gray-700';
     }
   };
 
@@ -2564,186 +3302,290 @@ Respond ONLY with valid JSON:
     setActiveCategory(categoryId);
   };
 
-  // Generate metrics_for_success via AI
-  const generateMetricsForSuccess = async (categoryId: string, context: string): Promise<string> => {
-    const rubrics: Record<string, string> = {
-      A: '1. AI Mechanism Understanding: explains data→model→patterns→output in their context\n2. Contextual Performance: identifies where AI works well vs poorly for their task — including economic impact of failures\n3. Limitations & Failure Modes: names ≥1 limitation with cause and consequence, including at least one business or financial consequence\n4. Terminology Accuracy: uses ≥3 AI terms correctly and integrated',
-      B: '1. Goal & Constraints: states a clear goal + ≥1 constraint — goal must reference a productive or economic outcome\n2. Iteration Strategy: explains why prompts changed and what was learned — at least one iteration must target a commercially useful improvement\n3. Output Sensitivity: describes how prompt changes altered outputs and their economic usefulness',
-      C: '1. Risk & Bias Reasoning: identifies who is harmed or advantaged with tradeoffs — must include at least one business, livelihood, or community economic risk\n2. Privacy Judgment: names sensitive data + ≥1 protection strategy\n3. Ethical Action: proposes concrete mitigation steps with reasoning, including any impact on trust or commercial viability',
-      D: '1. Verification Process: names ≥2 verification sources or methods — at least one must address whether AI output could lead to a bad business or financial decision\n2. Error & Bias Detection: identifies ≥1 flaw/assumption + suggests a correction grounded in real-world consequences\n3. Reflective Judgment: states when AI output should/should not be trusted and why — must address at least one high-stakes productive use scenario',
-      E: '1. Problem Decomposition: breaks problem into ≥2 components with causal connections — must include at least one economic or cost component\n2. AI Suitability: justifies AI vs ≥1 alternative, including a cost-benefit comparison\n3. Outcome Measurement: defines success with ≥1 measurable economic indicator (revenue, cost saving, yield increase, time saved with monetary value, etc.)',
-    };
-    const result = await chatText({
-      messages: [{ role: 'user', content: `A learner is doing an AI Proficiency session with an entrepreneurial focus:\n${context}\n\nRubric criteria:\n${rubrics[categoryId] || rubrics['A']}\n\nWrite a concise paragraph (3–5 sentences) describing specific evidence the learner must produce to score Competent (2) or higher on each criterion, grounded in their scenario. Emphasise that answers must connect AI thinking to real economic value, cost-benefit reasoning, or productive outcomes — not just technical accuracy.` }],
-      system: 'You are an educational assessment designer who specialises in connecting AI skills to entrepreneurial and productive-use contexts. Be specific, concise, and use the learner\'s context.',
-      max_tokens: 400,
-      temperature: 0.3
-    });
-    return result.trim();
-  };
-
-  // Create a new user-defined learning module + launch it
-  const handleCreateCustomActivity = async () => {
+  // Create a user-defined Skills learning module + dashboard entry, then launch it
+  const handleCreateCustomSkillsActivity = async () => {
     if (!user?.id) return;
-    if (!createForm.title.trim()) { alert('Please enter a title.'); return; }
+    if (!createForm.title.trim())       { alert('Please enter a title.'); return; }
     if (!createForm.description.trim()) { alert('Please describe the problem or topic.'); return; }
+
     setIsCreatingModule(true);
     try {
+      // Build context string — entrepreneurial angle surfaces first so the coach sees it immediately
       const contextParts = [`Problem/Topic: ${createForm.description.trim()}`];
       if (createForm.entrepreneurialContext.trim()) contextParts.push(`Entrepreneurial/Business Angle: ${createForm.entrepreneurialContext.trim()}`);
       if (createForm.location.trim())     contextParts.push(`Location: ${createForm.location.trim()}`);
       if (createForm.constraints.trim())  contextParts.push(`Constraints: ${createForm.constraints.trim()}`);
       if (createForm.stakeholders.trim()) contextParts.push(`Stakeholders: ${createForm.stakeholders.trim()}`);
-      contextParts.push(`Chosen Category: ${createForm.category}`);
       const context = contextParts.join('\n');
-      const sessionCat = SESSION_CATEGORIES.find(c => c.id === createForm.category);
-      const subCategory = sessionCat?.subCategory || 'Understanding AI: Core Concepts & Capabilities';
-      let gradeLevel = userGradeLevel;
-      let continent = userContinent;
-      if (gradeLevel === null || continent === null) {
-        const profile = await fetchUserProfile(user.id);
-        gradeLevel = profile.gradeLevel; continent = profile.continent;
-        setUserGradeLevel(gradeLevel); setUserContinent(continent);
-      }
-      const metricsForSuccess = await generateMetricsForSuccess(createForm.category, context);
+
+      const sessionCat = SKILLS_SESSION_CATEGORIES.find(c => c.id === createForm.category);
+      const subCategory = sessionCat?.subCategory || 'Vibe Coding';
+
+      // Build facilitator instructions using the rubric for this skill (PUE lens embedded)
+      const facilitatorInstructions = buildSkillsFacilitatorPrompt(subCategory, context, personalityBaseline, communicationLevel);
+
       const newModuleId = crypto.randomUUID();
-      const { error: insertError } = await supabase.from('learning_modules').insert({
+      const newDashboardId = crypto.randomUUID();
+      const now = new Date().toISOString();
+
+      // 1. Insert learning_module
+      const { error: moduleError } = await supabase.from('learning_modules').insert({
         learning_module_id: newModuleId,
         title: createForm.title.trim(),
         description: context,
-        category: 'AI Proficiency',
+        category: 'Skills',
         sub_category: subCategory,
-        ai_facilitator_instructions: AI_SESSION_BUILDER_PROMPT,
-        ai_assessment_instructions: buildUNESCOAssessmentInstructions(),
-        metrics_for_success: metricsForSuccess,
-        outcomes: '',
+        ai_facilitator_instructions: facilitatorInstructions,
+        ai_assessment_instructions: `Evaluate the learner's demonstration of ${subCategory} skills based on the rubric dimensions. Score each dimension 0–3 and provide evidence from the conversation. Where the learner connected their skill work to real economic value, costs, benefits, or long-term thinking, note this as evidence of advanced productive application.`,
+        metrics_for_success: `Learner demonstrates Proficient (2/3) or Advanced (3/3) on all ${subCategory} rubric dimensions through their responses — and grounds at least one dimension in a real economic, business, or productive-use outcome.`,
+        outcomes: `Develop ${subCategory} skills applied to: ${createForm.title.trim()}`,
         public: 0,
         grade_level: 4,
         youtube_link: null,
         youtube_description: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        continent: continent || null,
+        created_at: now,
+        updated_at: now,
+        continent: userContinent || null,
         user_id: user.id,
         application: 1,
         learning_or_certification: 'learning',
       });
-      if (insertError) throw insertError;
-      const newActivity: DashboardActivity = {
-        id: newModuleId, title: createForm.title.trim(), activity: createForm.title.trim(),
-        category_activity: 'AI Learning', sub_category: subCategory,
-        progress: 'started', learning_module_id: newModuleId,
-        updated_at: new Date().toISOString(), isPublic: false,
-      };
+      if (moduleError) throw moduleError;
+
+      // 2. Insert dashboard entry
+      const { error: dashError } = await supabase.from('dashboard').insert({
+        id: newDashboardId,
+        user_id: user.id,
+        learning_module_id: newModuleId,
+        activity: createForm.title.trim(),
+        title: createForm.title.trim(),
+        category_activity: 'Skills Development',
+        sub_category: subCategory,
+        progress: 'started',
+        continent: userContinent || null,
+        created_at: now,
+        updated_at: now,
+      });
+      if (dashError) throw dashError;
+
+      // 3. Reset form and reload
       setShowCreateActivity(false);
-      setCreateForm({ title: '', description: '', location: '', constraints: '', stakeholders: '', entrepreneurialContext: '', category: 'A' });
-      await fetchAllAIActivities();
+      setCreateForm({ title: '', description: '', location: '', constraints: '', stakeholders: '', entrepreneurialContext: '', category: 'vibe-coding' });
+      await loadDashboardActivities(userCity);
+
+      // 4. Launch the new activity directly
+      const newActivity: DashboardActivity = {
+        id: newDashboardId,
+        title: createForm.title.trim(),
+        activity: createForm.title.trim(),
+        category_activity: 'Skills Development',
+        sub_category: subCategory,
+        progress: 'started',
+        learning_module_id: newModuleId,
+        updated_at: now,
+        isPublic: false,
+        learning_modules: { category: 'Skills', sub_category: subCategory, learning_or_certification: 'learning', public: 0 },
+      };
       await handleActivitySelect(newActivity);
     } catch (err) {
-      console.error('[Create Activity] Error:', err);
+      console.error('[Create Skills Activity] Error:', err);
       alert('Failed to create your activity. Please try again.');
     } finally {
       setIsCreatingModule(false);
     }
   };
 
-  // Initial load
-  useEffect(() => {
-    if (user?.id) {
-      setLoading(true);
-      
-      Promise.all([
-        fetchAllAIActivities(),
-        fetchUserProfile(user.id)
-      ]).then(([_, profile]) => {
-        setUserGradeLevel(profile.gradeLevel);
-        setUserContinent(profile.continent);
-        // Default Nigerian voice for Africa users; British for everyone else
-        if (profile.continent === 'Africa') setVoiceMode('pidgin');
-        else setVoiceMode('english');
-        if (profile.communicationStrategy) setCommunicationStrategy(profile.communicationStrategy);
-        if (profile.learningStrategy)       setLearningStrategy(profile.learningStrategy);
-        setCommunicationLevel(profile.communicationLevel ?? 1);
-      }).finally(() => setLoading(false));
-    }
-  }, [user?.id]);
-
-  const currentCategory = aiLearningCategories.find(cat => cat.id === activeCategory);
+  // Get current category info
+  const currentCategory = skillCategories.find(cat => cat.id === activeCategory);
   const currentActivities = getActivitiesForCategory(activeCategory);
   const currentStats = getCategoryStats(activeCategory);
+// Code Editor Panel Component (for Vibe Coding only)
+// Vibe Coding Workflow Component
+  // Render evaluation result
+  const renderEvaluationResult = () => {
+    if (!evaluationResult) return null;
+
+    if ('dimensions' in evaluationResult) {
+      const rubricEval = evaluationResult as SkillsRubricEvaluation;
+      // Use MINIMUM score instead of average for overall certification score
+      const overallScore = Math.min(...rubricEval.dimensions.map(dim => dim.score));
+      
+      // Get certification level label
+      const getCertificationLabel = (score: number) => {
+        switch(score) {
+          case 0: return 'No Evidence';
+          case 1: return 'Emerging';
+          case 2: return 'Proficient';
+          case 3: return 'Advanced';
+          default: return '';
+        }
+      };
+
+      return (
+        <div>
+          <div className="mb-6 p-6 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border-2 border-purple-200">
+            <div className="text-center">
+              <div className="text-sm font-semibold text-purple-600 uppercase tracking-wide mb-3">
+                Overall Certification Score
+              </div>
+              <div className="flex items-center justify-center gap-4 mb-2">
+                <div className="text-6xl font-extrabold text-purple-700">
+                  {overallScore}<span className="text-3xl text-purple-500">/3</span>
+                </div>
+              </div>
+              <div className={classNames(
+                "inline-block px-6 py-3 rounded-full text-2xl font-bold mt-2",
+                overallScore === 3 ? 'bg-green-100 text-green-800' :
+                overallScore === 2 ? 'bg-blue-100 text-blue-800' :
+                overallScore === 1 ? 'bg-yellow-100 text-yellow-800' :
+                'bg-red-100 text-red-800'
+              )}>
+                {getCertificationLabel(overallScore)}
+              </div>
+              <div className="text-xs text-gray-600 mt-3">
+                {overallScore === 0 && 'No evidence of competency demonstrated'}
+                {overallScore === 1 && 'Emerging understanding of competency'}
+                {overallScore === 2 && 'Proficient - Meets certification standard ✓'}
+                {overallScore === 3 && 'Advanced - Exceeds certification standard ✓'}
+              </div>
+            </div>
+          </div>
+          
+          <div className="space-y-4 mb-6">
+            <h4 className="font-semibold text-gray-900">Dimension Scores:</h4>
+            {rubricEval.dimensions.map((dim, index) => (
+              <div key={index} className="border-l-4 border-purple-500 pl-4 py-2">
+                <div className="flex items-center justify-between mb-1">
+                  <h5 className="font-medium text-gray-900 capitalize">
+                    {dim.dimension.replace(/_/g, ' ')}
+                  </h5>
+                  <div className="flex items-center space-x-2">
+                    <span className={classNames(
+                      'px-3 py-1 rounded-full text-xs font-medium',
+                      dim.score === 0 ? 'bg-red-100 text-red-700' :
+                      dim.score === 1 ? 'bg-yellow-100 text-yellow-700' :
+                      dim.score === 2 ? 'bg-green-100 text-green-700' :
+                      'bg-blue-100 text-blue-700'
+                    )}>
+                      {dim.score === 0 ? 'No Evidence' :
+                       dim.score === 1 ? 'Emerging' :
+                       dim.score === 2 ? 'Proficient' :
+                       'Advanced'}
+                    </span>
+                    <span className="text-lg font-bold text-gray-700">
+                      {dim.score}/3
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-600 mt-1">
+                  {dim.evidence}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Improvement Advice Section */}
+          {rubricEval.improvementAdvice && (
+            <div className="mt-6 border-t pt-6">
+              <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
+                <Lightbulb className="h-5 w-5 text-yellow-500 mr-2" />
+                Improvement Advice
+              </h4>
+              <div className="bg-blue-50 rounded-lg p-4 text-sm text-gray-800">
+                <MarkdownText text={rubricEval.improvementAdvice} />
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    } else {
+      const standardEval = evaluationResult as {score: number, evidence: string};
+      return (
+        <div>
+          <div className="mb-4 p-4 bg-green-50 rounded-lg text-center">
+            <div className="text-4xl font-bold text-green-600 mb-2">
+              {standardEval.score}%
+            </div>
+            <div className="text-sm text-green-700">
+              Overall Score
+            </div>
+          </div>
+          <div className="text-sm text-gray-700 bg-gray-50 rounded-lg p-4">
+            <strong className="block mb-2 text-gray-900">Evidence:</strong>
+            {standardEval.evidence}
+          </div>
+        </div>
+      );
+    }
+  };
 
   // ── UI text tiers based on communication_level ────────────────────────────
-  // lvl 0–1 = simpler labels, shorter sentences, plain vocabulary
-  // lvl 2–3 = current phrasing (unchanged)
   const lvl = communicationLevel ?? 1;
 
   const uiText = {
-    // ── Page header ──────────────────────────────────────────────────────────
-    pageTitle:    lvl <= 1 ? 'AI Learning'                                : 'AI Learning Center',
-    pageSubtitle: lvl <= 1 ? 'Pick a topic and start learning with AI'   : 'Explore and master artificial intelligence concepts and applications',
+    pageTitle:    lvl <= 1 ? 'Skills Practice'                           : 'AI Ready Skills Development',
+    pageSubtitle: lvl <= 1 ? 'Pick a skill and practise with your coach' : 'Develop essential skills for success in an AI-powered world',
 
-    // ── Activity list panel ──────────────────────────────────────────────────
-    activitiesHeader:  lvl <= 1 ? 'Learning Activities'                  : `Learning Activities - ${undefined}`, // placeholder, used inline
     activitiesSubtext: lvl <= 1 ? 'Click an activity to begin'           : 'Click on activities to start learning',
     createBtnLabel:    lvl <= 1 ? '+ Make My Own'                        : 'Create Your Own',
 
-    // ── Create Your Own form ─────────────────────────────────────────────────
     createPageTitle:   lvl <= 1 ? 'Make Your Own Activity'               : 'Create Your Own Activity',
-    createPageSub:     lvl <= 1 ? 'Choose a topic from your life'        : 'Design a personalized AI learning session rooted in your real world',
+    createPageSub:     lvl <= 1 ? 'Choose a skill and a topic you know'  : 'Design a personalised skills session rooted in your real world',
 
-    createBannerTitle: lvl <= 1 ? '💡 Connect to your real life'         : '💡 Ground your learning in real productive value',
+    createBannerTitle: lvl <= 1 ? '💡 Use something from your real life' : '💡 Ground your skills in real productive value',
     createBannerBody:  lvl <= 1
-      ? 'The best topics are things you already know — your farm, your market stall, your school, your community. When you learn about AI using something real, it is easier to understand.'
-      : 'The best learning activities connect AI skills to something that creates economic value — starting or strengthening a business, improving agriculture, reducing costs, increasing income, or making a community service more productive. Your AI coach will push you to think about costs, benefits, tradeoffs, and long-term viability.',
+      ? 'The best topics are things you already know — your farm, your market stall, your school, your community. When you practise a skill using something real, it is much easier to understand and remember.'
+      : 'The best skill-building scenarios connect directly to something that creates economic value — starting or strengthening a business, improving agriculture, reducing costs, increasing income, or making a community service more productive. Your AI coach will push you to think about costs, benefits, tradeoffs, and long-term viability.',
     createBannerExamples: lvl <= 1
-      ? 'Examples: AI to find plant diseases on my farm · AI to help price goods at my market · AI to answer questions for students'
-      : 'Examples: AI-assisted crop disease detection → sell diagnosis as a service · Solar-powered cold storage pricing tool · AI chatbot for a market stall · Smart irrigation scheduling for a farm cooperative',
+      ? 'Examples: Problem-solving a food shortage in my village · Critical thinking about which crop to plant · Coding a price calculator for my stall'
+      : 'Examples: Problem-solving a supply chain for a market stall · Critical thinking about which crops to plant for best yield · Vibe Coding a price calculator for a solar kiosk · Communication skills for pitching a new product to investors',
 
     titleLabel:        lvl <= 1 ? 'Name of your activity'                : 'Activity Title',
-    titlePlaceholder:  lvl <= 1 ? 'e.g. Using AI to check my crops'      : 'e.g. Using AI to Price Solar-Dried Fish in My Market',
-    categoryLabel:     lvl <= 1 ? 'What type of AI skill?'               : 'AI Proficiency Category',
-    categoryHelp:      lvl <= 1 ? 'Your coach will use this to guide your session.'
-                                : "The AI coach will use this category's rubric to guide your session — and connect every criterion to your real-world business context.",
-    problemLabel:      lvl <= 1 ? 'What do you want to learn about?'     : 'Problem / Topic / Challenge',
+    titlePlaceholder:  lvl <= 1 ? 'e.g. Solving the water problem in my village'
+                                 : 'e.g. Solving the Cold-Storage Problem for My Fish Cooperative',
+    categoryLabel:     lvl <= 1 ? 'What skill do you want to practise?'  : 'Skill Category',
+    categoryHelp:      lvl <= 1 ? 'Your coach will use this skill to guide and score your session.'
+                                 : "The AI coach uses this skill's rubric to guide and score your session — and connects every dimension to your real-world productive context.",
+    problemLabel:      lvl <= 1 ? 'What do you want to work on?'         : 'Problem / Topic / Challenge',
     problemPlaceholder: lvl <= 1
-      ? 'Tell me what you want to explore. What is the problem or question? e.g. How can AI help me know when to water my garden?'
-      : 'Describe the problem or challenge you want to explore. Be specific — what is broken, inefficient, or costly right now?',
+      ? 'Tell me the problem or topic. What is happening? e.g. My family\'s farm has too many weeds and we do not know the best way to remove them.'
+      : 'Describe the scenario or challenge you want to work through. Be specific — what is broken, inefficient, or costly right now?',
 
-    pueLabel:          lvl <= 1 ? '💼 How could this help you earn or save money? (helps a lot)'
-                                : '💼 Entrepreneurial or Productive-Use Angle (strongly recommended)',
-    pueHelp:           lvl <= 1 ? 'Can this help you make money, save money, or help people in your community? Even a small idea is good.'
-                                : 'How could solving this problem create income, save money, improve a business, or strengthen a community? Even a rough idea helps your coach push you toward real economic thinking.',
-    puePlaceholder:    lvl <= 1
-      ? 'e.g. I want to charge farmers to check their crops with AI. Or: I want to use AI to help me decide prices at my stall.'
-      : "e.g. I want to start a small service charging farmers to identify crop diseases using AI. Or: I manage a solar kiosk and want to use AI to predict demand so I don't waste power.",
+    pueLabel:  lvl <= 1 ? '💼 Could this help you earn or save money? (helps a lot)'
+                        : '💼 Entrepreneurial or Productive-Use Angle (strongly recommended)',
+    pueHelp:   lvl <= 1 ? 'Can this skill help you make money, save money, or help people? Even a small idea is good.'
+                        : 'How could applying this skill create income, save money, improve a business, or strengthen a community? Even a rough idea helps your coach push you toward real economic thinking.',
+    puePlaceholder: lvl <= 1
+      ? 'e.g. I want to use problem-solving to help my family sell more fish. Or: I want to use coding to count my stock faster.'
+      : 'e.g. I want to use problem-solving skills to reduce post-harvest losses for my cooperative so we can sell at better prices. Or: I\'m building a Vibe Coding tool to automate stock tracking for my family\'s shop.',
 
-    locationLabel:     lvl <= 1 ? 'Where are you? (optional)'            : 'Location (optional)',
-    locationPlaceholder: lvl <= 1 ? 'e.g. Oloibiri, Bayelsa'            : 'City, town, or region — helps the coach give locally relevant examples',
-    constraintsLabel:  lvl <= 1 ? 'What makes this hard? (optional)'     : 'Constraints (optional)',
+    locationLabel:       lvl <= 1 ? 'Where are you? (optional)'          : 'Location (optional)',
+    locationPlaceholder: lvl <= 1 ? 'e.g. Oloibiri, Bayelsa'             : 'City, school, community, or region — helps the coach give locally relevant examples',
+    constraintsLabel:    lvl <= 1 ? 'What makes this hard? (optional)'   : 'Constraints (optional)',
     constraintsPlaceholder: lvl <= 1
-      ? 'e.g. No internet, not much money, people cannot read well'
-      : 'Budget limits, unreliable internet, no electricity at site, low literacy in target users, seasonal market, etc.',
-    stakeholdersLabel: lvl <= 1 ? 'Who is affected? (optional)'          : 'Stakeholders (optional)',
+      ? 'e.g. No money, no internet, people cannot read well'
+      : 'Budget limits, unreliable internet, no electricity, seasonal markets, low literacy in target users, etc.',
+    stakeholdersLabel:   lvl <= 1 ? 'Who is affected? (optional)'        : 'Stakeholders (optional)',
     stakeholdersPlaceholder: lvl <= 1
       ? 'e.g. Farmers in my village, my customers, my family'
-      : 'Customers, suppliers, community members, local government, competitors — anyone who gains or loses from this solution',
+      : 'Customers, suppliers, community members, competitors, local government — anyone who gains or loses from this solution',
 
-    infoBoxTitle:      lvl <= 1 ? 'Your AI coach will ask you about…'    : 'What your coach will push you to think about',
-    infoBoxItems:      lvl <= 1 ? [
-      { icon: '💰', bold: 'Cost and value', text: '— Is AI worth it here? How much does it cost?' },
-      { icon: '⚖️', bold: 'Tradeoffs',      text: '— What do you give up? Who wins and who loses?' },
-      { icon: '📈', bold: 'The future',     text: '— Will this still work in 2 years?' },
-      { icon: '🏪', bold: 'Business',       text: '— Could someone pay for this?' },
+    infoBoxTitle: lvl <= 1 ? 'Your coach will ask you about…'            : 'What your coach will push you to think about',
+    infoBoxItems: lvl <= 1 ? [
+      { icon: '💰', bold: 'Cost and value',  text: '— Is your idea worth it? What does it cost?' },
+      { icon: '⚖️', bold: 'Tradeoffs',       text: '— What do you give up? Who wins and who loses?' },
+      { icon: '📈', bold: 'The future',      text: '— Will this still work in 2 years?' },
+      { icon: '🏪', bold: 'Business',        text: '— Could someone pay for this?' },
     ] : [
-      { icon: '💰', bold: 'Costs vs benefits',      text: '— Is the AI solution worth it? What does it cost to run?' },
-      { icon: '⚖️', bold: 'Tradeoffs',              text: '— What do you give up by choosing this approach? Who benefits and who bears the risk?' },
-      { icon: '📈', bold: 'Long-term thinking',     text: '— Will this still be useful in 2–5 years? What could go wrong over time?' },
-      { icon: '⚡', bold: 'Productive use of energy', text: '— If power is involved, is it creating real economic value or just consuming resources?' },
-      { icon: '🏪', bold: 'Business viability',     text: '— Could this become a real service or business? Who would pay for it?' },
+      { icon: '💰', bold: 'Costs vs benefits',        text: '— Is your solution worth it? What does it cost to build or sustain?' },
+      { icon: '⚖️', bold: 'Tradeoffs',                text: '— What do you give up by choosing this approach? Who benefits, who bears the risk?' },
+      { icon: '📈', bold: 'Long-term thinking',       text: '— Will this still be useful or profitable in 2–5 years?' },
+      { icon: '⚡', bold: 'Productive use of resources', text: '— Are time, energy, and money creating real value, or just being consumed?' },
+      { icon: '🏪', bold: 'Business viability',       text: '— Could this become a real service, product, or livelihood?' },
     ],
 
-    submitBtn:         lvl <= 1 ? 'Start My Activity →'                  : 'Create & Start Activity',
-    backBtn:           lvl <= 1 ? '← Back'                               : '← Back to Activities',
+    submitBtn: lvl <= 1 ? 'Start My Activity →'  : 'Create & Start Activity',
+    backBtn:   lvl <= 1 ? '← Back'               : '← Back to Activities',
   };
 
   // ── Create Your Own Activity view ─────────────────────────────────────────
@@ -2751,10 +3593,8 @@ Respond ONLY with valid JSON:
     return (
       <AppLayout>
         <div className="min-h-screen">
-          <DistortedBackground imageUrl="/AI_learning.png" />
-          <div className="relative z-10 px-6 py-8">
-            {/* Constrain to 2/3 of available width */}
-            <div className="max-w-[50%]">
+          <DistortedBackground imageUrl="/skills-development-bg.png" />
+          <div className="relative z-10 pl-6 pr-6 py-8 max-w-[50%]">
             <div className="mb-6 flex items-center justify-between">
               <div className="inline-flex flex-col items-start gap-1 rounded-lg bg-pink-100/80 p-4 backdrop-blur-sm">
                 <div className="flex items-center gap-2">
@@ -2784,18 +3624,20 @@ Respond ONLY with valid JSON:
               {/* Title */}
               <div>
                 <label className="block text-base font-semibold text-gray-800 mb-1">{uiText.titleLabel} <span className="text-red-500">*</span></label>
-                <input type="text" value={createForm.title} onChange={e => setCreateForm(f => ({ ...f, title: e.target.value }))}
+                <input type="text" value={createForm.title}
+                  onChange={e => setCreateForm(f => ({ ...f, title: e.target.value }))}
                   placeholder={uiText.titlePlaceholder}
                   className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-base focus:ring-2 focus:ring-purple-400 focus:border-purple-400" />
               </div>
 
-              {/* Category */}
+              {/* Skill Category */}
               <div>
                 <label className="block text-base font-semibold text-gray-800 mb-1">{uiText.categoryLabel} <span className="text-red-500">*</span></label>
-                <select value={createForm.category} onChange={e => setCreateForm(f => ({ ...f, category: e.target.value }))}
+                <select value={createForm.category}
+                  onChange={e => setCreateForm(f => ({ ...f, category: e.target.value }))}
                   className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-base focus:ring-2 focus:ring-purple-400 focus:border-purple-400 bg-white">
-                  {SESSION_CATEGORIES.map(cat => (
-                    <option key={cat.id} value={cat.id}>{cat.id}) {cat.label}</option>
+                  {SKILLS_SESSION_CATEGORIES.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.label}</option>
                   ))}
                 </select>
                 <p className="text-sm text-gray-500 mt-1">{uiText.categoryHelp}</p>
@@ -2804,7 +3646,8 @@ Respond ONLY with valid JSON:
               {/* Problem / Topic */}
               <div>
                 <label className="block text-base font-semibold text-gray-800 mb-1">{uiText.problemLabel} <span className="text-red-500">*</span></label>
-                <textarea value={createForm.description} onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))}
+                <textarea value={createForm.description}
+                  onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))}
                   rows={3} placeholder={uiText.problemPlaceholder}
                   className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-base focus:ring-2 focus:ring-purple-400 focus:border-purple-400 resize-none" />
               </div>
@@ -2813,7 +3656,8 @@ Respond ONLY with valid JSON:
               <div className="bg-green-50 border border-green-200 rounded-xl p-4">
                 <label className="block text-base font-semibold text-green-900 mb-1">{uiText.pueLabel}</label>
                 <p className="text-sm text-green-700 mb-2">{uiText.pueHelp}</p>
-                <textarea value={createForm.entrepreneurialContext} onChange={e => setCreateForm(f => ({ ...f, entrepreneurialContext: e.target.value }))}
+                <textarea value={createForm.entrepreneurialContext}
+                  onChange={e => setCreateForm(f => ({ ...f, entrepreneurialContext: e.target.value }))}
                   rows={3} placeholder={uiText.puePlaceholder}
                   className="w-full border border-green-300 rounded-lg px-4 py-2.5 text-base focus:ring-2 focus:ring-green-400 focus:border-green-400 resize-none bg-white" />
               </div>
@@ -2821,7 +3665,8 @@ Respond ONLY with valid JSON:
               {/* Location */}
               <div>
                 <label className="block text-base font-semibold text-gray-800 mb-1">{uiText.locationLabel}</label>
-                <input type="text" value={createForm.location} onChange={e => setCreateForm(f => ({ ...f, location: e.target.value }))}
+                <input type="text" value={createForm.location}
+                  onChange={e => setCreateForm(f => ({ ...f, location: e.target.value }))}
                   placeholder={uiText.locationPlaceholder}
                   className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-base focus:ring-2 focus:ring-purple-400 focus:border-purple-400" />
               </div>
@@ -2829,7 +3674,8 @@ Respond ONLY with valid JSON:
               {/* Constraints */}
               <div>
                 <label className="block text-base font-semibold text-gray-800 mb-1">{uiText.constraintsLabel}</label>
-                <textarea value={createForm.constraints} onChange={e => setCreateForm(f => ({ ...f, constraints: e.target.value }))}
+                <textarea value={createForm.constraints}
+                  onChange={e => setCreateForm(f => ({ ...f, constraints: e.target.value }))}
                   rows={2} placeholder={uiText.constraintsPlaceholder}
                   className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-base focus:ring-2 focus:ring-purple-400 focus:border-purple-400 resize-none" />
               </div>
@@ -2837,7 +3683,8 @@ Respond ONLY with valid JSON:
               {/* Stakeholders */}
               <div>
                 <label className="block text-base font-semibold text-gray-800 mb-1">{uiText.stakeholdersLabel}</label>
-                <textarea value={createForm.stakeholders} onChange={e => setCreateForm(f => ({ ...f, stakeholders: e.target.value }))}
+                <textarea value={createForm.stakeholders}
+                  onChange={e => setCreateForm(f => ({ ...f, stakeholders: e.target.value }))}
                   rows={2} placeholder={uiText.stakeholdersPlaceholder}
                   className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-base focus:ring-2 focus:ring-purple-400 focus:border-purple-400 resize-none" />
               </div>
@@ -2853,7 +3700,7 @@ Respond ONLY with valid JSON:
               </div>
 
               <div className="flex justify-end pt-2">
-                <button onClick={handleCreateCustomActivity}
+                <button onClick={handleCreateCustomSkillsActivity}
                   disabled={isCreatingModule || !createForm.title.trim() || !createForm.description.trim()}
                   className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full px-8 py-3 font-semibold text-base transition-colors">
                   {isCreatingModule
@@ -2862,7 +3709,6 @@ Respond ONLY with valid JSON:
                 </button>
               </div>
             </div>
-            </div>{/* end max-w-[66%] */}
           </div>
         </div>
       </AppLayout>
@@ -2872,691 +3718,719 @@ Respond ONLY with valid JSON:
   if (loading) {
     return (
       <AppLayout>
-        <div className="min-h-screen flex items-center justify-center">
+        <DistortedBackground imageUrl="/skills-development-bg.png" />
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading your AI learning activities...</p>
+            <div className="text-xl text-gray-600">Loading activities...</div>
           </div>
         </div>
       </AppLayout>
     );
   }
 
-  // Activity Learning Interface
+  // Activity Detail View
   if (selectedActivity) {
     return (
       <AppLayout>
+        <DistortedBackground imageUrl="/skills-development-bg.png" />
         {showConfetti && <ConfettiAnimation />}
         
-        <div className="min-h-screen">
-          <DistortedBackground imageUrl="/AI_learning.png" />
-          <div className="relative z-10 pl-6 pr-6 py-8">
-            {/* Constrain chat and input to 2/3 width, centered */}
-            <div className="max-w-[67%] mx-auto">
-            {/* Header with Back Button */}
-            <div className="mb-6 flex items-center justify-between">
-              <div className="inline-flex flex-col items-start gap-1 rounded-lg bg-pink-100/75 p-4 backdrop-blur-sm">
-                <div className="flex items-center gap-2">
-                  <Brain className="h-10 w-10 text-purple-600" />
-                  <h1 className="text-4xl font-extrabold text-gray-900">
-                    {moduleTitle || selectedActivity.title}
+        <div className={classNames(
+          "relative z-10 py-8",
+          selectedActivity.sub_category === 'Vibe Coding'
+            ? "max-w-7xl mx-auto px-6"
+            : "max-w-[67%] mx-auto px-6"
+        )}>
+          {/* Remove the broken conditional wrapper */}
+
+          {/* Header */}
+          <div className="mb-6">
+            <Button
+              onClick={handleBackToOverview}
+              icon={<ArrowLeft size={18} />}
+              variant="secondary"
+              className="mb-4 text-base"
+            >
+              Back to Overview
+            </Button>
+            
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-4xl font-bold text-gray-900 mb-3">
+                    {moduleTitle}
                   </h1>
+                  <p className="text-xl text-gray-600 mb-3">
+                    {activityDescription}
+                  </p>
+                  <div className="flex items-center space-x-2 text-lg text-gray-500">
+                    <span>{selectedActivity.category_activity}</span>
+                    {selectedActivity.sub_category && (
+                      <>
+                        <span>•</span>
+                        <span>{selectedActivity.sub_category}</span>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <p className="text-gray-800 text-lg">
-                  Interactive AI Learning Activity
-                </p>
-              </div>
-
-              <Button
-                onClick={handleBackToOverview}
-                size="sm"
-                icon={<ArrowLeft size={16} />}
-                className="bg-pink-400 hover:bg-purple-900 text-purple-900 hover:text-pink-200 rounded-full px-6 py-2 border-0"
-              >
-                Back to AI Learning Menu
-              </Button>
-            </div>
-
-            {/* Activity Info Panel */}
-            <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-              <h2 className="text-2xl font-semibold text-gray-900 mb-3">Activity Overview</h2>
-              <div className="space-y-2 text-base">
-                <div><strong>Category:</strong> {selectedActivity.sub_category}</div>
-                <div><strong>Status:</strong> 
+                <div className="text-right">
                   <span className={classNames(
-                    'ml-2 px-2 py-1 rounded text-base',
+                    'inline-flex items-center px-4 py-2 rounded-full text-base font-medium border',
                     getProgressColor(selectedActivity.progress)
                   )}>
                     {selectedActivity.progress}
                   </span>
-                </div>
-                {selectedActivity.certification_evaluation_score && (
-                  <div><strong>Current Score:</strong> 
-                    <span className="ml-2 text-xl font-semibold text-green-600">
-                      {selectedActivity.certification_evaluation_score}
-                    </span>
-                  </div>
-                )}
-                {selectedActivity.certification_evaluation_evidence && (
-                  <div><strong>Last Evaluation:</strong> 
-                    <p className="mt-1 text-gray-700 bg-gray-50 rounded p-2 text-base">
-                      {selectedActivity.certification_evaluation_evidence}
-                    </p>
-                  </div>
-                )}
-                <div className="pt-2">
-                  <strong>Description:</strong>
-                  <p className="mt-1 text-gray-700 text-base">{activityDescription}</p>
+                  {selectedActivity.certification_evaluation_score != null && (() => {
+                    const normalizedScore = normalizeCertificationScore(selectedActivity.certification_evaluation_score);
+                    return (
+                      <div className="mt-2">
+                        <div className="text-2xl font-bold text-purple-600">
+                          {normalizedScore}/3
+                        </div>
+                        <div className="text-base text-gray-600">
+                          {normalizedScore === 3 ? 'Advanced' :
+                           normalizedScore === 2 ? 'Proficient' :
+                           normalizedScore === 1 ? 'Emerging' :
+                           'No Evidence'}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Evaluation Results Modal */}
-            {showEvaluationModal && evaluationResult && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg shadow-xl p-6 max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-                  {/* Header */}
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className={classNames(
-                      "text-xl font-bold flex items-center",
-                      evaluationResult.score === 3 ? "text-green-600" : "text-gray-900"
-                    )}>
-                      <Star className={classNames(
-                        "h-6 w-6 mr-2",
-                        evaluationResult.score === 3 ? "text-yellow-500 fill-yellow-500" : "text-yellow-500"
-                      )} />
-                      {evaluationResult.score === 3 ? "🎉 Activity Completed!" : "Evaluation Complete"}
-                    </h3>
-                    <button
-                      onClick={() => setShowEvaluationModal(false)}
-                      className="text-gray-400 hover:text-gray-600"
+          {/* Chat Interface */}
+{/* CONDITIONAL LAYOUT based on Vibe Coding */}
+{selectedActivity.sub_category === 'Vibe Coding' ? (
+            /* 2-COLUMN LAYOUT for Vibe Coding */
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
+              {/* LEFT: Chat — Design your prompt here */}
+              <div className="bg-white rounded-lg shadow-md flex flex-col" style={{ height: '700px' }}>
+
+                {/* Start Here header */}
+                <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-5 py-4 rounded-t-lg flex-shrink-0">
+                  <p className="text-xs font-bold text-purple-200 uppercase tracking-wider mb-0.5">Start Here</p>
+                  <h3 className="text-base font-bold text-white leading-snug">
+                    Work with AI to Design Your Vibe Coding Prompt
+                  </h3>
+                  <p className="text-xs text-purple-100 mt-1 leading-relaxed">
+                    Describe your project idea to the coach. Ask questions, explore features, and refine your thinking. When you're ready, click <strong>Create Vibe Coding Prompt</strong> below to turn this conversation into a structured prompt — then move to the right column to generate your code.
+                  </p>
+                </div>
+
+                {/* Chat messages */}
+                <div 
+                  ref={chatContainerRef}
+                  className="flex-1 overflow-y-auto p-6 space-y-4"
+                >
+                  {chatHistory.map((message, index) => (
+                    <div
+                      key={index}
+                      className={classNames(
+                        'flex items-start space-x-3',
+                        message.role === 'assistant' ? 'justify-start' : 'justify-end'
+                      )}
                     >
-                      <X className="w-6 h-6" />
-                    </button>
-                  </div>
-                  
-                  {/* Content */}
-                  <div className="space-y-4">
-                    {/* Overall Certification Score Display */}
-                    <div className="mb-6 p-6 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border-2 border-purple-200">
-                      <div className="text-center">
-                        <div className="text-sm font-semibold text-purple-600 uppercase tracking-wide mb-3">
-                          Overall Certification Score
+                      {message.role === 'assistant' && (
+                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-purple-100 flex items-center justify-center">
+                          <Bot className="h-5 w-5 text-purple-600" />
                         </div>
-                        <div className="flex items-center justify-center gap-4 mb-2">
-                          <div className="text-6xl font-extrabold text-purple-700">
-                            {evaluationResult.score}<span className="text-3xl text-purple-500">/3</span>
-                          </div>
-                        </div>
-                        <div className={classNames(
-                          "inline-block px-6 py-3 rounded-full text-2xl font-bold mt-2",
-                          evaluationResult.score === 3 ? 'bg-green-100 text-green-800' :
-                          evaluationResult.score === 2 ? 'bg-blue-100 text-blue-800' :
-                          evaluationResult.score === 1 ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
-                        )}>
-                          {evaluationResult.score === 3 ? 'Advanced' :
-                           evaluationResult.score === 2 ? 'Proficient' :
-                           evaluationResult.score === 1 ? 'Emerging' :
-                           'No Evidence'}
-                        </div>
-                        <div className="text-xs text-gray-600 mt-3">
-                          {evaluationResult.score === 0 && 'No evidence of competency demonstrated'}
-                          {evaluationResult.score === 1 && 'Emerging understanding of competency'}
-                          {evaluationResult.score === 2 && 'Proficient - Meets certification standard ✓'}
-                          {evaluationResult.score === 3 && 'Advanced - Exceeds certification standard ✓'}
-                        </div>
-                        {evaluationResult.score === 3 && (
-                          <div className="mt-3 text-sm text-green-600 font-semibold">
-                            Activity marked as completed!
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* UNESCO Competency Sub-Scores */}
-                    {evaluationResult.unescoScores && (
-                      <div className="mb-6">
-                        <h4 className="font-semibold text-lg mb-3">UNESCO AI Competency Scores:</h4>
-                        <div className="space-y-4">
-                          {/* Competency 1 */}
-                          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                            <div className="flex items-center justify-between mb-2">
-                              <h5 className="font-semibold text-gray-800">Understanding of AI Principles</h5>
-                              <span className={classNames(
-                                "px-3 py-1 rounded-full text-sm font-bold",
-                                evaluationResult.unescoScores.competency_1_score === 3 ? "bg-green-100 text-green-800" :
-                                evaluationResult.unescoScores.competency_1_score === 2 ? "bg-blue-100 text-blue-800" :
-                                evaluationResult.unescoScores.competency_1_score === 1 ? "bg-yellow-100 text-yellow-800" :
-                                "bg-gray-100 text-gray-800"
-                              )}>
-                                {evaluationResult.unescoScores.competency_1_score}/3
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-700">
-                              <span className="font-medium">Evidence:</span> {evaluationResult.unescoScores.competency_1_evidence}
-                            </p>
-                          </div>
-
-                          {/* Competency 2 */}
-                          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                            <div className="flex items-center justify-between mb-2">
-                              <h5 className="font-semibold text-gray-800">Human-Centred Mindset</h5>
-                              <span className={classNames(
-                                "px-3 py-1 rounded-full text-sm font-bold",
-                                evaluationResult.unescoScores.competency_2_score === 3 ? "bg-green-100 text-green-800" :
-                                evaluationResult.unescoScores.competency_2_score === 2 ? "bg-blue-100 text-blue-800" :
-                                evaluationResult.unescoScores.competency_2_score === 1 ? "bg-yellow-100 text-yellow-800" :
-                                "bg-gray-100 text-gray-800"
-                              )}>
-                                {evaluationResult.unescoScores.competency_2_score}/3
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-700">
-                              <span className="font-medium">Evidence:</span> {evaluationResult.unescoScores.competency_2_evidence}
-                            </p>
-                          </div>
-
-                          {/* Competency 3 */}
-                          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                            <div className="flex items-center justify-between mb-2">
-                              <h5 className="font-semibold text-gray-800">Application of AI Tools</h5>
-                              <span className={classNames(
-                                "px-3 py-1 rounded-full text-sm font-bold",
-                                evaluationResult.unescoScores.competency_3_score === 3 ? "bg-green-100 text-green-800" :
-                                evaluationResult.unescoScores.competency_3_score === 2 ? "bg-blue-100 text-blue-800" :
-                                evaluationResult.unescoScores.competency_3_score === 1 ? "bg-yellow-100 text-yellow-800" :
-                                "bg-gray-100 text-gray-800"
-                              )}>
-                                {evaluationResult.unescoScores.competency_3_score}/3
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-700">
-                              <span className="font-medium">Evidence:</span> {evaluationResult.unescoScores.competency_3_evidence}
-                            </p>
-                          </div>
-
-                          {/* Competency 4 */}
-                          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                            <div className="flex items-center justify-between mb-2">
-                              <h5 className="font-semibold text-gray-800">Critical Evaluation</h5>
-                              <span className={classNames(
-                                "px-3 py-1 rounded-full text-sm font-bold",
-                                evaluationResult.unescoScores.competency_4_score === 3 ? "bg-green-100 text-green-800" :
-                                evaluationResult.unescoScores.competency_4_score === 2 ? "bg-blue-100 text-blue-800" :
-                                evaluationResult.unescoScores.competency_4_score === 1 ? "bg-yellow-100 text-yellow-800" :
-                                "bg-gray-100 text-gray-800"
-                              )}>
-                                {evaluationResult.unescoScores.competency_4_score}/3
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-700">
-                              <span className="font-medium">Evidence:</span> {evaluationResult.unescoScores.competency_4_evidence}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Improvement Advice */}
-                    {evaluationResult.improvementAdvice && (
-                      <div className="border-t pt-4 bg-blue-50 rounded-lg p-4">
-                        <h4 className="font-semibold text-blue-900 mb-2 flex items-center">
-                          <Target className="h-5 w-5 mr-2" />
-                          Improvement Advice:
-                        </h4>
-                        <div className="text-blue-900 space-y-4">
-                          {evaluationResult.improvementAdvice.split('\n\n').map((section, index) => {
-                            const headingMatch = section.match(/^\*\*(.+?):\*\*/);
-                            if (headingMatch) {
-                              const heading = headingMatch[1];
-                              const content = section.substring(headingMatch[0].length).trim();
-                              return (
-                                <div key={index} className="space-y-2">
-                                  <h5 className="font-semibold text-blue-800">{heading}:</h5>
-                                  <p className="text-blue-800 text-sm leading-relaxed pl-4">{content}</p>
-                                </div>
-                              );
-                            } else {
-                              return (
-                                <p key={index} className="text-blue-800 text-sm leading-relaxed">
-                                  {section}
-                                </p>
-                              );
-                            }
-                          })}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Footer Button */}
-                    <div className="flex justify-end pt-4">
-                      <Button
-                        onClick={() => setShowEvaluationModal(false)}
+                      )}
+                      <div
                         className={classNames(
-                          "px-6 py-2 rounded-lg text-white",
-                          evaluationResult.score === 3 ? "bg-green-600 hover:bg-green-700" : "bg-blue-600 hover:bg-blue-700"
+                          'max-w-md rounded-lg px-4 py-3',
+                          message.role === 'assistant'
+                            ? 'bg-gray-100 text-gray-900'
+                            : 'bg-purple-600 text-white'
                         )}
                       >
-                        {evaluationResult.score === 3 ? "Celebrate!" : "Close"}
+                        <MarkdownText text={message.content} />
+                        {message.codeExecution && (
+                          <div className={classNames(
+                            "mt-2 text-xs",
+                            message.role === 'user' ? 'text-purple-100' : 'text-gray-500'
+                          )}>
+                            🔧 Code executed: {message.codeExecution.language}
+                          </div>
+                        )}
+                      </div>
+                      {message.role === 'user' && (
+                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-purple-600 flex items-center justify-center">
+                          <User className="h-5 w-5 text-white" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {submitting && (
+                    <div className="flex items-start space-x-3">
+                      <div className="flex-shrink-0 h-8 w-8 rounded-full bg-purple-100 flex items-center justify-center">
+                        <Bot className="h-5 w-5 text-purple-600" />
+                      </div>
+                      <div className="bg-gray-100 rounded-lg px-4 py-3">
+                        <div className="flex space-x-2">
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Text fallback when TTS unavailable (e.g. no network voice in Nigeria) */}
+                {fallbackText && (
+                  <div className="px-4 py-2">
+                    <VoiceFallback text={fallbackText} onDismiss={clearFallback} />
+                  </div>
+                )}
+
+                {/* Input area */}
+                <div className="border-t p-4">
+                  <p className="text-xs text-indigo-600 mb-2 flex items-center gap-1">
+                    <span>💡</span>
+                    <span>Have a question? Just ask it — the AI will answer you directly before continuing.</span>
+                  </p>
+
+                  {/* Proficient/Advanced status banner */}
+                  {(() => {
+                    const scores = extractLatestRubricScores(chatHistory);
+                    if (scores.length === 0) return null;
+                    const allAdvanced = scores.every(s => s === 3);
+                    const allProficient = scores.every(s => s >= 2);
+                    if (allAdvanced) return (
+                      <div className="mb-2 flex items-start gap-2 rounded-xl bg-green-50 border border-green-300 px-3 py-2">
+                        <span className="text-lg flex-shrink-0">🏆</span>
+                        <div>
+                          <p className="text-xs font-bold text-green-800">Advanced on all criteria!</p>
+                          <p className="text-xs text-green-700 mt-0.5">You've hit the top level. Select <strong>Complete Session</strong> below to save your results.</p>
+                        </div>
+                      </div>
+                    );
+                    if (allProficient) return (
+                      <div className="mb-2 flex items-start gap-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2">
+                        <span className="text-lg flex-shrink-0">✅</span>
+                        <div>
+                          <p className="text-xs font-bold text-blue-800">Proficient or higher on all criteria</p>
+                          <p className="text-xs text-blue-700 mt-0.5">You've met the standard. Keep going for Advanced, or select <strong>Complete Session</strong> to save now.</p>
+                        </div>
+                      </div>
+                    );
+                    return null;
+                  })()}
+
+                  <div className="flex items-end space-x-2">
+                    <div className="flex-1">
+                      <textarea
+                        value={userInput}
+                        onChange={(e) => setUserInput(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="Describe what you want to code..."
+                        rows={2}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div className="flex flex-col space-y-2">
+                      <Button
+                        onClick={toggleVoiceInput}
+                        icon={<Mic size={16} className={isListening ? 'text-red-500' : ''} />}
+                        variant={isListening ? 'danger' : 'secondary'}
+                        title={isListening ? 'Stop listening' : 'Start voice input'}
+                      >
+                        {isListening ? 'Stop' : 'Voice'}
+                      </Button>
+                      <Button
+                        onClick={handleSubmitMessage}
+                        icon={<Send size={16} />}
+                        disabled={!userInput.trim() || submitting}
+                        isLoading={submitting}
+                      >
+                        Send
                       </Button>
                     </div>
                   </div>
-                </div>
-              </div>
-            )}
 
-            {/* Chat History Panel */}
-            <div className="bg-white rounded-lg shadow-md mb-4">
-              <div className="p-4 border-b flex items-center justify-between flex-wrap gap-2">
-                <h3 className="text-xl font-semibold text-gray-900">Learning Conversation</h3>
-                <div className="flex items-center gap-1.5 text-sm bg-indigo-50 border border-indigo-200 rounded-full px-3 py-1 text-indigo-700">
-                  <span className="font-semibold">Scores out of 3:</span>
-                  <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-300 font-bold">0</span>
-                  <span>No Evidence</span>
-                  <span className="px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-300 font-bold">1</span>
-                  <span>Emerging</span>
-                  <span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-300 font-bold">2</span>
-                  <span className="font-semibold">Proficient ✓</span>
-                  <span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 font-bold">3</span>
-                  <span className="font-semibold">Advanced ✓</span>
+                  {/* Create Vibe Coding Prompt from Design — full width below textarea */}
+                  <div className="mt-2">
+                    <Button
+                      onClick={handleCreateVibePromptFromChat}
+                      disabled={chatHistory.length < 2 || generatingVibePromptFromChat}
+                      isLoading={generatingVibePromptFromChat}
+                      className="w-full bg-purple-600 hover:bg-purple-700 text-white justify-center"
+                      icon={<Wand2 size={15} />}
+                    >
+                      {generatingVibePromptFromChat ? 'Creating Prompt…' : 'Create Vibe Coding Prompt from Design'}
+                    </Button>
+                    {chatHistory.length < 2 && (
+                      <p className="text-xs text-gray-400 text-center mt-1">Chat with the AI first to design your project</p>
+                    )}
+                    {vibeCodingInjectedPrompt && (
+                      <p className="text-xs text-emerald-600 text-center mt-1 flex items-center justify-center gap-1">
+                        <CheckCircle size={11} /> Prompt sent to the Vibe Coding panel →
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <div className="flex items-center space-x-4 text-sm text-gray-600">
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={voiceOutputEnabled}
+                          onChange={toggleVoiceOutput}
+                          className="rounded border-gray-300"
+                        />
+                        <span>Voice Output</span>
+                      </label>
+                      
+                      {voiceOutputEnabled && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">Coach voice:</span>
+                          <div className="flex rounded-lg overflow-hidden border border-gray-400 shadow-sm">
+                            <button
+                              onClick={() => setVoiceMode('english')}
+                              title="British English — Google UK English Female"
+                              className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold transition-all border-r border-gray-400
+                                ${voiceMode === 'english'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
+                            >
+                              🇬🇧 English
+                            </button>
+                            <button
+                              onClick={() => setVoiceMode('pidgin')}
+                              title="Nigerian English / Pidgin voice"
+                              className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold transition-all
+                                ${voiceMode === 'pidgin'
+                                  ? 'bg-green-600 text-white'
+                                  : 'bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
+                            >
+                              🇳🇬 Pidgin
+                            </button>
+                          </div>
+                          {selectedVoice && (
+                            <span className="text-xs text-gray-400 italic hidden sm:inline">
+                              {selectedVoice.name} ({selectedVoice.lang}){selectedVoice.localService ? ' · offline' : ''}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      
+                      {isListening && (
+                        <span className="text-red-500 animate-pulse">● Listening...</span>
+                      )}
+                    </div>
+                    <Button
+                      onClick={handleImproveEnglish}
+                      disabled={!userInput.trim() || isImproving}
+                      className="bg-violet-500 hover:bg-violet-600 text-white flex items-center gap-2"
+                      size="sm"
+                    >
+                      {isImproving
+                        ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Improving...</>
+                        : <><Wand2 size={14} /> Improve my English</>}
+                    </Button>
+                    <Button
+                      onClick={handleSaveSession}
+                      icon={<Save size={16} />}
+                      disabled={chatHistory.length <= 1 || savingSession}
+                      isLoading={savingSession}
+                      variant="secondary"
+                      size="sm"
+                    >
+                      Save Session
+                    </Button>
+                  </div>
                 </div>
               </div>
+
+              {/* RIGHT: Vibe Coding Workflow */}
+              <VibeCodingWorkflow
+                onExecuteCode={handleExecuteCode}
+                onGetAICritique={handleGetInstructionCritique}
+                onGenerateCode={handleGenerateCodeFromInstructions}
+                onGetDebuggingHelp={handleGetDebuggingHelp}
+                injectedInstructions={vibeCodingInjectedPrompt}
+                onInstructionsInjected={() => setVibeCodingInjectedPrompt(null)}
+              />
+
+            </div>
+          ) : (
+            /* 1-COLUMN LAYOUT for other activities */
+            <div className="w-full bg-white rounded-lg shadow-md mb-6 flex flex-col" style={{ height: '740px' }}>
+              {/* Score legend bar */}
+              <div className="flex items-center flex-wrap gap-2 px-5 py-3 border-b bg-indigo-50 text-xl text-indigo-700 flex-shrink-0">
+                <span className="font-semibold">Scores out of 3:</span>
+                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-300 font-bold">0</span>
+                <span>No Evidence</span>
+                <span className="px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-300 font-bold">1</span>
+                <span>Emerging</span>
+                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-300 font-bold">2</span>
+                <span className="font-semibold">Proficient ✓</span>
+                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 font-bold">3</span>
+                <span className="font-semibold">Advanced ✓</span>
+              </div>
+              {/* Chat messages */}
               <div 
                 ref={chatContainerRef}
-                className="p-4 space-y-4 overflow-y-auto w-full h-72"
+                className="flex-1 overflow-y-auto p-6 space-y-4"
               >
                 {chatHistory.map((message, index) => (
                   <div
                     key={index}
                     className={classNames(
-                      'flex flex-col space-y-2',
-                      message.role === 'user' ? 'items-end' : 'items-start'
+                      'flex items-start space-x-3',
+                      message.role === 'assistant' ? 'justify-start' : 'justify-end'
                     )}
                   >
-                    <div className={classNames(
-                      'flex items-start space-x-3 max-w-2xl',
-                      message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
-                    )}>
-                      <div className={classNames(
-                        'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
-                        message.role === 'assistant' ? 'bg-blue-100' : 'bg-green-100'
-                      )}>
-                        {message.role === 'assistant' ? (
-                          <Bot className="w-4 h-4 text-blue-600" />
-                        ) : (
-                          <User className="w-4 h-4 text-green-600" />
-                        )}
+                    {message.role === 'assistant' && (
+                      <div className="flex-shrink-0 h-12 w-12 rounded-full bg-purple-100 flex items-center justify-center">
+                        <Bot className="h-7 w-7 text-purple-600" />
                       </div>
-                      <div className="flex-1">
-                        <div className={classNames(
-                          'text-base font-semibold mb-1',
-                          message.role === 'assistant' ? 'text-blue-600' : 'text-green-600'
-                        )}>
-                          {message.role === 'assistant' ? (
-                            <span><strong>AI Assistant:</strong></span>
-                          ) : (
-                            <span><strong>You:</strong></span>
-                          )}
-                        </div>
-                        <div className={classNames(
-                          'p-3 rounded-lg',
-                          message.role === 'assistant' 
-                            ? 'bg-gray-100 text-gray-900' 
-                            : 'bg-blue-500 text-white'
-                        )}>
-                          <div className="text-base leading-relaxed">
-                            {message.role === 'assistant' ? (
-                              <MarkdownText text={message.content} />
-                            ) : (
-                              <p>{message.content}</p>
-                            )}
-                          </div>
-                          <p className={classNames(
-                            'text-sm mt-1',
-                            message.role === 'assistant' ? 'text-gray-500' : 'text-blue-100'
-                          )}>
-                            {message.timestamp.toLocaleTimeString()}
-                          </p>
-                        </div>
-                      </div>
+                    )}
+                    <div
+                      className={classNames(
+                        'max-w-2xl rounded-lg px-5 py-4 text-2xl leading-relaxed',
+                        message.role === 'assistant'
+                          ? 'bg-gray-100 text-gray-900'
+                          : 'bg-purple-600 text-white'
+                      )}
+                    >
+                      <MarkdownText text={message.content} />
                     </div>
+                    {message.role === 'user' && (
+                      <div className="flex-shrink-0 h-12 w-12 rounded-full bg-purple-600 flex items-center justify-center">
+                        <User className="h-7 w-7 text-white" />
+                      </div>
+                    )}
                   </div>
                 ))}
                 {submitting && (
                   <div className="flex items-start space-x-3">
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                      <Bot className="w-4 h-4 text-blue-600" />
+                    <div className="flex-shrink-0 h-12 w-12 rounded-full bg-purple-100 flex items-center justify-center">
+                      <Bot className="h-7 w-7 text-purple-600" />
                     </div>
-                    <div className="flex-1">
-                      <div className="text-base font-semibold mb-1 text-blue-600">
-                        <strong>AI Assistant:</strong>
-                      </div>
-                      <div className="bg-gray-100 text-gray-900 p-3 rounded-lg">
-                        <div className="flex space-x-1">
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
-                        </div>
+                    <div className="bg-gray-100 rounded-lg px-4 py-3">
+                      <div className="flex space-x-2">
+                        <div className="w-3 h-3 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-3 h-3 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-3 h-3 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                       </div>
                     </div>
                   </div>
                 )}
               </div>
-            </div>
 
-            {/* Text fallback when TTS unavailable (e.g. no network voice in Nigeria) */}
-            {fallbackText && (
-              <div className="px-2 pb-2">
-                <VoiceFallback text={fallbackText} onDismiss={clearFallback} />
-              </div>
-            )}
-
-            {/* Voice Controls */}
-            <div className="flex flex-wrap items-center gap-3 mb-4">
-              {/* Voice Input toggle */}
-              <label className="flex items-center space-x-2 bg-purple-100 border border-black px-4 py-2 rounded-md cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={voiceInputEnabled}
-                  onChange={(e) => {
-                    setVoiceInputEnabled(e.target.checked);
-                    if (!e.target.checked && isListening && speechRecognition) {
-                      speechRecognition.stop();
-                      setIsListening(false);
-                      setWasListeningBeforeSubmit(false);
-                    }
-                  }}
-                  className="accent-purple-600 w-5 h-5"
-                />
-                <span className="text-black font-medium text-base">Enable Voice Input</span>
-              </label>
-              {/* Voice Output toggle */}
-              <label className="flex items-center space-x-2 bg-purple-100 border border-black px-4 py-2 rounded-md cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={voiceOutputEnabled}
-                  onChange={() => setVoiceOutputEnabled(!voiceOutputEnabled)}
-                  className="accent-purple-600 w-5 h-5"
-                />
-                <span className="text-black font-medium text-base">Enable Voice Output</span>
-              </label>
-
-              {/* Coach Voice Language Toggle */}
-              {voiceOutputEnabled && (
-                <div className="flex items-center gap-2">
-                  <span className="text-base font-medium text-gray-700">Coach voice:</span>
-                  <div className="flex rounded-lg overflow-hidden border border-gray-400 shadow-sm">
-                    <button
-                      onClick={() => setVoiceMode('english')}
-                      title="British English — Google UK English Female"
-                      className={`flex items-center gap-1.5 px-4 py-2 text-base font-bold transition-all border-r border-gray-400
-                        ${voiceMode === 'english'
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
-                    >
-                      🇬🇧 British English
-                    </button>
-                    <button
-                      onClick={() => setVoiceMode('pidgin')}
-                      title="Nigerian English / Pidgin voice"
-                      className={`flex items-center gap-1.5 px-4 py-2 text-base font-bold transition-all
-                        ${voiceMode === 'pidgin'
-                          ? 'bg-green-600 text-white'
-                          : 'bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
-                    >
-                      🇳🇬 Nigerian Pidgin
-                    </button>
-                  </div>
-                  {selectedVoice && (
-                    <span className="text-xs text-gray-500 italic">
-                      {selectedVoice.name} ({selectedVoice.lang}){selectedVoice.localService ? ' · offline' : ''}
-                    </span>
-                  )}
+              {/* Text fallback when TTS unavailable (e.g. no network voice in Nigeria) */}
+              {fallbackText && (
+                <div className="px-4 py-2">
+                  <VoiceFallback text={fallbackText} onDismiss={clearFallback} />
                 </div>
               )}
-            </div>
 
-            {/* User Input Panel with Voice Chat */}
-            <div className="bg-white rounded-lg shadow-md p-4 w-full">
-              <p className="text-base text-indigo-600 mb-2 flex items-center gap-1">
-                <span>💡</span>
-                <span>Have a question? Just ask it — the AI will answer you directly before continuing.</span>
-              </p>
+              {/* Input area */}
+              <div className="border-t p-5">
+                <p className="text-xl text-indigo-600 mb-2 flex items-center gap-1">
+                  <span>💡</span>
+                  <span>Have a question? Just ask it — the AI will answer you directly before continuing.</span>
+                </p>
 
-              {/* ── Proficient/Advanced status banner ─────────────────────── */}
-              {(() => {
-                const scores = extractLatestRubricScores(chatHistory);
-                if (scores.length === 0) return null;
-                const allAdvanced = scores.every(s => s === 3);
-                const allProficient = scores.every(s => s >= 2);
-                if (allAdvanced) {
-                  return (
+                {/* Proficient/Advanced status banner */}
+                {(() => {
+                  const scores = extractLatestRubricScores(chatHistory);
+                  if (scores.length === 0) return null;
+                  const allAdvanced = scores.every(s => s === 3);
+                  const allProficient = scores.every(s => s >= 2);
+                  if (allAdvanced) return (
                     <div className="mb-3 flex items-start gap-3 rounded-xl bg-green-50 border border-green-300 px-4 py-3">
-                      <span className="text-xl flex-shrink-0">🏆</span>
+                      <span className="text-2xl flex-shrink-0">🏆</span>
                       <div>
-                        <p className="text-base font-bold text-green-800">Advanced on all criteria!</p>
-                        <p className="text-sm text-green-700 mt-0.5">
-                          You've reached the highest level across every criterion. There's one final step — select <strong>Complete Session</strong> below to save your results.
-                        </p>
+                        <p className="text-xl font-bold text-green-800">Advanced on all criteria!</p>
+                        <p className="text-lg text-green-700 mt-0.5">You've reached the highest level across every criterion. There's one final step — select <strong>Complete Session</strong> below to save your results.</p>
                       </div>
                     </div>
                   );
-                }
-                if (allProficient) {
-                  return (
+                  if (allProficient) return (
                     <div className="mb-3 flex items-start gap-3 rounded-xl bg-blue-50 border border-blue-200 px-4 py-3">
-                      <span className="text-xl flex-shrink-0">✅</span>
+                      <span className="text-2xl flex-shrink-0">✅</span>
                       <div>
-                        <p className="text-base font-bold text-blue-800">Proficient or higher on all criteria</p>
-                        <p className="text-sm text-blue-700 mt-0.5">
-                          Well done — you've met the standard on every criterion. You can keep going to push for Advanced, or select <strong>Complete Session</strong> below to save your results now.
-                        </p>
+                        <p className="text-xl font-bold text-blue-800">Proficient or higher on all criteria</p>
+                        <p className="text-lg text-blue-700 mt-0.5">Well done — you've met the standard on every criterion. You can keep going to push for Advanced, or select <strong>Complete Session</strong> below to save your results now.</p>
                       </div>
                     </div>
                   );
-                }
-                return null;
-              })()}
+                  return null;
+                })()}
 
-              <div className="flex items-end space-x-3">
-                <div className="flex-1">
+                <div className="flex items-end space-x-3">
                   <div className="flex-1">
-                    <SpellCheckTextarea
+                    <textarea
                       value={userInput}
-                      onChange={setUserInput}
-                      onKeyDown={handleKeyPress}
-                      placeholder="Type your response here..."
-                      className="w-full p-4 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 h-24 text-base leading-relaxed"
+                      onChange={(e) => setUserInput(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Type your response..."
+                      rows={3}
+                      className="w-full px-4 py-3 text-2xl border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none leading-relaxed"
                       disabled={submitting}
                     />
                   </div>
+                  <div className="flex flex-col space-y-2">
+                    <Button
+                      onClick={toggleVoiceInput}
+                      icon={<Mic size={22} className={isListening ? 'text-red-500' : ''} />}
+                      variant={isListening ? 'danger' : 'secondary'}
+                      title={isListening ? 'Stop listening' : 'Start voice input'}
+                    >
+                      {isListening ? 'Stop' : 'Voice'}
+                    </Button>
+                    <Button
+                      onClick={handleSubmitMessage}
+                      icon={<Send size={22} />}
+                      disabled={!userInput.trim() || submitting}
+                      isLoading={submitting}
+                    >
+                      Send
+                    </Button>
+                  </div>
                 </div>
-
-                {voiceInputEnabled && (
-                  <Button
-                    onClick={startVoiceInput}
-                    icon={<Mic size={18} />}
-                    className={classNames(
-                      "px-4 py-3 text-base",
-                      isListening 
-                        ? "bg-red-100 hover:bg-red-200 text-red-800" 
-                        : "bg-blue-100 hover:bg-blue-200 text-blue-800"
+                
+                <div className="mt-3 flex items-center justify-between">
+                  <div className="flex items-center space-x-4 text-xl text-gray-600">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={voiceOutputEnabled}
+                        onChange={toggleVoiceOutput}
+                        className="rounded border-gray-300 w-5 h-5"
+                      />
+                      <span>Voice Output</span>
+                    </label>
+                    
+                    {voiceOutputEnabled && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg text-gray-500">Coach voice:</span>
+                        <div className="flex rounded-lg overflow-hidden border border-gray-400 shadow-sm">
+                          <button
+                            onClick={() => setVoiceMode('english')}
+                            title="British English — Google UK English Female"
+                            className={`flex items-center gap-1.5 px-4 py-2 text-lg font-bold transition-all border-r border-gray-400
+                              ${voiceMode === 'english'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
+                          >
+                            🇬🇧 British English
+                          </button>
+                          <button
+                            onClick={() => setVoiceMode('pidgin')}
+                            title="Nigerian English / Pidgin voice"
+                            className={`flex items-center gap-1.5 px-4 py-2 text-lg font-bold transition-all
+                              ${voiceMode === 'pidgin'
+                                ? 'bg-green-600 text-white'
+                                : 'bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
+                          >
+                            🇳🇬 Nigerian Pidgin
+                          </button>
+                        </div>
+                        {selectedVoice && (
+                          <span className="text-base text-gray-400 italic hidden sm:inline">
+                            {selectedVoice.name} ({selectedVoice.lang}){selectedVoice.localService ? ' · offline' : ''}
+                          </span>
+                        )}
+                      </div>
                     )}
-                    disabled={!speechRecognition}
+                    
+                    {isListening && (
+                      <span className="text-red-500 text-xl animate-pulse">● Listening...</span>
+                    )}
+                  </div>
+                  <Button
+                    onClick={handleImproveEnglish}
+                    disabled={!userInput.trim() || isImproving}
+                    className="bg-violet-500 hover:bg-violet-600 text-white flex items-center gap-2"
                   >
-                    {isListening ? 'Stop' : 'Speak'}
+                    {isImproving
+                      ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Improving...</>
+                      : <><Wand2 size={20} /> Improve my English</>}
                   </Button>
-                )}
-
-                <Button
-                  onClick={handleSubmitMessage}
-                  disabled={!userInput.trim() || submitting}
-                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-3 text-base"
-                  icon={<Send size={18} />}
-                  isLoading={submitting}
-                >
-                  Submit
-                </Button>
+                  <Button
+                    onClick={handleSaveSession}
+                    icon={<Save size={20} />}
+                    disabled={chatHistory.length <= 1 || savingSession}
+                    isLoading={savingSession}
+                    variant="secondary"
+                  >
+                    Save Session
+                  </Button>
+                </div>
               </div>
-              
-              {/* Action buttons row */}
-              <div className="mt-3 flex flex-wrap justify-center gap-3">
-                <Button
-                  onClick={handleImproveEnglish}
-                  disabled={!userInput.trim() || isImproving}
-                  className="bg-violet-500 hover:bg-violet-600 text-white px-6 py-2 rounded-full text-base"
-                  icon={<Wand2 size={18} />}
-                  isLoading={isImproving}
-                >
-                  Improve my English
-                </Button>
-                <Button
-                  onClick={handleSaveSession}
-                  disabled={evaluating || chatHistory.length <= 1}
-                  className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-full text-base flex items-center gap-2"
-                >
-                  {evaluating
-                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
-                    : <><Save size={18} /> Save Session</>}
-                </Button>
+            </div>
+          )}
+          {/* END CONDITIONAL LAYOUT */}
+
+          {/* Actions */}
+          <div className="flex items-center justify-between mt-2">
+            <div className="text-xl text-gray-600">
+              {chatHistory.length > 1 && (
+                <span>{chatHistory.length - 1} messages exchanged</span>
+              )}
+            </div>
+            <button
+              onClick={handleCompleteSession}
+              disabled={completingSession || chatHistory.length <= 1}
+              className={classNames(
+                'flex items-center gap-2 px-6 py-3 rounded-lg text-xl font-semibold transition-colors',
+                chatHistory.length > 1 && !completingSession
+                  ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              )}
+            >
+              {completingSession
+                ? <><div className="w-5 h-5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" /> Completing...</>
+                : <><CheckCircle size={22} /> Complete Session</>}
+            </button>
+          </div>
+        </div>
+
+        {/* Complete Session Modal */}
+        {showCompleteSessionModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <BookOpen className="h-5 w-5 text-purple-600" />
+                  Complete Your Session
+                </h3>
                 <button
-                  onClick={handleCompleteSession}
-                  disabled={completingSession || chatHistory.length <= 1}
+                  onClick={() => setShowCompleteSessionModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <p className="text-sm text-gray-700 leading-relaxed">
+                  Before we save your results, take a moment to reflect on what you've worked through in this session.
+                </p>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-2">
+                    What did you learn in this session? <span className="text-red-500">*</span>
+                  </label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Be as specific and detailed as you can — what concepts clicked for you? What was hard? What would you do differently next time?
+                  </p>
+                  <textarea
+                    value={sessionReflectionInput}
+                    onChange={e => setSessionReflectionInput(e.target.value)}
+                    rows={6}
+                    placeholder="e.g. I learned how to break down a complex problem into smaller steps and apply the skill of critical thinking to each one. The hardest part was identifying assumptions I hadn't noticed before. Next time I'd start by listing what I don't yet know..."
+                    className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-purple-400 focus:border-purple-400 resize-none leading-relaxed"
+                    autoFocus
+                  />
+                  <p className="text-xs text-gray-400 mt-1 text-right">
+                    {sessionReflectionInput.length} characters
+                    {sessionReflectionInput.length < 80 && sessionReflectionInput.length > 0 && (
+                      <span className="text-amber-600 ml-2">— a bit more detail will help your score</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="px-6 pb-5 flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowCompleteSessionModal(false)}
+                  className="px-5 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-300 rounded-full transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleCompleteSessionSubmit()}
+                  disabled={sessionReflectionInput.trim().length < 20}
                   className={classNames(
-                    'flex items-center gap-2 px-6 py-2 rounded-full text-base font-semibold transition-colors',
-                    chatHistory.length > 1 && !completingSession
-                      ? 'bg-pink-500 hover:bg-pink-600 text-white'
+                    'flex items-center gap-2 px-6 py-2 rounded-full text-sm font-semibold transition-colors',
+                    sessionReflectionInput.trim().length >= 20
+                      ? 'bg-purple-600 hover:bg-purple-700 text-white'
                       : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                   )}
                 >
-                  {completingSession
-                    ? <><div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" /> Completing...</>
-                    : <><CheckCircle size={18} /> Complete Session</>}
+                  <Star size={15} /> Save &amp; Complete
                 </button>
               </div>
             </div>
+          </div>
+        )}
 
-            {/* ── Complete Session Modal ──────────────────────────────────── */}
-            {showCompleteSessionModal && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-                  {/* Header */}
-                  <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                      <BookOpen className="h-5 w-5 text-purple-600" />
-                      Complete Your Session
-                    </h3>
-                    <button
-                      onClick={() => setShowCompleteSessionModal(false)}
-                      className="text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      <X size={20} />
-                    </button>
-                  </div>
-
-                  {/* Body */}
-                  <div className="px-6 py-5 space-y-4">
-                    <p className="text-sm text-gray-700 leading-relaxed">
-                      Before we save your results, take a moment to reflect on what you've worked through in this session.
-                    </p>
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-800 mb-2">
-                        What did you learn in this session? <span className="text-red-500">*</span>
-                      </label>
-                      <p className="text-xs text-gray-500 mb-2">
-                        Be as specific and detailed as you can — what concepts clicked for you? What was hard? What would you do differently?
-                      </p>
-                      <textarea
-                        value={sessionReflectionInput}
-                        onChange={e => setSessionReflectionInput(e.target.value)}
-                        rows={6}
-                        placeholder="e.g. I learned that AI models learn patterns from data, not rules — so if the training data has gaps (like no examples from small farms), the AI will perform poorly in those situations. The hardest part was explaining failure modes. Next time I'd try to give more specific examples from my own context..."
-                        className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-purple-400 focus:border-purple-400 resize-none leading-relaxed"
-                        autoFocus
-                      />
-                      <p className="text-xs text-gray-400 mt-1 text-right">
-                        {sessionReflectionInput.length} characters
-                        {sessionReflectionInput.length < 80 && sessionReflectionInput.length > 0 && (
-                          <span className="text-amber-600 ml-2">— a bit more detail will help your score</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="px-6 pb-5 flex gap-3 justify-end">
-                    <button
-                      onClick={() => setShowCompleteSessionModal(false)}
-                      className="px-5 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-300 rounded-full transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => handleCompleteSessionSubmit()}
-                      disabled={sessionReflectionInput.trim().length < 20}
-                      className={classNames(
-                        'flex items-center gap-2 px-6 py-2 rounded-full text-sm font-semibold transition-colors',
-                        sessionReflectionInput.trim().length >= 20
-                          ? 'bg-purple-600 hover:bg-purple-700 text-white'
-                          : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      )}
-                    >
-                      <Star size={15} /> Save &amp; Complete
-                    </button>
-                  </div>
+        {/* Evaluation Modal */}
+        {showEvaluationModal && evaluationResult && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <h3 className="text-xl font-bold text-gray-900 mb-4">
+                  Evaluation Results
+                </h3>
+                
+                {renderEvaluationResult()}
+                
+                <div className="mt-6 flex justify-end space-x-3">
+                  <Button
+                    onClick={() => {
+                      setShowEvaluationModal(false);
+                      if ('dimensions' in evaluationResult) {
+                        const rubricEval = evaluationResult as SkillsRubricEvaluation;
+                        const avgScore = rubricEval.dimensions.reduce((sum, dim) => sum + dim.score, 0) / rubricEval.dimensions.length;
+                        const percentage = Math.round((avgScore / 3) * 100);
+                        // Only celebrate and auto-return to overview if 100%
+                        if (percentage === 100) {
+                          handleCelebration();
+                          setTimeout(() => handleBackToOverview(), 2000);
+                        }
+                      }
+                    }}
+                    variant="primary"
+                  >
+                    Continue
+                  </Button>
                 </div>
               </div>
-            )}
-            </div>{/* end max-w-[67%] mx-auto */}
+            </div>
           </div>
-        </div>
+        )}
       </AppLayout>
     );
   }
 
-  // Main AI Learning Overview Interface
+  // Overview - Activity List
   return (
     <AppLayout>
-      {showConfetti && <ConfettiAnimation />}
-      
-      <div className="min-h-screen">
-        <DistortedBackground imageUrl="/AI_learning.png" />
-        
-        <div className="relative z-10 pl-6 pr-6 py-12">
-          <div className="max-w-5xl mx-auto">
-          <div className="mb-8 flex items-center justify-between">
-            <div className="inline-flex flex-col items-start gap-1 rounded-lg bg-pink-100/75 p-4 backdrop-blur-sm">
-              <div className="flex items-center gap-2">
-                <Brain className="h-12 w-12 text-purple-600" />
-                <h1 className="text-5xl font-extrabold text-gray-900">
-                  {uiText.pageTitle}
-                </h1>
-              </div>
-              <p className="text-gray-800 text-xl">
-                {uiText.pageSubtitle}
-              </p>
-            </div>
-
+      <DistortedBackground imageUrl="/skills-development-bg.png" />
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          {/* Title with enhanced visibility */}
+          <div className="bg-black/30 backdrop-blur-sm rounded-lg p-6 mb-6">
+            <h1 className="text-4xl font-bold text-white mb-3" style={{ textShadow: '2px 2px 4px rgba(0,0,0,0.8)' }}>
+              {uiText.pageTitle}
+            </h1>
+            <p className="text-xl text-purple-100" style={{ textShadow: '1px 1px 3px rgba(0,0,0,0.7)' }}>
+              {uiText.pageSubtitle}
+            </p>
+          </div>
+          
+          <div className="mt-4 flex items-center space-x-4">
             <Button
               onClick={refreshDashboard}
-              variant="outline"
-              size="sm"
               icon={<RefreshCw size={16} />}
+              variant="secondary"
               isLoading={refreshing}
-              className={classNames(
-                'bg-pink-400 text-pink-200',
-                'hover:bg-purple-900 hover:text-pink-200',
-                'border border-pink-200',
-                'disabled:opacity-60'
-              )}
+              disabled={refreshing}
             >
               Refresh
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
-            {aiLearningCategories.map(category => {
+          {/* Category Selector */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-8 mt-8">
+            {skillCategories.map((category) => {
               const stats = getCategoryStats(category.id);
               return (
                 <button
@@ -3569,17 +4443,13 @@ Respond ONLY with valid JSON:
                       : 'bg-white hover:shadow-md border-gray-200 hover:border-purple-200'
                   )}
                 >
-                  <div
-                    className={classNames(
-                      'p-2 rounded-lg',
-                      activeCategory === category.id ? 'bg-purple-200' : 'bg-gray-100'
-                    )}
-                  >
-                    <div
-                      className={
-                        activeCategory === category.id ? 'text-purple-700' : 'text-purple-600'
-                      }
-                    >
+                  <div className={classNames(
+                    'p-2 rounded-lg',
+                    activeCategory === category.id ? 'bg-purple-200' : 'bg-gray-100'
+                  )}>
+                    <div className={classNames(
+                      activeCategory === category.id ? 'text-purple-700' : 'text-purple-600'
+                    )}>
                       {category.icon}
                     </div>
                   </div>
@@ -3587,7 +4457,9 @@ Respond ONLY with valid JSON:
                     <h3 className="text-base font-semibold text-gray-900 mb-1">
                       {category.title}
                     </h3>
-                    <p className="text-sm text-gray-600 mb-2">{category.description}</p>
+                    <p className="text-sm text-gray-600 mb-2">
+                      {category.description}
+                    </p>
                     <div className="flex items-center space-x-2 text-sm">
                       <span className="text-gray-500">{stats.total} activities</span>
                       {stats.completed > 0 && (
@@ -3600,6 +4472,7 @@ Respond ONLY with valid JSON:
             })}
           </div>
 
+          {/* Selected Category Detail */}
           {currentCategory && (
             <div className="bg-white rounded-lg shadow-md p-6 mb-8">
               <div className="flex items-center justify-between mb-6">
@@ -3618,46 +4491,39 @@ Respond ONLY with valid JSON:
                   </div>
                 </div>
               </div>
+              {/* END CONDITIONAL LAYOUT */}
 
+              {/* Progress Statistics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <div className="text-center p-4 bg-blue-50 rounded-lg">
                   <div className="text-3xl font-bold text-blue-600">{currentStats.total}</div>
                   <div className="text-base text-blue-700">Total Activities</div>
                 </div>
                 <div className="text-center p-4 bg-green-50 rounded-lg">
-                  <div className="text-3xl font-bold text-green-600">
-                    {currentStats.completed}
-                  </div>
+                  <div className="text-3xl font-bold text-green-600">{currentStats.completed}</div>
                   <div className="text-base text-green-700">Completed</div>
                 </div>
                 <div className="text-center p-4 bg-yellow-50 rounded-lg">
-                  <div className="text-3xl font-bold text-yellow-600">
-                    {currentStats.started}
-                  </div>
+                  <div className="text-3xl font-bold text-yellow-600">{currentStats.started}</div>
                   <div className="text-base text-yellow-700">In Progress</div>
                 </div>
                 <div className="text-center p-4 bg-gray-50 rounded-lg">
-                  <div className="text-3xl font-bold text-gray-600">
-                    {currentStats.notStarted}
-                  </div>
+                  <div className="text-3xl font-bold text-gray-600">{currentStats.notStarted}</div>
                   <div className="text-base text-gray-700">Not Started</div>
                 </div>
               </div>
 
+              {/* Progress Bar */}
               {currentStats.total > 0 && (
                 <div className="mb-6">
                   <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
                     <span>Progress in {currentCategory.title}</span>
-                    <span>
-                      {Math.round((currentStats.completed / currentStats.total) * 100)}% Complete
-                    </span>
+                    <span>{Math.round((currentStats.completed / currentStats.total) * 100)}% Complete</span>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-3">
-                    <div
-                      className="bg-purple-500 h-3 rounded-full transition-all duration-300"
-                      style={{
-                        width: `${(currentStats.completed / currentStats.total) * 100}%`
-                      }}
+                    <div 
+                      className="bg-green-500 h-3 rounded-full transition-all duration-300"
+                      style={{ width: `${(currentStats.completed / currentStats.total) * 100}%` }}
                     ></div>
                   </div>
                 </div>
@@ -3665,27 +4531,24 @@ Respond ONLY with valid JSON:
             </div>
           )}
 
+          {/* Activities List */}
           <div className="bg-white rounded-lg shadow-md overflow-hidden">
             {/* Panel header with Create Your Own button */}
             <div className="px-6 py-4 border-b bg-gray-50 flex items-center justify-between">
               <div>
                 <h3 className="text-xl font-semibold text-gray-900">
                   {lvl <= 1
-                    ? `${uiText.activitiesHeader} — ${currentCategory?.title}`
+                    ? `${uiText.activitiesSubtext.replace('Click an activity to begin', 'Learning Activities')} — ${currentCategory?.title}`
                     : `Learning Activities - ${currentCategory?.title}`}
                 </h3>
                 <p className="text-base text-gray-600 mt-1">
                   {uiText.activitiesSubtext}
-                  {lvl > 1 && <> • Activities in "{currentCategory?.subCategory}" area</>}
+                  {lvl > 1 && <> • Activities in "{currentCategory?.subCategory}" skill area</>}
                 </p>
               </div>
               <button
                 onClick={() => {
-                  const catMap: Record<string, string> = {
-                    'understanding-ai': 'A', 'prompt-engineering': 'B',
-                    'ai-ethics': 'C', 'evaluating-outputs': 'D', 'applications': 'E',
-                  };
-                  setCreateForm(f => ({ ...f, category: catMap[activeCategory] || 'A' }));
+                  setCreateForm(f => ({ ...f, category: activeCategory }));
                   setShowCreateActivity(true);
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
@@ -3697,20 +4560,26 @@ Respond ONLY with valid JSON:
             </div>
 
             {(() => {
-              const myActivities = currentActivities.filter(a => a.isPublic === false);
-              const otherActivities = currentActivities.filter(a => a.isPublic !== false);
+              const myActivities     = currentActivities.filter(a => a.isPublic === false);
+              const otherActivities  = currentActivities.filter(a => a.isPublic !== false);
 
               const renderRow = (activity: DashboardActivity) => {
-                const hasScores = activity.progress !== 'not started' &&
-                  (activity.certification_evaluation_score != null ||
-                   activity.certification_evaluation_UNESCO_1_score != null);
+                // Collect per-dimension scores for display
+                const subCat = activity.sub_category || '';
+                const colMap = RUBRIC_COLUMN_MAP[subCat] || {};
+                const dimensions = RUBRIC_DEFINITIONS[subCat] || [];
 
-                const scoreCompetencies = [
-                  { label: 'Understanding of AI',  score: activity.certification_evaluation_UNESCO_1_score },
-                  { label: 'Human-Centred',         score: activity.certification_evaluation_UNESCO_2_score },
-                  { label: 'Application',           score: activity.certification_evaluation_UNESCO_3_score },
-                  { label: 'Critical Eval',         score: activity.certification_evaluation_UNESCO_4_score },
-                ].filter(c => c.score != null);
+                const dimScores = dimensions
+                  .map(dim => {
+                    const dimKey = dim.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+                    const cols = colMap[dimKey];
+                    const score = cols ? (activity[cols.score] ?? null) : null;
+                    return score != null ? { label: dim.replace(/_/g, ' '), score } : null;
+                  })
+                  .filter(Boolean) as { label: string; score: number }[];
+
+                const hasScores = activity.progress !== 'not started' &&
+                  (activity.certification_evaluation_score != null || dimScores.length > 0);
 
                 return (
                   <div
@@ -3720,7 +4589,7 @@ Respond ONLY with valid JSON:
                       activity.progress === 'completed'
                         ? 'bg-gray-50 opacity-60 cursor-not-allowed'
                         : isActivitySelectable(activity)
-                        ? 'hover:bg-purple-50 cursor-pointer'
+                        ? 'hover:bg-blue-50 cursor-pointer'
                         : 'cursor-default'
                     )}
                     onClick={() => isActivitySelectable(activity) && handleActivitySelect(activity)}
@@ -3734,11 +4603,11 @@ Respond ONLY with valid JSON:
                             activity.progress === 'completed'
                               ? 'text-gray-400 line-through'
                               : isActivitySelectable(activity)
-                              ? 'text-purple-900'
+                              ? 'text-blue-900'
                               : 'text-gray-900')}>
                             {activity.title}
                             {isActivitySelectable(activity) && (
-                              <span className="ml-2 text-sm text-purple-600">(Click to start)</span>
+                              <span className="ml-2 text-sm text-blue-600">(Click to start)</span>
                             )}
                             {activity.progress === 'completed' && (
                               <span className="ml-2 text-sm text-gray-400 no-underline font-normal">✓ Completed</span>
@@ -3750,36 +4619,47 @@ Respond ONLY with valid JSON:
                           </div>
                         </div>
                       </div>
-                      {/* Progress badge (right-aligned) */}
-                      <span className={classNames('inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border flex-shrink-0', getProgressColor(activity.progress))}>
+                      {/* Progress badge */}
+                      <span className={classNames(
+                        'inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border flex-shrink-0',
+                        getProgressColor(activity.progress))}>
                         {activity.progress}
                       </span>
                     </div>
 
-                    {/* ── Scores row (only when data present) ── */}
+                    {/* ── Score strip (only when data present) ── */}
                     {hasScores && (
                       <div className="mt-3 flex flex-wrap items-center gap-2">
-                        {/* Overall score */}
-                        {activity.certification_evaluation_score != null && (
-                          <span className={classNames(
-                            'px-2.5 py-1 rounded-full text-xs font-bold border',
-                            activity.certification_evaluation_score === 3
-                              ? 'bg-green-100 text-green-800 border-green-300'
-                              : activity.certification_evaluation_score === 2
-                              ? 'bg-blue-100 text-blue-800 border-blue-300'
-                              : activity.certification_evaluation_score === 1
-                              ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
-                              : 'bg-gray-100 text-gray-800 border-gray-300'
-                          )}>
-                            Overall: {activity.certification_evaluation_score}/3
-                          </span>
-                        )}
-                        {/* 4 UNESCO competency score pills */}
-                        {scoreCompetencies.map(({ label, score }) => (
+                        {/* Overall score badge */}
+                        {activity.certification_evaluation_score != null && (() => {
+                          const normalizedScore = normalizeCertificationScore(activity.certification_evaluation_score);
+                          return (
+                            <span className={classNames(
+                              'px-2.5 py-1 rounded-full text-xs font-bold border',
+                              normalizedScore === 3
+                                ? 'bg-green-100 text-green-800 border-green-300'
+                                : normalizedScore === 2
+                                ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                : normalizedScore === 1
+                                ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
+                                : 'bg-red-100 text-red-800 border-red-300'
+                            )}>
+                              Overall: {normalizedScore}/3 - {
+                                normalizedScore === 3 ? 'Advanced' :
+                                normalizedScore === 2 ? 'Proficient' :
+                                normalizedScore === 1 ? 'Emerging' :
+                                'No Evidence'
+                              }
+                            </span>
+                          );
+                        })()}
+
+                        {/* Per-dimension score pills */}
+                        {dimScores.map(({ label, score }) => (
                           <span
                             key={label}
-                            className={classNames('px-2 py-0.5 rounded-full text-xs font-medium border', unescoScoreColor(score!))}
-                            title={`${label}: ${score}/3 — ${unescoScoreLabel(score!)}`}
+                            className={classNames('px-2 py-0.5 rounded-full text-xs font-medium border capitalize', rubricScoreColor(score))}
+                            title={`${label}: ${score}/3 — ${rubricScoreLabel(score)}`}
                           >
                             {label}: {score}/3
                           </span>
@@ -3787,7 +4667,7 @@ Respond ONLY with valid JSON:
                       </div>
                     )}
 
-                    {/* ── Evidence (collapsed to one line) ── */}
+                    {/* ── Evidence summary ── */}
                     {activity.certification_evaluation_evidence && (
                       <div className="mt-2 text-xs text-gray-500 bg-gray-50 rounded px-3 py-1.5 line-clamp-2">
                         <strong className="text-gray-600">Evidence:</strong>{' '}
@@ -3806,11 +4686,12 @@ Respond ONLY with valid JSON:
               if (currentActivities.length === 0) {
                 return (
                   <div className="p-6 text-center">
-                    <Brain className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600 mb-2">No activities found for {currentCategory?.title}</p>
-                    <p className="text-sm text-gray-500 mb-4">
-                      AI Learning activities with sub-category "{currentCategory?.subCategory}" will appear here
-                    </p>
+                    <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 mb-2 font-semibold">No activities found for {currentCategory?.title}</p>
+                    <div className="text-sm text-gray-500 mb-4 max-w-md mx-auto">
+                      <p className="mb-2">Looking for Skills activities with sub-category: <strong>"{currentCategory?.subCategory}"</strong></p>
+                      <p className="mb-2 text-xs text-gray-400">Check the browser console for debugging information.</p>
+                    </div>
                     <Button onClick={refreshDashboard} icon={<RefreshCw size={16} />} isLoading={refreshing}>
                       Refresh Activities
                     </Button>
@@ -3851,12 +4732,11 @@ Respond ONLY with valid JSON:
                 </>
               );
             })()}
-          </div>{/* end activities panel */}
-          </div>{/* end max-w-5xl centering wrapper */}
+          </div>
         </div>
       </div>
     </AppLayout>
   );
 };
 
-export default AILearningPage;
+export default SkillsPage;
