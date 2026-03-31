@@ -1676,17 +1676,14 @@ Help them brainstorm and refine their ideas before they start coding.`;
       if (initialChatHistory.length > 0) {
         setChatHistory(initialChatHistory);
       } else {
-        const hasApiKey = !!import.meta.env.VITE_OPENAI_API_KEY;
         setChatHistory([
           {
             role: 'assistant',
-            content: hasApiKey 
-              ? `All righty! 🎵 Let's get this vibe coding adventure started for **${details.title}**! 
+            content: `All righty! 🎵 Let's get this vibe coding adventure started for **${details.title}**! 
 
 All you have to do is provide me what you are trying to create. I build the code. Then you test it. Let's develop code for **${categoryDescription}**.
 
-What specifically would you like to build code to do? 🚀✨`
-              : `Hello, I'm your learning assistant for ${details.title}. Note: AI responses are currently unavailable due to configuration.`,
+What specifically would you like to build code to do? 🚀✨`,
             timestamp: new Date()
           }
         ]);
@@ -1705,17 +1702,14 @@ What specifically would you like to build code to do? 🚀✨`
       if (initialChatHistory.length > 0) {
         setChatHistory(initialChatHistory);
       } else {
-        const hasApiKey = !!import.meta.env.VITE_OPENAI_API_KEY;
         setChatHistory([
           {
             role: 'assistant',
-            content: hasApiKey 
-              ? `All righty! 🎵 Let's get this vibe coding adventure started for **${category.activity.title}**! 
+            content: `All righty! 🎵 Let's get this vibe coding adventure started for **${category.activity.title}**! 
 
 All you have to do is provide me what you are trying to create. I build the code. Then you test it. Let's develop code for **${categoryDescription}**.
 
-What specifically would you like to build code to do? 🚀✨`
-              : `Hello, I'm your learning assistant for ${category.activity.title}. Note: AI responses are currently unavailable due to configuration.`,
+What specifically would you like to build code to do? 🚀✨`,
             timestamp: new Date()
           }
         ]);

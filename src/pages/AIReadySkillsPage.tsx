@@ -194,17 +194,10 @@ const AIReadySkillsPage: React.FC = () => {
     if (!userResponse.trim() || isImproving) return;
     setIsImproving(true);
     try {
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          max_tokens: 600,
-          response_format: { type: 'json_object' },
-          messages: [{
-            role: 'user',
-            content: `You are an English language coach helping a student in rural Nigeria improve their writing.
+      const result = await chatJSON({
+        messages: [{
+          role: 'user',
+          content: `You are an English language coach helping a student in rural Nigeria improve their writing.
 The student wrote: "${userResponse.trim()}"
 
 Your job:
@@ -215,12 +208,12 @@ Your job:
 5. If the meaning is unclear, make the most reasonable interpretation and write the clearest possible sentence.
 
 Return ONLY valid JSON: { "improved_text": "..." }`
-          }]
-        })
+        }],
+        system: 'You are an English language coach. Return only valid JSON.',
+        max_tokens: 600,
+        temperature: 0.3,
       });
-      const data = await res.json();
-      const parsed = JSON.parse(data.choices[0].message.content);
-      if (parsed.improved_text) setUserResponse(parsed.improved_text);
+      if (result?.improved_text) setUserResponse(result.improved_text);
     } catch (err) {
       console.error('Improve English error:', err);
     } finally {

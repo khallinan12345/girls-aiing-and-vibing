@@ -115,6 +115,22 @@ const CITY_OPTIONS: Record<string, string[]> = {
 // School/organization dropdown for African users
 const AFRICA_SCHOOL_OPTIONS = ['Davidson AI Innovation Lab', 'Other'];
 
+// All 36 Nigerian states + FCT
+const NIGERIA_STATES = [
+  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa',
+  'Benue', 'Borno', 'Cross River', 'Delta', 'Ebonyi', 'Edo',
+  'Ekiti', 'Enugu', 'FCT (Abuja)', 'Gombe', 'Imo', 'Jigawa',
+  'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara',
+  'Lagos', 'Nasarawa', 'Niger', 'Ogun', 'Ondo', 'Osun',
+  'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara',
+];
+
+// Auto-populate city_town for known Nigerian states
+const NIGERIA_STATE_CITY_MAP: Record<string, string> = {
+  'Ogun':    'Ibiade',
+  'Bayelsa': 'Oloibiri',
+};
+
 const ProfilePage: React.FC = () => {
   const { user: authUser, refreshUserProfile } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -733,7 +749,10 @@ const ProfilePage: React.FC = () => {
                         </label>
                         <select
                           value={formData.country}
-                          onChange={(e) => setFormData(prev => ({ ...prev, country: e.target.value }))}
+                          onChange={(e) => {
+                            setFormData(prev => ({ ...prev, country: e.target.value, state: '', city: '' }));
+                            setCityChoice('');
+                          }}
                           className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                         >
                           <option value="">-- Select a country --</option>
@@ -750,21 +769,48 @@ const ProfilePage: React.FC = () => {
                         <MapPin className="inline h-4 w-4 mr-1" />
                         State/Province
                       </label>
-                      <input
-                        type="text"
-                        value={formData.state}
-                        onChange={(e) => setFormData(prev => ({ ...prev, state: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                        placeholder="e.g., Ohio, Ontario, Bayelsa"
-                      />
+                      {formData.country === 'Nigeria' ? (
+                        <select
+                          value={formData.state}
+                          onChange={(e) => {
+                            const selectedState = e.target.value;
+                            const autoCity = NIGERIA_STATE_CITY_MAP[selectedState] ?? '';
+                            setFormData(prev => ({ ...prev, state: selectedState, city: autoCity }));
+                            setCityChoice('');
+                          }}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                        >
+                          <option value="">-- Select a state --</option>
+                          {NIGERIA_STATES.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={formData.state}
+                          onChange={(e) => setFormData(prev => ({ ...prev, state: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          placeholder="e.g., Ohio, Ontario, Bayelsa"
+                        />
+                      )}
                     </div>
 
-                    {/* City — smart dropdown for Africa and North America, free text otherwise */}
+                    {/* City — Nigeria: plain input (may be auto-populated by state); 
+                           Other Africa / North America: smart dropdown; elsewhere: free text */}
                     <div className="w-full">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         City
                       </label>
-                      {CITY_OPTIONS[formData.continent] ? (
+                      {formData.country === 'Nigeria' ? (
+                        <input
+                          type="text"
+                          value={formData.city}
+                          onChange={(e) => setFormData(prev => ({ ...prev, city: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          placeholder="e.g., Ibiade, Oloibiri, Lagos"
+                        />
+                      ) : CITY_OPTIONS[formData.continent] ? (
                         <>
                           <select
                             value={cityChoice}
@@ -821,8 +867,6 @@ const ProfilePage: React.FC = () => {
                         />
                       )}
                     </div>
-
-                    {/* School/Organization */}
                     <div className="w-full">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         School/Organization
@@ -880,7 +924,7 @@ const ProfilePage: React.FC = () => {
                       )}
                     </div>
 
-                    {/* Form Actions */}
+                    {/* School/Organization */}
                     <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
                       <Button
                         type="button"
