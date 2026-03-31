@@ -208,8 +208,55 @@ interface HistoricalRecord {
 
 // ─── Assessment Prompt ────────────────────────────────────────────────────────
 
-function buildAssessmentPrompt(transcript: string, sessionCount: number, playgroundTranscript: string, playgroundSessionCount: number): string {
-  return `You are an expert educational assessment analyst with deep knowledge of the Oloibiri, Nigeria AI learning lab — a rural community with a new solar mini-grid where young learners (ages 12–24) are developing AI and digital skills for the first time. The central research framework tests whether AI-facilitated capability formation can prime Productive Use of Energy (PUE) demand ahead of infrastructure expansion.
+// ─── City Context Helpers ─────────────────────────────────────────────────────
+
+function getCityContext(city: string): {
+  name: string;
+  description: string;
+  localRefs: string;
+  institution: string;
+} {
+  if (city === "Ibiade") {
+    return {
+      name: "Ibiade",
+      description:
+        "a lagoon-side community in Ogun Waterside LGA, Ogun State, Nigeria, where young learners " +
+        "(ages 12–24) are developing AI and digital skills for the first time. Ibiade sits on the " +
+        "Lekki Lagoon and the Bight of Benin; livelihoods centre on artisanal fishing, cassava and " +
+        "yam farming, fish processing, and market trading. The community faces seasonal flooding, " +
+        "contaminated creek water, no grid electricity, and limited road access. The learning " +
+        "initiative is supported by Solardero Foundation. The central research framework tests " +
+        "whether AI-facilitated capability formation can prime Productive Use of Energy (PUE) demand " +
+        "ahead of solar infrastructure expansion.",
+      localRefs: "Ibiade/Ogun/lagoon/mangrove/Bight of Benin/community/naira",
+      institution: "Solardero Foundation — Ibiade",
+    };
+  }
+  // Default: Oloibiri
+  return {
+    name: "Oloibiri",
+    description:
+      "a rural community in Ogbia LGA, Bayelsa State, Nigeria, with a new solar mini-grid where " +
+      "young learners (ages 12–24) are developing AI and digital skills for the first time. Oloibiri " +
+      "is the birthplace of Nigeria's oil industry yet has no grid electricity; livelihoods centre " +
+      "on fishing the Otuabagi creeks, cassava and plantain farming, and small-scale trade. The " +
+      "community has been severely damaged by decades of oil pollution. The central research " +
+      "framework tests whether AI-facilitated capability formation can prime Productive Use of " +
+      "Energy (PUE) demand ahead of infrastructure expansion.",
+    localRefs: "Oloibiri/Bayelsa/village/Nigeria/community/naira",
+    institution: "Davidson AI Innovation Center — Oloibiri",
+  };
+}
+
+function buildAssessmentPrompt(
+  transcript: string,
+  sessionCount: number,
+  playgroundTranscript: string,
+  playgroundSessionCount: number,
+  city: string
+): string {
+  const ctx = getCityContext(city);
+  return `You are an expert educational assessment analyst with deep knowledge of the ${ctx.name} AI learning initiative — ${ctx.description}
 
 Analyze these ${sessionCount} structured curriculum sessions${playgroundSessionCount > 0 ? ` AND ${playgroundSessionCount} AI Playground sessions` : ""}. Return a SINGLE valid JSON object with NO markdown, NO preamble.
 
@@ -243,7 +290,7 @@ Return JSON with EXACTLY these fields. Use 0 for any metric where evidence is in
   "pue_learner_initiated_pct": <0-100, % of sessions where LEARNER introduced PUE topics BEFORE AI did>,
   "pue_ai_introduced_pct": <0-100, % of sessions where AI scaffolded PUE scenarios first>,
   "pue_multi_domain_pct": <0-100, % of sessions where 3 or more PUE domains appeared simultaneously>,
-  "pue_local_context_pct": <0-100, % of sessions with explicit local refs: village/Nigeria/community/Oloibiri/Bayelsa/naira>,
+  "pue_local_context_pct": <0-100, % of sessions with explicit local refs: ${ctx.localRefs}>,
   "pue_summary": "<2-3 sentences: how broadly and deeply is this learner connecting AI skills to productive energy use? What domains dominate? What does the learner-vs-AI source split reveal?>",
   "pue_evidence_quotes": ["<direct quote from LEARNER showing PUE reasoning>"],
 
@@ -293,6 +340,7 @@ Return JSON with EXACTLY these fields. Use 0 for any metric where evidence is in
   "ai_prof_verification_gpt": <0-100, learner's ability to verify AI outputs — fact-checking, identifying bias or hallucination, questioning AI responses, not accepting outputs uncritically>,
   "ai_prof_gpt_narrative": "<2-3 sentences: What does the transcript evidence say about this learner's overall AI proficiency — their practical application, ethical awareness, conceptual understanding, and critical verification? Which dimension is strongest and which needs most development?>"
 }`;
+}
 }
 
 // ─── AI Proficiency Cert Data ─────────────────────────────────────────────────
@@ -423,7 +471,8 @@ interface CommunityImpactData {
 async function fetchCommunityImpactData(
   userId: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  city: string
 ): Promise<CommunityImpactData> {
   const empty: CommunityImpactData = {
     training_sessions_total: 0,
@@ -546,7 +595,7 @@ async function fetchCommunityImpactData(
           model: "gpt-4o",
           messages: [{
             role: "user",
-            content: `Write a concise 2–3 sentence narrative for a monthly education report about a learner's Community Impact training and certification progress at a rural AI learning lab in Oloibiri, Nigeria.
+            content: `Write a concise 2–3 sentence narrative for a monthly education report about a learner's Community Impact training and certification progress at a rural AI learning lab in ${city}, Nigeria.
 
 The 5 Community Impact tracks train learners to advise their community as:
 - AI Ambassadors (teaching others about AI in plain language)
@@ -590,7 +639,8 @@ Note which tracks are most active, highlight any certs passed or strong eval sco
 async function assessMonthlySkills(
   userId: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  city: string
 ): Promise<{
   result: MonthlySkillsResult | null;
   sessionCount: number;
@@ -701,7 +751,7 @@ async function assessMonthlySkills(
       model: "gpt-4o",
       messages: [
         { role: "system", content: "Expert educational assessment analyst. Respond ONLY with valid JSON, no markdown." },
-        { role: "user", content: buildAssessmentPrompt(truncated, engagedSessionCount, playgroundTranscript, playgroundSessionCount) },
+        { role: "user", content: buildAssessmentPrompt(truncated, engagedSessionCount, playgroundTranscript, playgroundSessionCount, city) },
       ],
       response_format: { type: "json_object" },
       temperature: 0.2,
@@ -795,7 +845,7 @@ Be encouraging and specific. Note strongest and weakest dimensions if AI Profici
     result.ai_prof_cert_level = certData.ai_prof_cert_level;
 
     // Fetch Community Impact training + certification data
-    const ciData = await fetchCommunityImpactData(userId, startDate, endDate);
+    const ciData = await fetchCommunityImpactData(userId, startDate, endDate, city);
     result.ci_training_sessions_total    = ciData.training_sessions_total;
     result.ci_training_sessions_by_track = ciData.training_sessions_by_track;
     result.ci_training_eval_by_track     = ciData.training_eval_by_track;
@@ -1067,7 +1117,8 @@ async function fetchCohortHistoryBase(excludeIds: Set<string>): Promise<CohortMo
 async function fetchPlaygroundSummary(
   userId: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  city: string
 ): Promise<PlaygroundSummary | null> {
   // Playground chats live in ai_playground_chats — separate from dashboard.
   // messages is stored as a native JSON array: [{role, content, timestamp}]
@@ -1109,7 +1160,7 @@ async function fetchPlaygroundSummary(
         {
           role: "system",
           content:
-            "You are an educational analyst reviewing free-form AI Playground conversations from youth learners (ages 12–24) at the Davidson AI Innovation Center in Oloibiri, Nigeria. " +
+            `You are an educational analyst reviewing free-form AI Playground conversations from youth learners (ages 12–24) at the ${getCityContext(city).institution}. ` +
             "The AI Playground gives learners unrestricted access to Claude — no curriculum scaffolding, no activity structure. " +
             "Your job is to characterise how this learner is using free-form AI access and flag anything connected to Productive Use of Energy (PUE), entrepreneurship, or community enterprise. " +
             "Respond ONLY with valid JSON, no markdown.",
@@ -1156,9 +1207,18 @@ Return this exact JSON:
 
 // ─── User Discovery ───────────────────────────────────────────────────────────
 
-async function getAfricanUsersNeedingAssessment(startDate: Date, endDate: Date): Promise<string[]> {
-  const { data: profiles } = await supabase.from("profiles").select("id").eq("continent", "Africa");
+async function getAfricanUsersNeedingAssessment(
+  startDate: Date,
+  endDate: Date
+): Promise<Array<{ userId: string; city: string }>> {
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, city")
+    .eq("continent", "Africa");
   if (!profiles?.length) return [];
+
+  // city = "Ibiade" → Ibiade cohort; everything else → Oloibiri cohort
+  const cityMap = new Map(profiles.map((p) => [p.id, p.city === "Ibiade" ? "Ibiade" : "Oloibiri"]));
   const ids = profiles.map((p) => p.id);
 
   const { data: activities } = await supabase
@@ -1173,7 +1233,9 @@ async function getAfricanUsersNeedingAssessment(startDate: Date, endDate: Date):
     .gte("measured_at", startDate.toISOString()).lte("measured_at", endDate.toISOString());
 
   const doneSet = new Set((assessed || []).map((a) => a.user_id));
-  return activeIds.filter((id) => !doneSet.has(id) && !EXCLUDED_USER_IDS.has(id));
+  return activeIds
+    .filter((id) => !doneSet.has(id) && !EXCLUDED_USER_IDS.has(id))
+    .map((id) => ({ userId: id, city: cityMap.get(id) ?? "Oloibiri" }));
 }
 
 // ─── Historical Data ──────────────────────────────────────────────────────────
@@ -1512,157 +1574,203 @@ function buildUserCard(
 
 function buildEmailHtml(
   monthLabel: string,
-  summaries: AssessmentSummary[],
+  oloibiriSummaries: AssessmentSummary[],
+  ibiadeSummaries: AssessmentSummary[],
   historyMap: Map<string, HistoricalRecord[]>,
   playgroundMap: Map<string, PlaygroundSummary | null>,
+  profileCityMap: Record<string, string>,
   cohortHistory: CohortMonthRecord[],
   durationMs: number
 ): string {
-  const successes = summaries.filter((s) => s.status === "success");
-  const totalSessions = summaries.reduce((a, s) => a + (s.sessionCount || 0), 0);
-  const cohortAvg = (key: keyof MonthlySkillsResult) =>
-    successes.length ? Math.round(successes.reduce((a, s) => a + ((s.scores?.[key] as number) || 0), 0) / successes.length) : 0;
+  // Helper to build one cohort's section HTML
+  function buildCohortSection(
+    summaries: AssessmentSummary[],
+    city: string,
+    label: string,
+    institution: string
+  ): string {
+    const successes = summaries.filter((s) => s.status === "success");
+    const totalSessions = summaries.reduce((a, s) => a + (s.sessionCount || 0), 0);
+    const cohortAvg = (key: keyof MonthlySkillsResult) =>
+      successes.length ? Math.round(successes.reduce((a, s) => a + ((s.scores?.[key] as number) || 0), 0) / successes.length) : 0;
+    const converging = successes.filter((s) => s.scores?.scaffold_convergence_trend === "converging").length;
+    const roleReady  = successes.filter((s) => (s.scores?.role_teaching_intent_count || 0) + (s.scores?.role_enterprise_orientation_count || 0) > 0).length;
+    const playgroundActive = [...playgroundMap.entries()]
+      .filter(([id]) => (profileCityMap[id] ?? "Oloibiri") === city)
+      .filter(([, p]) => p && p.hasMeaningfulActivity).length;
 
-  const converging = successes.filter((s) => s.scores?.scaffold_convergence_trend === "converging").length;
-  const roleReady = successes.filter((s) => (s.scores?.role_teaching_intent_count || 0) + (s.scores?.role_enterprise_orientation_count || 0) > 0).length;
-  const playgroundActive = [...playgroundMap.values()].filter((p) => p && p.hasMeaningfulActivity).length;
+    const userCards = summaries
+      .filter((s) => s.status === "success")
+      .sort((a, b) => (historyMap.get(b.userId) || []).length - (historyMap.get(a.userId) || []).length)
+      .map((s) => buildUserCard(s, historyMap.get(s.userId) || [], playgroundMap.get(s.userId) || null))
+      .join("");
 
-  const userCards = summaries
-    .filter((s) => s.status === "success")
-    .sort((a, b) => (historyMap.get(b.userId) || []).length - (historyMap.get(a.userId) || []).length)
-    .map((s) => buildUserCard(s, historyMap.get(s.userId) || [], playgroundMap.get(s.userId) || null))
-    .join("");
+    // Playground summary for this cohort
+    const pgEntries = [...playgroundMap.entries()]
+      .filter(([id]) => (profileCityMap[id] ?? "Oloibiri") === city)
+      .map(([, p]) => p)
+      .filter((p): p is PlaygroundSummary => p !== null && p.hasMeaningfulActivity);
 
-  // ── Cohort Playground Summary ─────────────────────────────────────────────
-  const pgEntries = [...playgroundMap.values()].filter((p): p is PlaygroundSummary => p !== null && p.hasMeaningfulActivity);
-
-  // Aggregate top topics across all learners
-  const topicFreq: Record<string, number> = {};
-  for (const pg of pgEntries) {
-    for (const t of pg.topTopics) {
-      const key = t.toLowerCase().trim();
-      topicFreq[key] = (topicFreq[key] || 0) + 1;
+    const topicFreq: Record<string, number> = {};
+    for (const pg of pgEntries) {
+      for (const t of pg.topTopics) {
+        const k = t.toLowerCase().trim();
+        topicFreq[k] = (topicFreq[k] || 0) + 1;
+      }
     }
-  }
-  const sortedTopics = Object.entries(topicFreq)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8);
-
-  const totalPgSessions = pgEntries.reduce((a, p) => a + p.sessionCount, 0);
-  const totalPgWords    = pgEntries.reduce((a, p) => a + p.totalWords, 0);
-  const totalPueSessions = pgEntries.reduce((a, p) => a + p.pueSessionCount, 0);
-  const totalEntSessions = pgEntries.reduce((a, p) => a + p.entrepreneurshipCount, 0);
-
-  // Collect the best PUE highlight quotes across the cohort (up to 4)
-  const allPueHighlights: Array<{ name: string; quote: string }> = [];
-  for (const s of summaries.filter((x) => x.status === "success")) {
-    const pg = playgroundMap.get(s.userId);
-    if (pg?.pueHighlights?.length) {
-      allPueHighlights.push({ name: s.name, quote: pg.pueHighlights[0] });
+    const sortedTopics = Object.entries(topicFreq).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const totalPgSessions  = pgEntries.reduce((a, p) => a + p.sessionCount, 0);
+    const totalPgWords     = pgEntries.reduce((a, p) => a + p.totalWords, 0);
+    const totalPueSessions = pgEntries.reduce((a, p) => a + p.pueSessionCount, 0);
+    const totalEntSessions = pgEntries.reduce((a, p) => a + p.entrepreneurshipCount, 0);
+    const allPueHighlights: Array<{ name: string; quote: string }> = [];
+    for (const s of summaries.filter((x) => x.status === "success")) {
+      const pg = playgroundMap.get(s.userId);
+      if (pg?.pueHighlights?.length) allPueHighlights.push({ name: s.name, quote: pg.pueHighlights[0] });
     }
-  }
-  const featuredHighlights = allPueHighlights.slice(0, 4);
+    const featuredHighlights = allPueHighlights.slice(0, 4);
 
-  const cohortPlaygroundHtml = pgEntries.length === 0 ? "" : `
-    <div style="background:#fffdf0;border:2px solid #fde68a;border-radius:12px;padding:18px 20px;margin-bottom:24px;">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
-        <span style="font-size:16px;">🎮</span>
-        <div style="font-size:13px;font-weight:700;color:#92400e;">Cohort AI Playground Summary — ${monthLabel}</div>
-        <span style="margin-left:auto;font-size:11px;color:#92400e;opacity:0.7;">${pgEntries.length} active learner${pgEntries.length !== 1 ? "s" : ""} · ${totalPgSessions} sessions · ${totalPgWords.toLocaleString()} words</span>
+    const bgGrad = city === "Ibiade"
+      ? "linear-gradient(135deg,#1a3d5c 0%,#1d6a8f 100%)"
+      : "linear-gradient(135deg,#1a3d2b 0%,#2d6a4f 100%)";
+    const accentColor = city === "Ibiade" ? "#52b0d0" : "#52b788";
+    const chipBg1 = city === "Ibiade" ? "#dbeafe" : "#dcfce7";
+    const chipColor1 = city === "Ibiade" ? "#1e3a8a" : "#166534";
+
+    return `
+  <!-- ── ${label} Cohort Section ── -->
+  <div style="margin-bottom:32px;">
+    <div style="background:${bgGrad};padding:20px 28px;border-radius:12px 12px 0 0;">
+      <div style="font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:${accentColor};margin-bottom:5px;font-weight:600;">${institution}</div>
+      <div style="font-size:18px;font-weight:800;color:#fff;">${label} — ${monthLabel}</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px;">${summaries.length} learner${summaries.length !== 1 ? "s" : ""} with history · ${successes.length} assessed this period</div>
+    </div>
+
+    <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:18px 20px;">
+      <!-- Stat chips -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;">
+        ${[
+          ["✅", "Assessed", successes.length, chipBg1, chipColor1],
+          ["📊", "Sessions", totalSessions, "#dbeafe", "#1e40af"],
+          ["⚡", "PUE Learner %", `${cohortAvg("pue_learner_initiated_pct")}%`, "#fef3c7", "#92400e"],
+          ["🔧", "Converging", converging, "#e0f2fe", "#0369a1"],
+          ["🌍", "Role-Ready", roleReady, "#f3e8ff", "#6b21a8"],
+          ["🎮", "Playground", playgroundActive, "#fef9c3", "#92400e"],
+        ].map(([icon, lbl, val, bg, color]) => `
+        <div style="flex:1;min-width:90px;background:${bg};border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:13px;margin-bottom:2px;">${icon}</div>
+          <div style="font-size:17px;font-weight:700;color:${color};">${val}</div>
+          <div style="font-size:8px;color:${color};font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">${lbl}</div>
+        </div>`).join("")}
       </div>
 
-      <!-- Stats row -->
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
-        <div style="background:#fff;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;text-align:center;min-width:90px;">
-          <div style="font-size:22px;font-weight:700;color:${totalPueSessions > 0 ? "#065f46" : "#9ca3af"};">${totalPueSessions}</div>
-          <div style="font-size:9px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;font-weight:600;">PUE Sessions</div>
+      ${pgEntries.length > 0 ? `
+      <!-- Playground summary for this cohort -->
+      <div style="background:#fffdf0;border:2px solid #fde68a;border-radius:10px;padding:14px 16px;margin-bottom:18px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+          <span style="font-size:14px;">🎮</span>
+          <div style="font-size:12px;font-weight:700;color:#92400e;">AI Playground — ${label}</div>
+          <span style="margin-left:auto;font-size:10px;color:#92400e;opacity:0.7;">${pgEntries.length} active · ${totalPgSessions} sessions · ${totalPgWords.toLocaleString()} words</span>
         </div>
-        <div style="background:#fff;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;text-align:center;min-width:90px;">
-          <div style="font-size:22px;font-weight:700;color:${totalEntSessions > 0 ? "#7c3aed" : "#9ca3af"};">${totalEntSessions}</div>
-          <div style="font-size:9px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;font-weight:600;">Enterprise Sessions</div>
-        </div>
-        <div style="flex:1;min-width:200px;">
-          <div style="font-size:10px;font-weight:600;color:#374151;margin-bottom:6px;">Most Common Topics Across Cohort</div>
-          <div style="display:flex;flex-wrap:wrap;gap:5px;">
-            ${sortedTopics.map(([topic, count]) =>
-              `<span style="background:#fef3c7;color:#92400e;padding:3px 9px;border-radius:12px;font-size:10px;font-weight:500;">${topic} <span style="opacity:0.6;">(${count})</span></span>`
-            ).join("")}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          <div style="background:#fff;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;text-align:center;min-width:75px;">
+            <div style="font-size:18px;font-weight:700;color:${totalPueSessions > 0 ? "#065f46" : "#9ca3af"};">${totalPueSessions}</div>
+            <div style="font-size:8px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;font-weight:600;">PUE Sessions</div>
+          </div>
+          <div style="background:#fff;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;text-align:center;min-width:75px;">
+            <div style="font-size:18px;font-weight:700;color:${totalEntSessions > 0 ? "#7c3aed" : "#9ca3af"};">${totalEntSessions}</div>
+            <div style="font-size:8px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;font-weight:600;">Enterprise</div>
+          </div>
+          <div style="flex:1;min-width:160px;">
+            <div style="font-size:9px;font-weight:600;color:#374151;margin-bottom:4px;">Top Topics</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px;">
+              ${sortedTopics.map(([topic, count]) =>
+                `<span style="background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:500;">${topic} <span style="opacity:0.6;">(${count})</span></span>`
+              ).join("")}
+            </div>
           </div>
         </div>
-      </div>
+        ${featuredHighlights.length ? `
+        <div style="font-size:9px;font-weight:700;color:#065f46;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.8px;">PUE Highlights</div>
+        ${featuredHighlights.map(({ name, quote }) =>
+          `<div style="display:flex;gap:6px;margin-bottom:4px;align-items:flex-start;">
+            <span style="font-size:9px;font-weight:600;color:#92400e;white-space:nowrap;padding-top:1px;">${name.split(" ")[0]}:</span>
+            <div style="padding:3px 8px;border-left:3px solid #f0c040;background:#fffbeb;border-radius:0 4px 4px 0;font-size:10px;color:#374151;font-style:italic;flex:1;">"${quote}"</div>
+          </div>`
+        ).join("")}` : ""}
+      </div>` : ""}
 
-      ${featuredHighlights.length ? `
-      <div style="font-size:10px;font-weight:700;color:#065f46;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.8px;">PUE &amp; Entrepreneurship Highlights from Free-Form Use</div>
-      ${featuredHighlights.map(({ name, quote }) =>
-        `<div style="display:flex;gap:8px;margin-bottom:5px;align-items:flex-start;">
-          <span style="font-size:10px;font-weight:600;color:#92400e;white-space:nowrap;padding-top:1px;">${name.split(" ")[0]}:</span>
-          <div style="padding:4px 10px;border-left:3px solid #f0c040;background:#fffbeb;border-radius:0 6px 6px 0;font-size:11px;color:#374151;font-style:italic;flex:1;">"${quote}"</div>
-        </div>`
-      ).join("")}` : ""}
+      <!-- Individual learner cards -->
+      <div style="font-size:12px;font-weight:600;color:#1a3d2b;margin-bottom:10px;">Individual Learner Progress — Longitudinal View</div>
+      ${userCards || `<div style="background:#fef9c3;border-radius:8px;padding:14px;color:#854d0e;font-size:12px;">No new assessments this period for ${label}.</div>`}
+    </div>
+  </div>`;
+  } // end buildCohortSection
 
-      <div style="margin-top:10px;font-size:10px;color:#92400e;opacity:0.7;">
-        The AI Playground gives learners unconstrained access to Claude beyond structured curriculum activities. PUE and enterprise use here is learner-initiated — not scaffolded by the curriculum.
-      </div>
-    </div>`;
+  const oloibiriHtml = buildCohortSection(oloibiriSummaries, "Oloibiri", "Oloibiri", "Davidson AI Innovation Center · Oloibiri, Bayelsa");
+  const ibiadeHtml   = buildCohortSection(ibiadeSummaries,   "Ibiade",   "Ibiade",   "Solardero Foundation · Ibiade, Ogun State");
+
+  const totalAssessed = [...oloibiriSummaries, ...ibiadeSummaries].filter((s) => s.status === "success").length;
+  const totalSessions = [...oloibiriSummaries, ...ibiadeSummaries].reduce((a, s) => a + (s.sessionCount || 0), 0);
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f2f8f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-<div style="max-width:760px;margin:20px auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+<div style="max-width:780px;margin:20px auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
 
-  <div style="background:linear-gradient(135deg,#1a3d2b 0%,#2d6a4f 100%);padding:32px 36px;">
-    <div style="font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:#52b788;margin-bottom:8px;font-weight:600;">Girls AIing &amp; Vibing · Oloibiri · Davidson AI Innovation Center</div>
-    <div style="font-size:26px;font-weight:800;color:#fff;margin-bottom:4px;">Monthly Assessment Report</div>
-    <div style="font-size:14px;color:rgba(255,255,255,0.55);">${monthLabel} · PUE Linkage + Longitudinal Analysis · v2.0</div>
+  <!-- ── Master header ── -->
+  <div style="background:linear-gradient(135deg,#0d1b14 0%,#1a3d2b 60%,#1a3d5c 100%);padding:28px 32px;">
+    <div style="font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:#52b788;margin-bottom:6px;font-weight:600;">
+      Girls AIing &amp; Vibing · Oloibiri (Davidson AI) &amp; Ibiade (Solardero)
+    </div>
+    <div style="font-size:24px;font-weight:800;color:#fff;margin-bottom:3px;">Monthly Assessment Report</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.5);">${monthLabel} · PUE Linkage + Longitudinal Analysis · v2.1</div>
+    <div style="display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;">
+      <div style="background:rgba(255,255,255,0.1);border-radius:8px;padding:8px 14px;text-align:center;">
+        <div style="font-size:20px;font-weight:700;color:#fff;">${totalAssessed}</div>
+        <div style="font-size:9px;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.8px;">Assessed</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.1);border-radius:8px;padding:8px 14px;text-align:center;">
+        <div style="font-size:20px;font-weight:700;color:#fff;">${totalSessions}</div>
+        <div style="font-size:9px;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.8px;">Total Sessions</div>
+      </div>
+      <div style="background:rgba(82,183,136,0.25);border-radius:8px;padding:8px 14px;text-align:center;">
+        <div style="font-size:20px;font-weight:700;color:#52b788;">${oloibiriSummaries.length}</div>
+        <div style="font-size:9px;color:#52b788;text-transform:uppercase;letter-spacing:0.8px;">Oloibiri</div>
+      </div>
+      <div style="background:rgba(82,176,208,0.25);border-radius:8px;padding:8px 14px;text-align:center;">
+        <div style="font-size:20px;font-weight:700;color:#52b0d0;">${ibiadeSummaries.length}</div>
+        <div style="font-size:9px;color:#52b0d0;text-transform:uppercase;letter-spacing:0.8px;">Ibiade</div>
+      </div>
+    </div>
   </div>
 
-  <div style="padding:24px 36px;">
+  <div style="padding:24px 32px;">
 
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;">
-      ${[
-        ["✅", "Assessed", successes.length, "#dcfce7", "#166534"],
-        ["📊", "Sessions", totalSessions, "#dbeafe", "#1e40af"],
-        ["⚡", "PUE Learner %", `${cohortAvg("pue_learner_initiated_pct")}%`, "#fef3c7", "#92400e"],
-        ["🔧", "Converging", converging, "#e0f2fe", "#0369a1"],
-        ["🌍", "Role-Ready", roleReady, "#f3e8ff", "#6b21a8"],
-        ["🧩", "Structured L3", `${cohortAvg("reasoning_structured_pct")}%`, "#dcfce7", "#166534"],
-        ["🎮", "Playground Active", playgroundActive, "#fef9c3", "#92400e"],
-      ].map(([icon, label, val, bg, color]) => `
-      <div style="flex:1;min-width:100px;background:${bg};border-radius:10px;padding:12px;text-align:center;">
-        <div style="font-size:16px;margin-bottom:3px;">${icon}</div>
-        <div style="font-size:20px;font-weight:700;color:${color};">${val}</div>
-        <div style="font-size:9px;color:${color};font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">${label}</div>
-      </div>`).join("")}
-    </div>
-
-    <!-- ── Column Key (above aggregate table) ───────────────────────── -->
-    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:16px;">
+    <!-- Column Key -->
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:24px;">
       <div style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Column Key</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px 20px;font-size:11px;color:#374151;">
-        <div><strong style="color:#1a3d2b;">COG</strong> — Cognitive (comprehension, recall, conceptual grasp)</div>
-        <div><strong style="color:#1a3d2b;">CT</strong> — Critical Thinking (analysis, evaluation, reasoning)</div>
-        <div><strong style="color:#1a3d2b;">PS</strong> — Problem Solving (definition, iteration, solutions)</div>
-        <div><strong style="color:#1a3d2b;">CRE</strong> — Creativity (originality, exploration, creative risk)</div>
-        <div><strong style="color:#1a3d2b;">PUE</strong> — Productive Use of Energy (energy-enterprise reasoning)</div>
-        <div><strong style="color:#1a3d2b;">AVG</strong> — Simple average of all 5 dimensions</div>
-        <div><strong style="color:#1a3d2b;">Sessions</strong> — Total dashboard sessions recorded in that period</div>
-        <div><strong style="color:#6b21a8;">App / Eth / Und / Ver</strong> — AI Proficiency GPT scores: Application, Ethics, Understanding, Verification (0–100)</div>
-        <div><strong style="color:#92400e;">Certs</strong> — Total certifications passed by the learner (all time)</div>
+        <div><strong style="color:#1a3d2b;">COG</strong> — Cognitive</div>
+        <div><strong style="color:#1a3d2b;">CT</strong> — Critical Thinking</div>
+        <div><strong style="color:#1a3d2b;">PS</strong> — Problem Solving</div>
+        <div><strong style="color:#1a3d2b;">CRE</strong> — Creativity</div>
+        <div><strong style="color:#1a3d2b;">PUE</strong> — Productive Use of Energy</div>
+        <div><strong style="color:#6b21a8;">App / Eth / Und / Ver</strong> — AI Proficiency (GPT, 0–100)</div>
+        <div><strong style="color:#92400e;">Certs</strong> — Certifications passed (all-time)</div>
       </div>
-      <div style="margin-top:10px;font-size:10px;color:#6b7280;">
-        Score key: &nbsp;
+      <div style="margin-top:8px;font-size:10px;color:#6b7280;">
         <span style="background:#bbf7d0;color:#14532d;padding:1px 6px;border-radius:3px;font-weight:600;">≥75 Strong</span> &nbsp;
         <span style="background:#bfdbfe;color:#1e40af;padding:1px 6px;border-radius:3px;font-weight:600;">55–74 Developing</span> &nbsp;
         <span style="background:#fef08a;color:#713f12;padding:1px 6px;border-radius:3px;font-weight:600;">35–54 Emerging</span> &nbsp;
-        <span style="background:#fecaca;color:#7f1d1d;padding:1px 6px;border-radius:3px;font-weight:600;">&lt;35 Needs Support</span> &nbsp;
-        <span style="color:#52b788;font-weight:700;">●</span> = most recent assessment &nbsp;·&nbsp; ▲▼ = trend vs prior period
+        <span style="background:#fecaca;color:#7f1d1d;padding:1px 6px;border-radius:3px;font-weight:600;">&lt;35 Needs Support</span>
       </div>
     </div>
 
-    <!-- ── Longitudinal Cohort Averages ─────────────────────────────── -->
+    <!-- ── Longitudinal cohort averages (combined) ── -->
     <div style="margin-bottom:24px;">
-      <div style="font-size:13px;font-weight:600;color:#1a3d2b;margin-bottom:4px;">Cohort Skill Averages — Longitudinal</div>
-      <div style="font-size:10px;color:#6b7280;margin-bottom:12px;">All months · cohort mean · ● = ${monthLabel} (most recent)</div>
+      <div style="font-size:13px;font-weight:600;color:#1a3d2b;margin-bottom:4px;">Combined Cohort Skill Averages — Longitudinal</div>
+      <div style="font-size:10px;color:#6b7280;margin-bottom:12px;">All months · cohort mean across both sites · ● = ${monthLabel}</div>
       <div style="overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:560px;">
         <thead>
@@ -1675,8 +1783,6 @@ function buildEmailHtml(
             <th style="padding:8px 10px;text-align:center;color:#a7f3d0;font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:0.8px;">Cre</th>
             <th style="padding:8px 10px;text-align:center;color:#a7f3d0;font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:0.8px;">PUE</th>
             <th style="padding:8px 10px;text-align:center;color:#a7f3d0;font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:0.8px;">Avg</th>
-            <th style="padding:8px 10px;text-align:center;color:#a7f3d0;font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:0.8px;">PUE%</th>
-            <th style="padding:8px 10px;text-align:center;color:#a7f3d0;font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:0.8px;">L-Init%</th>
             <th style="padding:8px 10px;text-align:center;color:#c4b5fd;font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:0.8px;">App</th>
             <th style="padding:8px 10px;text-align:center;color:#c4b5fd;font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:0.8px;">Eth</th>
             <th style="padding:8px 10px;text-align:center;color:#c4b5fd;font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:0.8px;">Und</th>
@@ -1759,77 +1865,16 @@ function buildEmailHtml(
     </div>
 
     <!-- ── Cohort Playground Summary ───────────────────────────────── -->
-    ${cohortPlaygroundHtml}
+    <!-- ── Oloibiri Cohort ── -->
+    ${oloibiriHtml}
 
-    <!-- ── Cohort Community Impact Summary ──────────────────────────── -->
-    ${(() => {
-      const ciSuccesses = successes.filter((s) => (s.scores?.ci_training_sessions_total || 0) > 0 || Object.keys(s.scores?.ci_cert_by_track || {}).length > 0);
-      if (ciSuccesses.length === 0) return "";
-
-      const ciTracks: Record<string, string> = {
-        ai_ambassadors: "AI Ambassadors",
-        agriculture_consultant: "Agriculture Consultant",
-        fishing_consultant: "Fishing Consultant",
-        healthcare_navigator: "Healthcare Navigator",
-        entrepreneurship_consultant: "Entrepreneurship Consultant",
-      };
-
-      // Per-track aggregates
-      const trackStats = Object.entries(ciTracks).map(([key, label]) => {
-        const trainersCount = ciSuccesses.filter((s) => (s.scores?.ci_training_sessions_by_track?.[key] || 0) > 0).length;
-        const totalSessions = ciSuccesses.reduce((a, s) => a + (s.scores?.ci_training_sessions_by_track?.[key] || 0), 0);
-        const evalScores = ciSuccesses
-          .map((s) => s.scores?.ci_training_eval_by_track?.[key]?.avg_overall)
-          .filter((v): v is number => v !== undefined);
-        const avgEval = evalScores.length ? (evalScores.reduce((a, b) => a + b, 0) / evalScores.length).toFixed(1) : null;
-        const certAttempted = ciSuccesses.filter((s) => s.scores?.ci_cert_by_track?.[key]?.attempted).length;
-        const certPassed    = ciSuccesses.filter((s) => s.scores?.ci_cert_by_track?.[key]?.passed).length;
-        return { key, label, trainersCount, totalSessions, avgEval, certAttempted, certPassed };
-      }).filter((t) => t.trainersCount > 0 || t.certAttempted > 0);
-
-      const totalCISessions = ciSuccesses.reduce((a, s) => a + (s.scores?.ci_training_sessions_total || 0), 0);
-      const totalCICertsPassed = ciSuccesses.reduce((a, s) => a + (s.scores?.ci_certs_passed_count || 0), 0);
-
-      const trackHtml = trackStats.map((t) => `
-        <tr style="border-top:1px solid #d1fae5;">
-          <td style="padding:7px 10px;font-size:11px;font-weight:600;color:#065f46;">${t.label}</td>
-          <td style="padding:7px 10px;text-align:center;font-family:monospace;font-size:11px;color:#1a3d2b;">${t.trainersCount}</td>
-          <td style="padding:7px 10px;text-align:center;font-family:monospace;font-size:11px;color:#374151;">${t.totalSessions}</td>
-          <td style="padding:7px 10px;text-align:center;font-family:monospace;font-size:11px;color:${t.avgEval && Number(t.avgEval) >= 2 ? "#166534" : "#92400e"};">${t.avgEval ? `${t.avgEval}/3` : "—"}</td>
-          <td style="padding:7px 10px;text-align:center;font-family:monospace;font-size:11px;color:#374151;">${t.certAttempted}</td>
-          <td style="padding:7px 10px;text-align:center;font-family:monospace;font-size:11px;font-weight:700;color:${t.certPassed > 0 ? "#166534" : "#9ca3af"};">${t.certPassed}</td>
-        </tr>`).join("");
-
-      return `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:10px;padding:18px 20px;margin-bottom:24px;">
-        <div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:4px;">🌍 Community Impact — ${monthLabel}</div>
-        <div style="font-size:11px;color:#374151;margin-bottom:14px;">${ciSuccesses.length} learner${ciSuccesses.length !== 1 ? "s" : ""} active · ${totalCISessions} total training sessions · ${totalCICertsPassed} CI cert${totalCICertsPassed !== 1 ? "s" : ""} passed all-time</div>
-        <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:11px;">
-          <tr style="background:#d1fae5;">
-            <th style="padding:6px 10px;text-align:left;font-size:9px;color:#065f46;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;">Track</th>
-            <th style="padding:6px 10px;text-align:center;font-size:9px;color:#065f46;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;">Learners</th>
-            <th style="padding:6px 10px;text-align:center;font-size:9px;color:#065f46;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;">Sessions</th>
-            <th style="padding:6px 10px;text-align:center;font-size:9px;color:#065f46;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;">Avg Eval</th>
-            <th style="padding:6px 10px;text-align:center;font-size:9px;color:#065f46;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;">Cert Attempts</th>
-            <th style="padding:6px 10px;text-align:center;font-size:9px;color:#065f46;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;">Certs Passed</th>
-          </tr>
-          ${trackHtml}
-        </table>
-        </div>
-      </div>`;
-    })()}
-
-    <!-- ── Individual Learner section heading ──────────────────────── -->
-    <div style="margin-bottom:16px;">
-      <div style="font-size:13px;font-weight:600;color:#1a3d2b;">Individual Learner Progress — Longitudinal View</div>
-    </div>
-
-    ${userCards || `<div style="background:#fef9c3;border-radius:8px;padding:16px;color:#854d0e;font-size:13px;">No new assessments this period.</div>`}
+    <!-- ── Ibiade Cohort ── -->
+    ${ibiadeHtml}
 
     <div style="border-top:1px solid #e5e7eb;padding-top:16px;color:#9ca3af;font-size:11px;">
-      <div>⏱️ ${(durationMs/1000).toFixed(1)}s &nbsp;·&nbsp; 🤖 GPT-4o v2.0 &nbsp;·&nbsp; 🌍 Africa cohort &nbsp;·&nbsp;
+      <div>⏱️ ${(durationMs/1000).toFixed(1)}s &nbsp;·&nbsp; 🤖 GPT-4o v2.1 &nbsp;·&nbsp; 🌍 Oloibiri + Ibiade &nbsp;·&nbsp;
         <a href="https://girls-aiing-and-vibing.vercel.app" style="color:#2d6a4f;text-decoration:none;">Open App ↗</a></div>
-      <div style="margin-top:3px;">v2.1 captures PUE domain linkage, scaffolding convergence, reasoning levels, metacognition, role readiness, enterprise artifacts, AI Proficiency scores (formal + GPT), certification summaries, and Community Impact training &amp; certification tracking.</div>
+      <div style="margin-top:3px;">v2.1: separate Oloibiri (Davidson AI) and Ibiade (Solardero) cohorts derived from profiles.city. Captures PUE domain linkage, scaffolding convergence, reasoning levels, metacognition, role readiness, enterprise artifacts, AI Proficiency (formal + GPT), certifications, and Community Impact.</div>
     </div>
   </div>
 </div>
@@ -1848,11 +1893,16 @@ async function sendEmailReport(
   const resendKey = process.env.RESEND_API_KEY;
   if (!resendKey) { console.warn("⚠️  RESEND_API_KEY not set"); return; }
 
+  // Fetch all Africa profiles with city so we can route each user to their cohort
   const { data: africanProfiles } = await supabase
-    .from("profiles").select("id, name").eq("continent", "Africa");
+    .from("profiles").select("id, name, city").eq("continent", "Africa");
 
   const nameMap: Record<string, string> = {};
-  for (const p of africanProfiles || []) nameMap[p.id] = p.name || "Unknown";
+  const profileCityMap: Record<string, string> = {};
+  for (const p of africanProfiles || []) {
+    nameMap[p.id] = p.name || "Unknown";
+    profileCityMap[p.id] = p.city === "Ibiade" ? "Ibiade" : "Oloibiri";
+  }
   const allIds = (africanProfiles || []).map((p) => p.id);
 
   const { data: anyAssessments } = await supabase
@@ -1868,12 +1918,14 @@ async function sendEmailReport(
   });
 
   const newCount = summaries.filter((s) => s.status === "success").length;
-  // Fetch playground summaries for all assessed users
+
+  // Fetch playground summaries — pass each user's city for context-aware GPT prompts
   const playgroundMap = new Map<string, PlaygroundSummary | null>();
   const assessedIds = allSummaries.filter((s) => s.status === "success").map((s) => s.userId);
   await Promise.all(
     assessedIds.map(async (id) => {
-      const pg = await fetchPlaygroundSummary(id, startDate, endDate);
+      const city = profileCityMap[id] ?? "Oloibiri";
+      const pg = await fetchPlaygroundSummary(id, startDate, endDate, city);
       playgroundMap.set(id, pg);
     })
   );
@@ -1887,21 +1939,38 @@ async function sendEmailReport(
     console.warn("   Cohort history fetch failed (non-fatal):", err.message);
   }
 
-  const html = buildEmailHtml(monthLabel, allSummaries, historyMap, playgroundMap, cohortHistory, durationMs);
+  // Split summaries by city cohort for separate sections
+  const oloibiriSummaries = allSummaries.filter((s) => (profileCityMap[s.userId] ?? "Oloibiri") === "Oloibiri");
+  const ibiadeSummaries   = allSummaries.filter((s) => profileCityMap[s.userId] === "Ibiade");
 
-  const res = await fetch("https://api.resend.com/emails", {
+  const html = buildEmailHtml(
+    monthLabel,
+    oloibiriSummaries,
+    ibiadeSummaries,
+    historyMap,
+    playgroundMap,
+    profileCityMap,
+    cohortHistory,
+    durationMs
+  );
+
+  const totalLearners = idsWithHistory.length;
+  const oloibiriCount = oloibiriSummaries.length;
+  const ibiadeCount   = ibiadeSummaries.length;
+
+  const emailRes = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       from: "Girls AIing & Vibing <onboarding@resend.dev>",
       to: ["khallinan1@udayton.edu"],
-      subject: `📊 Monthly Report — ${monthLabel} · ${newCount} assessed · ${idsWithHistory.length} learners total`,
+      subject: `📊 Monthly Report — ${monthLabel} · ${newCount} assessed · Oloibiri (${oloibiriCount}) + Ibiade (${ibiadeCount})`,
       html,
     }),
   });
 
-  if (!res.ok) console.error("❌ Resend error:", await res.text());
-  else console.log("✉️  Email sent to khallinan1@udayton.edu");
+  if (!emailRes.ok) console.error("❌ Resend error:", await emailRes.text());
+  else console.log(`✉️  Email sent to khallinan1@udayton.edu (${totalLearners} learners total)`);
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -1931,23 +2000,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const startTime = Date.now();
   try {
-    const userIds = await getAfricanUsersNeedingAssessment(startDate, endDate);
-    console.log(`\n📋 Users to assess: ${userIds.length}`);
+    const userEntries = await getAfricanUsersNeedingAssessment(startDate, endDate);
+    console.log(`\n📋 Users to assess: ${userEntries.length}`);
 
+    const userIds = userEntries.map((e) => e.userId);
     const { data: profiles } = await supabase.from("profiles").select("id, name").in("id", userIds);
     const nameMap: Record<string, string> = {};
     for (const p of profiles || []) nameMap[p.id] = p.name || "Unknown";
 
     const summaries: AssessmentSummary[] = [];
-    for (let i = 0; i < userIds.length; i++) {
-      const userId = userIds[i];
+    for (let i = 0; i < userEntries.length; i++) {
+      const { userId, city } = userEntries[i];
       const name = nameMap[userId] || userId.slice(0, 8) + "…";
-      console.log(`\n[${i + 1}/${userIds.length}] ${name}`);
+      console.log(`\n[${i + 1}/${userEntries.length}] ${name} (${city})`);
       const { result, sessionCount, engagedSessionCount, status, error } =
-        await assessMonthlySkills(userId, startDate, endDate);
+        await assessMonthlySkills(userId, startDate, endDate, city);
       summaries.push({ userId, name, sessionCount, engagedSessionCount, scores: result, status, error });
       console.log(`   → ${status} | sessions: ${sessionCount} | engaged: ${engagedSessionCount}`);
-      if (i < userIds.length - 1) await new Promise((r) => setTimeout(r, 2000));
+      if (i < userEntries.length - 1) await new Promise((r) => setTimeout(r, 2000));
     }
 
     const durationMs = Date.now() - startTime;

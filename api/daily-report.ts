@@ -39,6 +39,7 @@ const supabase = createClient(
 
 interface DailyMetrics {
   logDate: string;           // YYYY-MM-DD in WAT
+  city: string;              // "Oloibiri" | "Ibiade"
   totalAfricaUsers: number;
 
   // Distinct active users today
@@ -79,27 +80,18 @@ function todayWAT(): string {
   return wat.toISOString().split("T")[0];
 }
 
-async function fetchMetrics(logDate: string): Promise<DailyMetrics> {
+async function fetchMetrics(logDate: string, cohortIds: string[], city: string): Promise<DailyMetrics> {
   // Day boundaries in UTC (WAT day starts at UTC-1 offset, i.e. 23:00 prev day)
   // Since we run at 11:00 UTC = 12:00 WAT, we use the WAT date's UTC window:
   // WAT 00:00 = UTC 23:00 previous day → WAT 23:59 = UTC 22:59 same day
   const dayStartUTC = new Date(`${logDate}T00:00:00+01:00`).toISOString();
   const dayEndUTC   = new Date(`${logDate}T23:59:59+01:00`).toISOString();
 
-  // ── 1. Fetch all Africa user IDs ─────────────────────────────────────────
-  const { data: africaProfiles } = await supabase
-    .from("profiles")
-    .select("id, name")
-    .eq("continent", "Africa");
+  const totalAfricaUsers = cohortIds.length;
 
-  const allProfiles: UserProfile[] = (africaProfiles || [])
-    .filter((p) => !EXCLUDED_USER_IDS.has(p.id));
-  const africaIds = allProfiles.map((p) => p.id);
-  const totalAfricaUsers = africaIds.length;
-
-  if (!africaIds.length) {
+  if (!cohortIds.length) {
     return {
-      logDate, totalAfricaUsers: 0,
+      logDate, city, totalAfricaUsers: 0,
       activeUsers: 0, totalActivities: 0,
       catAiLearning: 0, catSkillsDevelopment: 0, catEnglishSkills: 0,
       catAiProficiencyCert: 0, catOther: 0,
@@ -109,47 +101,40 @@ async function fetchMetrics(logDate: string): Promise<DailyMetrics> {
   }
 
   // ── 2. Dashboard sessions started OR updated on this day ────────────────
-  // Fetch rows matching created_at in range, and rows matching updated_at in range,
-  // then merge by id so each row is counted once.
   const [{ data: createdRows }, { data: updatedRows }] = await Promise.all([
     supabase
       .from("dashboard")
       .select("id, user_id, category_activity, activity")
-      .in("user_id", africaIds)
+      .in("user_id", cohortIds)
       .not("chat_history", "is", null)
       .gte("created_at", dayStartUTC)
       .lte("created_at", dayEndUTC),
     supabase
       .from("dashboard")
       .select("id, user_id, category_activity, activity")
-      .in("user_id", africaIds)
+      .in("user_id", cohortIds)
       .not("chat_history", "is", null)
       .gte("updated_at", dayStartUTC)
       .lte("updated_at", dayEndUTC),
   ]);
 
-  // Deduplicate by row id — a session updated on the same day it was created counts once
   const sessionMap = new Map<string, { id: string; user_id: string; category_activity: string; activity: string }>();
   for (const row of [...(createdRows || []), ...(updatedRows || [])]) {
     sessionMap.set(row.id, row);
   }
   const sessionRows = [...sessionMap.values()];
-  const totalActivities = sessionRows.length;  // total rows — not distinct users
-
-  // Unique users active today (distinct)
+  const totalActivities = sessionRows.length;
   const activeUserSet = new Set(sessionRows.map((r) => r.user_id));
   const activeUsers = activeUserSet.size;
 
-  // ── 3. Category breakdown — ROW counts (not distinct users) ─────────────
+  // ── 3. Category breakdown ────────────────────────────────────────────────
   const catCounts: Record<string, number> = {
     aiLearning: 0, skillsDevelopment: 0,
     englishSkills: 0, aiProficiencyCert: 0, other: 0,
   };
-
   for (const row of sessionRows) {
     const cat = (row.category_activity || "").toLowerCase();
     const act = (row.activity || "").toLowerCase();
-
     if (cat.includes("ai learning") || (cat.includes("ai proficiency") && !act.includes("certification"))) {
       catCounts.aiLearning++;
     } else if (cat.includes("skills development") || cat.includes("vibe")) {
@@ -163,42 +148,27 @@ async function fetchMetrics(logDate: string): Promise<DailyMetrics> {
     }
   }
 
-  // ── 4. AI Playground usage on this day (created OR updated) ─────────────
+  // ── 4. AI Playground ─────────────────────────────────────────────────────
   const [{ data: pgCreated }, { data: pgUpdated }] = await Promise.all([
-    supabase
-      .from("ai_playground_chats")
-      .select("id, user_id")
-      .in("user_id", africaIds)
-      .gte("created_at", dayStartUTC)
-      .lte("created_at", dayEndUTC),
-    supabase
-      .from("ai_playground_chats")
-      .select("id, user_id")
-      .in("user_id", africaIds)
-      .gte("updated_at", dayStartUTC)
-      .lte("updated_at", dayEndUTC),
+    supabase.from("ai_playground_chats").select("id, user_id")
+      .in("user_id", cohortIds).gte("created_at", dayStartUTC).lte("created_at", dayEndUTC),
+    supabase.from("ai_playground_chats").select("id, user_id")
+      .in("user_id", cohortIds).gte("updated_at", dayStartUTC).lte("updated_at", dayEndUTC),
   ]);
-
   const pgMap = new Map<string, string>();
-  for (const row of [...(pgCreated || []), ...(pgUpdated || [])]) {
-    pgMap.set(row.id, row.user_id);
-  }
+  for (const row of [...(pgCreated || []), ...(pgUpdated || [])]) pgMap.set(row.id, row.user_id);
   const pgRowsToday = [...pgMap.entries()].map(([id, user_id]) => ({ id, user_id }));
   const playgroundUsers = new Set(pgRowsToday.map((r) => r.user_id)).size;
   const playgroundChatsTotal = pgRowsToday.length;
 
-  // ── 5. Certifications — all-time attempted ───────────────────────────────
+  // ── 5. Certifications ─────────────────────────────────────────────────────
   const { data: certRowsAllTime } = await supabase
-    .from("dashboard")
-    .select("user_id, created_at, updated_at")
-    .in("user_id", africaIds)
+    .from("dashboard").select("user_id, created_at, updated_at")
+    .in("user_id", cohortIds)
     .eq("activity", "AI Proficiency Certification")
     .not("certification_evaluation_score", "is", null);
-
   const certAllTime = certRowsAllTime || [];
   const certAttemptedUsers = new Set(certAllTime.map((r) => r.user_id)).size;
-
-  // Certification rows started OR updated today
   const certAttemptedToday = new Set(
     certAllTime
       .filter((r) =>
@@ -209,140 +179,152 @@ async function fetchMetrics(logDate: string): Promise<DailyMetrics> {
   ).size;
 
   return {
-    logDate,
-    totalAfricaUsers,
-    activeUsers,
-    totalActivities,
+    logDate, city, totalAfricaUsers,
+    activeUsers, totalActivities,
     catAiLearning:        catCounts.aiLearning,
     catSkillsDevelopment: catCounts.skillsDevelopment,
     catEnglishSkills:     catCounts.englishSkills,
     catAiProficiencyCert: catCounts.aiProficiencyCert,
     catOther:             catCounts.other,
-    playgroundUsers,
-    playgroundChatsTotal,
-    certAttemptedUsers,
-    certAttemptedToday,
+    playgroundUsers, playgroundChatsTotal,
+    certAttemptedUsers, certAttemptedToday,
   };
 }
 
 // ─── Email HTML ───────────────────────────────────────────────────────────────
 
-function chip(val: number | string, bg: string, color: string, label: string): string {
-  return `
-  <div style="flex:1;min-width:110px;background:${bg};border-radius:10px;padding:14px 12px;text-align:center;">
-    <div style="font-size:24px;font-weight:800;color:${color};line-height:1;">${val}</div>
-    <div style="font-size:9px;color:${color};font-weight:600;text-transform:uppercase;letter-spacing:0.9px;margin-top:4px;">${label}</div>
-  </div>`;
-}
-
-function catRow(label: string, count: number, total: number): string {
-  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-  const w = Math.min(pct * 1.8, 180);
-  const active = count > 0;
-  return `
-  <tr style="border-top:1px solid #e5e7eb;">
-    <td style="padding:8px 12px;font-size:12px;color:#374151;">${label}</td>
-    <td style="padding:8px 12px;text-align:center;font-size:13px;font-weight:700;color:${active ? "#1a3d2b" : "#9ca3af"};">${count}</td>
-    <td style="padding:8px 16px;">
-      <span style="display:inline-block;background:#e5e7eb;border-radius:3px;width:180px;height:8px;vertical-align:middle;">
-        <span style="display:inline-block;background:${active ? "#2d6a4f" : "#e5e7eb"};border-radius:3px;height:8px;width:${w}px;"></span>
-      </span>
-      <span style="font-size:11px;color:#6b7280;margin-left:8px;">${pct}%</span>
-    </td>
-  </tr>`;
-}
-
-function buildEmailHtml(m: DailyMetrics, dateLabel: string): string {
+function buildCohortPanel(m: DailyMetrics): string {
   const participationPct = m.totalAfricaUsers > 0
     ? Math.round((m.activeUsers / m.totalAfricaUsers) * 100)
     : 0;
+  const isIbiade = m.city === "Ibiade";
+  const accentBg    = isIbiade ? "#dbeafe" : "#dcfce7";
+  const accentColor = isIbiade ? "#1e3a8a" : "#166534";
+  const headerBg    = isIbiade
+    ? "linear-gradient(135deg,#1a3d5c 0%,#1d6a8f 100%)"
+    : "linear-gradient(135deg,#1a3d2b 0%,#2d6a4f 100%)";
+  const subtitleColor = isIbiade ? "#52b0d0" : "#52b788";
+  const institution   = isIbiade
+    ? "Solardero Foundation · Ibiade, Ogun State"
+    : "Davidson AI Innovation Center · Oloibiri, Bayelsa";
+
+  return `
+  <div style="margin-bottom:24px;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+    <div style="background:${headerBg};padding:16px 20px;">
+      <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:${subtitleColor};margin-bottom:4px;font-weight:600;">${institution}</div>
+      <div style="font-size:16px;font-weight:700;color:#fff;">${m.city} Cohort</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.5);">${m.totalAfricaUsers} total learners</div>
+    </div>
+    <div style="padding:16px 20px;">
+      <!-- Chips -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+        <div style="flex:1;min-width:90px;background:${accentBg};border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;font-weight:800;color:${accentColor};">${m.activeUsers}</div>
+          <div style="font-size:8px;color:${accentColor};font-weight:600;text-transform:uppercase;letter-spacing:0.9px;margin-top:3px;">Active Today</div>
+        </div>
+        <div style="flex:1;min-width:90px;background:#dbeafe;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;font-weight:800;color:#1e40af;">${participationPct}%</div>
+          <div style="font-size:8px;color:#1e40af;font-weight:600;text-transform:uppercase;letter-spacing:0.9px;margin-top:3px;">Participation</div>
+        </div>
+        <div style="flex:1;min-width:90px;background:#fef3c7;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;font-weight:800;color:#92400e;">${m.playgroundUsers}</div>
+          <div style="font-size:8px;color:#92400e;font-weight:600;text-transform:uppercase;letter-spacing:0.9px;margin-top:3px;">Playground</div>
+        </div>
+        <div style="flex:1;min-width:90px;background:#f3e8ff;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;font-weight:800;color:#6b21a8;">${m.certAttemptedUsers}</div>
+          <div style="font-size:8px;color:#6b21a8;font-weight:600;text-transform:uppercase;letter-spacing:0.9px;margin-top:3px;">Cert Attempted</div>
+        </div>
+      </div>
+      <!-- Session overview -->
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:#374151;">
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+          <div>Unique active users: <strong>${m.activeUsers}</strong></div>
+          <div>Total activity rows: <strong>${m.totalActivities}</strong></div>
+          <div>Avg/user: <strong>${m.activeUsers > 0 ? (m.totalActivities / m.activeUsers).toFixed(1) : "—"}</strong></div>
+        </div>
+      </div>
+      <!-- Category table -->
+      <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:12px;">
+        <thead>
+          <tr style="background:#f5faf6;">
+            <th style="padding:6px 10px;text-align:left;font-size:9px;color:#5a7060;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Category</th>
+            <th style="padding:6px 10px;text-align:center;font-size:9px;color:#5a7060;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Sessions</th>
+            <th style="padding:6px 16px;text-align:left;font-size:9px;color:#5a7060;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Share</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${catRow("🤖 AI Learning",         m.catAiLearning,        m.totalActivities)}
+          ${catRow("⚡ Skills Development",   m.catSkillsDevelopment, m.totalActivities)}
+          ${catRow("🌍 English Skills",       m.catEnglishSkills,     m.totalActivities)}
+          ${catRow("🏆 AI Proficiency Cert",  m.catAiProficiencyCert, m.totalActivities)}
+          ${m.catOther > 0 ? catRow("📁 Other", m.catOther, m.totalActivities) : ""}
+        </tbody>
+      </table>
+      <!-- Playground + cert row -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div style="flex:1;background:#fffdf0;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;">
+          <div style="font-size:10px;font-weight:600;color:#92400e;margin-bottom:4px;">🎮 Playground</div>
+          <div style="font-size:11px;color:#374151;">Users: <strong>${m.playgroundUsers}</strong> &nbsp; Chats: <strong>${m.playgroundChatsTotal}</strong></div>
+        </div>
+        <div style="flex:1;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px 12px;">
+          <div style="font-size:10px;font-weight:600;color:#4c1d95;margin-bottom:4px;">🏆 Certifications</div>
+          <div style="font-size:11px;color:#374151;">Ever attempted: <strong>${m.certAttemptedUsers}</strong> &nbsp; Today: <strong>${m.certAttemptedToday}</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function buildEmailHtml(oloibiri: DailyMetrics, ibiade: DailyMetrics, dateLabel: string): string {
+  const totalActive = oloibiri.activeUsers + ibiade.activeUsers;
+  const totalLearners = oloibiri.totalAfricaUsers + ibiade.totalAfricaUsers;
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f2f8f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-<div style="max-width:660px;margin:20px auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+<div style="max-width:700px;margin:20px auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
 
   <!-- Header -->
-  <div style="background:linear-gradient(135deg,#1a3d2b 0%,#2d6a4f 100%);padding:28px 32px;">
-    <div style="font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:#52b788;margin-bottom:6px;font-weight:600;">Girls AIing &amp; Vibing · Oloibiri · Davidson AI Innovation Center</div>
-    <div style="font-size:22px;font-weight:800;color:#fff;margin-bottom:3px;">Daily Activity Report</div>
-    <div style="font-size:13px;color:rgba(255,255,255,0.55);">${dateLabel} · 12:00 Nigerian Time (WAT)</div>
+  <div style="background:linear-gradient(135deg,#0d1b14 0%,#1a3d2b 60%,#1a3d5c 100%);padding:24px 28px;">
+    <div style="font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:#52b788;margin-bottom:5px;font-weight:600;">
+      Girls AIing &amp; Vibing · Oloibiri (Davidson AI) &amp; Ibiade (Solardero)
+    </div>
+    <div style="font-size:20px;font-weight:800;color:#fff;margin-bottom:2px;">Daily Activity Report</div>
+    <div style="font-size:11px;color:rgba(255,255,255,0.5);">${dateLabel} · 12:00 Nigerian Time (WAT)</div>
+    <div style="display:flex;gap:12px;margin-top:12px;flex-wrap:wrap;">
+      <div style="background:rgba(255,255,255,0.12);border-radius:7px;padding:7px 12px;text-align:center;">
+        <div style="font-size:18px;font-weight:700;color:#fff;">${totalActive}</div>
+        <div style="font-size:8px;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.8px;">Total Active</div>
+      </div>
+      <div style="background:rgba(82,183,136,0.2);border-radius:7px;padding:7px 12px;text-align:center;">
+        <div style="font-size:18px;font-weight:700;color:#52b788;">${oloibiri.activeUsers}</div>
+        <div style="font-size:8px;color:#52b788;text-transform:uppercase;letter-spacing:0.8px;">Oloibiri</div>
+      </div>
+      <div style="background:rgba(82,176,208,0.2);border-radius:7px;padding:7px 12px;text-align:center;">
+        <div style="font-size:18px;font-weight:700;color:#52b0d0;">${ibiade.activeUsers}</div>
+        <div style="font-size:8px;color:#52b0d0;text-transform:uppercase;letter-spacing:0.8px;">Ibiade</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.08);border-radius:7px;padding:7px 12px;text-align:center;">
+        <div style="font-size:18px;font-weight:700;color:rgba(255,255,255,0.7);">${totalLearners}</div>
+        <div style="font-size:8px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.8px;">Total Cohort</div>
+      </div>
+    </div>
   </div>
 
-  <div style="padding:24px 32px;">
-
-    <!-- Stat chips -->
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;">
-      ${chip(m.activeUsers,        "#dcfce7", "#166534", "Active Today")}
-      ${chip(`${participationPct}%`, "#dbeafe", "#1e40af", "Participation")}
-      ${chip(m.playgroundUsers,    "#fef3c7", "#92400e", "Playground")}
-      ${chip(m.certAttemptedUsers, "#f3e8ff", "#6b21a8", "Cert Attempted")}
-      ${chip(m.totalAfricaUsers,   "#f1f5f9", "#475569", "Total Cohort")}
-    </div>
-
-    <!-- Session overview -->
-    <div style="background:#f0fff4;border:1px solid #a7f3d0;border-radius:10px;padding:14px 16px;margin-bottom:20px;">
-      <div style="font-size:12px;font-weight:600;color:#065f46;margin-bottom:6px;">📊 Session Overview — Today</div>
-      <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:12px;color:#374151;">
-        <div>Unique active users: <strong>${m.activeUsers}</strong></div>
-        <div>Total activity rows updated: <strong>${m.totalActivities}</strong></div>
-        <div>Avg activities/active user: <strong>${m.activeUsers > 0 ? (m.totalActivities / m.activeUsers).toFixed(1) : "—"}</strong></div>
-      </div>
-    </div>
-
-    <!-- Category breakdown -->
-    <div style="margin-bottom:20px;">
-      <div style="font-size:13px;font-weight:600;color:#1a3d2b;margin-bottom:4px;">📚 Activity Rows by Category — Today</div>
-      <div style="font-size:10px;color:#6b7280;margin-bottom:8px;">Session counts with non-null chat history (one user may have multiple sessions across categories)</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;">
-        <thead>
-          <tr style="background:#f5faf6;">
-            <th style="padding:7px 12px;text-align:left;font-size:9px;color:#5a7060;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Category</th>
-            <th style="padding:7px 12px;text-align:center;font-size:9px;color:#5a7060;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Sessions</th>
-            <th style="padding:7px 16px;text-align:left;font-size:9px;color:#5a7060;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Share of total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${catRow("🤖 AI Learning",              m.catAiLearning,        m.totalActivities)}
-          ${catRow("⚡ Skills Development",        m.catSkillsDevelopment, m.totalActivities)}
-          ${catRow("🌍 English Skills",            m.catEnglishSkills,     m.totalActivities)}
-          ${catRow("🏆 AI Proficiency Cert",       m.catAiProficiencyCert, m.totalActivities)}
-          ${m.catOther > 0 ? catRow("📁 Other", m.catOther, m.totalActivities) : ""}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Playground -->
-    <div style="background:#fffdf0;border:2px solid #fde68a;border-radius:10px;padding:14px 16px;margin-bottom:20px;">
-      <div style="font-size:12px;font-weight:600;color:#92400e;margin-bottom:6px;">🎮 AI Playground — Today</div>
-      <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:12px;color:#374151;">
-        <div>Users active: <strong style="color:${m.playgroundUsers > 0 ? "#065f46" : "#9ca3af"};">${m.playgroundUsers}</strong></div>
-        <div>Chat sessions created/updated: <strong>${m.playgroundChatsTotal}</strong></div>
-      </div>
-    </div>
-
-    <!-- Certifications -->
-    <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px 16px;margin-bottom:24px;">
-      <div style="font-size:12px;font-weight:600;color:#4c1d95;margin-bottom:6px;">🏆 Certifications</div>
-      <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:12px;color:#374151;">
-        <div>Ever attempted (all-time): <strong style="color:#4c1d95;">${m.certAttemptedUsers}</strong> of ${m.totalAfricaUsers} learners</div>
-        <div>Updated today: <strong style="color:${m.certAttemptedToday > 0 ? "#166534" : "#9ca3af"};">${m.certAttemptedToday}</strong></div>
-      </div>
-    </div>
+  <div style="padding:20px 24px;">
+    ${buildCohortPanel(oloibiri)}
+    ${buildCohortPanel(ibiade)}
 
     <!-- Footer -->
-    <div style="border-top:1px solid #e5e7eb;padding-top:14px;color:#9ca3af;font-size:10px;">
-      <div>🕛 Generated at 12:00 WAT (11:00 UTC) &nbsp;·&nbsp; 🌍 Africa cohort &nbsp;·&nbsp;
+    <div style="border-top:1px solid #e5e7eb;padding-top:12px;color:#9ca3af;font-size:10px;">
+      <div>🕛 Generated at 12:00 WAT (11:00 UTC) &nbsp;·&nbsp; 🌍 Oloibiri + Ibiade cohorts &nbsp;·&nbsp;
         <a href="https://girls-aiing-and-vibing.vercel.app" style="color:#2d6a4f;text-decoration:none;">Open App ↗</a>
       </div>
-      <div style="margin-top:3px;">Facilitator accounts excluded. <strong>Active users</strong> and <strong>Playground users</strong> are distinct user counts. Category rows and Total Activities are dashboard row counts (one user may have multiple rows).</div>
+      <div style="margin-top:3px;">Facilitator accounts excluded. Active users and Playground users are distinct user counts per cohort. Cohorts derived from profiles.city.</div>
     </div>
-
   </div>
 </div>
 </body></html>`;
-}
-
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -351,7 +333,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isManualTrigger = req.headers["x-cron-secret"] === cronSecret && !!cronSecret;
   if (!isVercelCron && !isManualTrigger) return res.status(401).json({ error: "Unauthorized" });
 
-  // Allow manual override of the date via query param: ?date=2026-03-21
   const logDate = (req.query.date as string) || todayWAT();
   const dateLabel = new Date(logDate).toLocaleDateString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
@@ -360,50 +341,63 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log(`\n${"─".repeat(50)}\nDAILY REPORT — ${dateLabel}\n${"─".repeat(50)}`);
 
   try {
-    const metrics = await fetchMetrics(logDate);
+    // ── Fetch all Africa profiles with city to split into cohorts ────────────
+    const { data: africaProfiles } = await supabase
+      .from("profiles")
+      .select("id, city")
+      .eq("continent", "Africa");
 
-    console.log(`  Africa users:       ${metrics.totalAfricaUsers}`);
-    console.log(`  Active today:       ${metrics.activeUsers} unique users`);
-    console.log(`  Total activities:   ${metrics.totalActivities} rows`);
-    console.log(`  AI Learning:        ${metrics.catAiLearning}`);
-    console.log(`  Skills Dev:         ${metrics.catSkillsDevelopment}`);
-    console.log(`  English Skills:     ${metrics.catEnglishSkills}`);
-    console.log(`  AI Prof Cert:       ${metrics.catAiProficiencyCert}`);
-    console.log(`  Other:              ${metrics.catOther}`);
-    console.log(`  Playground users:   ${metrics.playgroundUsers}`);
-    console.log(`  Playground chats:   ${metrics.playgroundChatsTotal}`);
-    console.log(`  Cert attempted:     ${metrics.certAttemptedUsers} (all-time)`);
-    console.log(`  Cert today:         ${metrics.certAttemptedToday}`);
+    const allProfiles = (africaProfiles || []).filter((p) => !EXCLUDED_USER_IDS.has(p.id));
+    const oloibiriIds = allProfiles.filter((p) => p.city !== "Ibiade").map((p) => p.id);
+    const ibiadeIds   = allProfiles.filter((p) => p.city === "Ibiade").map((p) => p.id);
 
-    // Upsert — capture error explicitly
+    console.log(`  Oloibiri cohort: ${oloibiriIds.length} users`);
+    console.log(`  Ibiade cohort:   ${ibiadeIds.length} users`);
+
+    // ── Fetch metrics for both cohorts in parallel ───────────────────────────
+    const [oloibiriMetrics, ibiadeMetrics] = await Promise.all([
+      fetchMetrics(logDate, oloibiriIds, "Oloibiri"),
+      fetchMetrics(logDate, ibiadeIds,   "Ibiade"),
+    ]);
+
+    const logMetrics = (label: string, m: DailyMetrics) => {
+      console.log(`  [${label}] Active: ${m.activeUsers} · Activities: ${m.totalActivities} · Playground: ${m.playgroundUsers} · Certs: ${m.certAttemptedUsers}`);
+    };
+    logMetrics("Oloibiri", oloibiriMetrics);
+    logMetrics("Ibiade",   ibiadeMetrics);
+
+    // ── Upsert one row per cohort into daily_activity_log ───────────────────
+    // Note: daily_activity_log needs composite unique key on (log_date, city)
     let upsertError: string | null = null;
     try {
+      const upsertRows = [oloibiriMetrics, ibiadeMetrics].map((m) => ({
+        log_date:                m.logDate,
+        city:                    m.city,
+        logged_at:               new Date().toISOString(),
+        active_users:            m.activeUsers,
+        cat_ai_learning:         m.catAiLearning,
+        cat_skills_development:  m.catSkillsDevelopment,
+        cat_english_skills:      m.catEnglishSkills,
+        cat_ai_proficiency_cert: m.catAiProficiencyCert,
+        cat_other:               m.catOther,
+        playground_users:        m.playgroundUsers,
+        playground_chats_total:  m.playgroundChatsTotal,
+        cert_attempted_users:    m.certAttemptedUsers,
+        cert_attempted_today:    m.certAttemptedToday,
+        total_activities:        m.totalActivities,
+        total_africa_users:      m.totalAfricaUsers,
+      }));
       const { error } = await supabase
         .from("daily_activity_log")
-        .upsert({
-          log_date:                metrics.logDate,
-          logged_at:               new Date().toISOString(),
-          active_users:            metrics.activeUsers,
-          cat_ai_learning:         metrics.catAiLearning,
-          cat_skills_development:  metrics.catSkillsDevelopment,
-          cat_english_skills:      metrics.catEnglishSkills,
-          cat_ai_proficiency_cert: metrics.catAiProficiencyCert,
-          cat_other:               metrics.catOther,
-          playground_users:        metrics.playgroundUsers,
-          playground_chats_total:  metrics.playgroundChatsTotal,
-          cert_attempted_users:    metrics.certAttemptedUsers,
-          cert_attempted_today:    metrics.certAttemptedToday,
-          total_activities:        metrics.totalActivities,
-          total_africa_users:      metrics.totalAfricaUsers,
-        }, { onConflict: "log_date" });
+        .upsert(upsertRows, { onConflict: "log_date,city" });
       if (error) { upsertError = error.message; console.error("❌ Upsert error:", error.message); }
-      else console.log(`✅ daily_activity_log upserted for ${metrics.logDate}`);
+      else console.log(`✅ daily_activity_log upserted for ${logDate} (Oloibiri + Ibiade)`);
     } catch (e: any) {
       upsertError = e.message;
       console.error("❌ Upsert threw:", e.message);
     }
 
-    // Email — capture error explicitly
+    // ── Email ────────────────────────────────────────────────────────────────
     let emailError: string | null = null;
     try {
       const resendKey = process.env.RESEND_API_KEY;
@@ -411,8 +405,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         emailError = "RESEND_API_KEY not set";
         console.warn("⚠️  RESEND_API_KEY not set — skipping email");
       } else {
-        const html = buildEmailHtml(metrics, dateLabel);
-        const activeLabel = `${metrics.activeUsers} active · ${metrics.playgroundUsers} playground · ${metrics.certAttemptedUsers} cert`;
+        const html = buildEmailHtml(oloibiriMetrics, ibiadeMetrics, dateLabel);
+        const totalActive = oloibiriMetrics.activeUsers + ibiadeMetrics.activeUsers;
+        const activeLabel = `${totalActive} active (${oloibiriMetrics.activeUsers} Oloibiri · ${ibiadeMetrics.activeUsers} Ibiade)`;
         const emailRes = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
@@ -424,8 +419,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }),
         });
         if (!emailRes.ok) {
-          const txt = await emailRes.text();
-          emailError = `Resend ${emailRes.status}: ${txt}`;
+          emailError = `Resend ${emailRes.status}: ${await emailRes.text()}`;
           console.error("❌ Resend error:", emailError);
         } else {
           console.log("✉️  Daily report emailed");
@@ -438,24 +432,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({
       date: logDate,
-      metrics: {
-        activeUsers:       metrics.activeUsers,
-        totalActivities:   metrics.totalActivities,
-        totalAfricaUsers:  metrics.totalAfricaUsers,
-        categories: {
-          aiLearning:        metrics.catAiLearning,
-          skillsDevelopment: metrics.catSkillsDevelopment,
-          englishSkills:     metrics.catEnglishSkills,
-          aiProficiencyCert: metrics.catAiProficiencyCert,
-          other:             metrics.catOther,
-        },
-        playgroundUsers:    metrics.playgroundUsers,
-        certAttemptedUsers: metrics.certAttemptedUsers,
+      oloibiri: {
+        activeUsers: oloibiriMetrics.activeUsers,
+        totalActivities: oloibiriMetrics.totalActivities,
+        totalLearners: oloibiriMetrics.totalAfricaUsers,
       },
-      upsertOk:    upsertError === null,
-      upsertError: upsertError,
-      emailOk:     emailError === null,
-      emailError:  emailError,
+      ibiade: {
+        activeUsers: ibiadeMetrics.activeUsers,
+        totalActivities: ibiadeMetrics.totalActivities,
+        totalLearners: ibiadeMetrics.totalAfricaUsers,
+      },
+      upsertOk: upsertError === null,
+      upsertError,
+      emailOk: emailError === null,
+      emailError,
     });
   } catch (err: any) {
     console.error("❌ Fatal:", err.message);
