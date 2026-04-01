@@ -1713,6 +1713,11 @@ function buildEmailHtml(
   const totalAssessed = [...oloibiriSummaries, ...ibiadeSummaries].filter((s) => s.status === "success").length;
   const totalSessions = [...oloibiriSummaries, ...ibiadeSummaries].reduce((a, s) => a + (s.sessionCount || 0), 0);
 
+  // Combined average across both cohorts — used in outer PUE linkage summary
+  const allSuccesses = [...oloibiriSummaries, ...ibiadeSummaries].filter((s) => s.status === "success");
+  const allAvg = (key: keyof MonthlySkillsResult) =>
+    allSuccesses.length ? Math.round(allSuccesses.reduce((a, s) => a + ((s.scores?.[key] as number) || 0), 0) / allSuccesses.length) : 0;
+
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f2f8f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
@@ -1854,13 +1859,13 @@ function buildEmailHtml(
     <div style="background:#f0fff4;border:1px solid #a7f3d0;border-radius:10px;padding:16px;margin-bottom:24px;">
       <div style="font-size:12px;font-weight:600;color:#065f46;margin-bottom:8px;">⚡ Cohort PUE Linkage — ${monthLabel}</div>
       <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:11px;color:#374151;line-height:1.8;">
-        <div>🔋 Energy Constraint: <strong>${cohortAvg("pue_energy_constraint_pct")}%</strong></div>
-        <div>📈 Market Pricing: <strong>${cohortAvg("pue_market_pricing_pct")}%</strong></div>
-        <div>🏪 Enterprise Planning: <strong>${cohortAvg("pue_enterprise_planning_pct")}%</strong></div>
-        <div>🗣 Learner-Initiated: <strong>${cohortAvg("pue_learner_initiated_pct")}%</strong></div>
-        <div>🤖 AI-Introduced: <strong>${cohortAvg("pue_ai_introduced_pct")}%</strong></div>
-        <div>🌐 Multi-Domain: <strong>${cohortAvg("pue_multi_domain_pct")}%</strong></div>
-        <div>📍 Local Context: <strong>${cohortAvg("pue_local_context_pct")}%</strong></div>
+        <div>🔋 Energy Constraint: <strong>${allAvg("pue_energy_constraint_pct")}%</strong></div>
+        <div>📈 Market Pricing: <strong>${allAvg("pue_market_pricing_pct")}%</strong></div>
+        <div>🏪 Enterprise Planning: <strong>${allAvg("pue_enterprise_planning_pct")}%</strong></div>
+        <div>🗣 Learner-Initiated: <strong>${allAvg("pue_learner_initiated_pct")}%</strong></div>
+        <div>🤖 AI-Introduced: <strong>${allAvg("pue_ai_introduced_pct")}%</strong></div>
+        <div>🌐 Multi-Domain: <strong>${allAvg("pue_multi_domain_pct")}%</strong></div>
+        <div>📍 Local Context: <strong>${allAvg("pue_local_context_pct")}%</strong></div>
       </div>
     </div>
 
