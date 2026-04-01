@@ -1,7 +1,7 @@
 // api/generate-community-profile.ts
 // Vercel Serverless Function
 // Usage: POST /api/generate-community-profile
-// Body: { city_town, state, country, user_id? }
+// Body: { city_town, state, country }
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
@@ -14,9 +14,13 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!   // service role needed for storage + inserts
 );
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
+// Vercel exposes ALL env vars to serverless functions regardless of prefix,
+// so this works whether the key is stored as ANTHROPIC_API_KEY or VITE_ANTHROPIC_API_KEY
+const anthropicApiKey = process.env.ANTHROPIC_API_KEY ?? process.env.VITE_ANTHROPIC_API_KEY;
+if (!anthropicApiKey) {
+  throw new Error('No Anthropic API key found in Vercel env. Set ANTHROPIC_API_KEY or VITE_ANTHROPIC_API_KEY.');
+}
+const anthropic = new Anthropic({ apiKey: anthropicApiKey });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -212,57 +216,67 @@ async function fetchModuleStructure(): Promise<Map<string, CategoryGroup>> {
 }
 
 // ─── Step 4: Generate contextually aligned modules via Claude ──────────────
+// Strategy: one API call per group, large groups chunked into batches of 25,
+// all batches run concurrently via Promise.all.
 
-async function generateModules(
+const BATCH_SIZE = 25;
+
+async function generateBatch(
   city_town: string,
   state: string,
   country: string,
-  profile: string,
-  groups: Map<string, CategoryGroup>
+  profileSnippet: string,
+  group: CategoryGroup,
+  batchIndex: number,
+  totalBatches: number
 ): Promise<GeneratedModule[]> {
+  const sampleTitles = group.samples.map((s) => `"${s.title}"`).join(', ');
+  const sampleDesc = group.samples[0]?.description ?? '';
+  const rowCount = batchIndex < totalBatches - 1
+    ? BATCH_SIZE
+    : group.count - batchIndex * BATCH_SIZE;
 
-  const groupDescriptions = Array.from(groups.values())
-    .map((g) => {
-      const sampleTitles = g.samples.map((s) => `"${s.title}"`).join(', ');
-      const sampleDesc = g.samples[0]?.description ?? '';
-      return (
-        `CATEGORY: "${g.category}" | SUB_CATEGORY: "${g.sub_category}" | ` +
-        `ROWS_NEEDED: ${g.count} | SAMPLE_TITLES: [${sampleTitles}] | ` +
-        `SAMPLE_DESC: "${sampleDesc.substring(0, 150)}..." | ` +
-        `LEARNING_OR_CERT: "${g.learning_or_certification}" | ` +
-        `ASSESSMENT_CATEGORY: "${g.assessment_category ?? 'null'}"`
-      );
-    })
-    .join('\n');
+  const batchNote = totalBatches > 1
+    ? `This is batch ${batchIndex + 1} of ${totalBatches}. Generate exactly ${rowCount} rows.`
+    : `Generate exactly ${rowCount} rows.`;
 
-  const prompt = `You are an expert curriculum designer creating hyper-local learning modules for an AI literacy platform.
-
-COMMUNITY PROFILE (use this to ground every module in local context):
-${profile}
-
-TASK:
-Generate new learning_modules rows for the category/sub_category groups below. Each module must be:
-- 100% contextually aligned with ${city_town}, ${state}, ${country} (reference local livelihoods, crops, businesses, challenges)
-- Following the same thematic structure as the sample titles (same pedagogy, same depth, same type of activity)
-- Producing exactly ROWS_NEEDED rows per group
-
-GROUPS TO GENERATE:
-${groupDescriptions}
-
-REQUIRED JSON FIELDS for each object:
-- title: string (concise, specific to this community)
-- description: string (2-3 sentences, locally grounded)
-- category: string (EXACT value from CATEGORY above)
-- sub_category: string (EXACT value from SUB_CATEGORY above)
-- outcomes: string (3-5 measurable learning outcomes)
-- metrics_for_success: string (how mastery is measured)
-- grade_level: number (1-5, match existing samples)
-- ai_facilitator_instructions: string (specific guidance for the AI facilitator, referencing local context)
-- ai_assessment_instructions: string (how the AI should assess this module)
-- learning_or_certification: string (EXACT value from LEARNING_OR_CERT above)
-- assessment_category: string or null (EXACT value from ASSESSMENT_CATEGORY above)
-
-Return ONLY a raw JSON array. No preamble, no explanation, no markdown fences.`;
+  const prompt = [
+    'You are an expert curriculum designer creating hyper-local learning modules for an AI literacy platform.',
+    '',
+    'COMMUNITY PROFILE (context):',
+    profileSnippet,
+    '',
+    'TASK:',
+    `Generate new learning_modules rows for this category/sub_category:`,
+    `  CATEGORY: "${group.category}"`,
+    `  SUB_CATEGORY: "${group.sub_category}"`,
+    `  LEARNING_OR_CERT: "${group.learning_or_certification}"`,
+    `  ASSESSMENT_CATEGORY: "${group.assessment_category ?? 'null'}"`,
+    `  SAMPLE_TITLES: [${sampleTitles}]`,
+    `  SAMPLE_DESC_EXAMPLE: "${sampleDesc.substring(0, 200)}..."`,
+    '',
+    batchNote,
+    '',
+    'Each module must be:',
+    `- 100% contextually aligned with ${city_town}, ${state}, ${country}`,
+    '- Following the same thematic style as the sample titles',
+    '- Distinct from others in this batch',
+    '',
+    'REQUIRED JSON FIELDS per object:',
+    '- title: string',
+    '- description: string (2-3 sentences, locally grounded)',
+    `- category: "${group.category}"`,
+    `- sub_category: "${group.sub_category}"`,
+    '- outcomes: string (3-5 measurable outcomes)',
+    '- metrics_for_success: string',
+    '- grade_level: number (1-5)',
+    '- ai_facilitator_instructions: string (reference local context)',
+    '- ai_assessment_instructions: string',
+    `- learning_or_certification: "${group.learning_or_certification}"`,
+    `- assessment_category: ${group.assessment_category ? '"' + group.assessment_category + '"' : 'null'}`,
+    '',
+    'Return ONLY a raw JSON array. No preamble, no markdown fences.',
+  ].join('\n');
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
@@ -275,18 +289,44 @@ Return ONLY a raw JSON array. No preamble, no explanation, no markdown fences.`;
     .map((b) => b.text)
     .join('');
 
-  let parsed: GeneratedModule[];
   try {
-    parsed = JSON.parse(extractJSON(raw));
-  } catch (e) {
-    throw new Error(`Failed to parse generated modules JSON. Raw response preview: ${raw.substring(0, 300)}`);
+    const parsed = JSON.parse(extractJSON(raw));
+    if (!Array.isArray(parsed)) throw new Error('Response was not a JSON array');
+    return parsed as GeneratedModule[];
+  } catch {
+    throw new Error(
+      `Parse error: ${group.category}/${group.sub_category} batch ${batchIndex + 1}/${totalBatches}. ` +
+      `Preview: ${raw.substring(0, 200)}`
+    );
+  }
+}
+
+async function generateModules(
+  city_town: string,
+  state: string,
+  country: string,
+  profile: string,
+  groups: Map<string, CategoryGroup>
+): Promise<GeneratedModule[]> {
+  // Trim profile to avoid bloating each prompt
+  const profileSnippet = profile.substring(0, 3000);
+
+  // Build one task per batch across all groups
+  const tasks: Array<() => Promise<GeneratedModule[]>> = [];
+
+  for (const group of groups.values()) {
+    const totalBatches = Math.ceil(group.count / BATCH_SIZE);
+    for (let i = 0; i < totalBatches; i++) {
+      const g = group;
+      const idx = i;
+      const total = totalBatches;
+      tasks.push(() => generateBatch(city_town, state, country, profileSnippet, g, idx, total));
+    }
   }
 
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error('Generated modules response was not a non-empty array.');
-  }
-
-  return parsed;
+  // Run all batches in parallel
+  const results = await Promise.all(tasks.map((t) => t()));
+  return results.flat();
 }
 
 // ─── Step 5: Insert modules into Supabase ─────────────────────────────────
