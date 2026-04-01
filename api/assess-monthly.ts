@@ -1556,11 +1556,21 @@ async function sendEmailReport(
     .filter((id) => !EXCLUDED_USER_IDS.has(id)) as string[];
   const historyMap = await fetchAllHistoricalData(idsWithHistory);
 
-  const summaryMap = new Map(summaries.map((s) => [s.userId, s]));
-  const allSummaries: AssessmentSummary[] = idsWithHistory.map((id) => {
-    if (summaryMap.has(id)) { const s = summaryMap.get(id)!; s.name = nameMap[id] || "Unknown"; return s; }
-    return { userId: id, name: nameMap[id] || "Unknown", sessionCount: 0, engagedSessionCount: 0, scores: null, status: "skipped" };
-  });
+  const results = await Promise.allSettled(
+    userIds.map(async (userId) => {
+      const name = nameMap[userId] || userId.slice(0, 8) + "…";
+      const { result, sessionCount, engagedSessionCount, status, error } =
+        await assessMonthlySkills(userId, startDate, endDate);
+      console.log(`   → ${name} | ${status} | sessions: ${sessionCount}`);
+      return { userId, name, sessionCount, engagedSessionCount, scores: result, status, error } as AssessmentSummary;
+    })
+  );
+  
+  const summaries: AssessmentSummary[] = results.map((r, i) =>
+    r.status === "fulfilled"
+      ? r.value
+      : { userId: userIds[i], name: nameMap[userIds[i]] || "Unknown", sessionCount: 0, engagedSessionCount: 0, scores: null, status: "error" as const, error: r.reason?.message }
+  );
 
   const newCount = summaries.filter((s) => s.status === "success").length;
   // Fetch playground summaries for all assessed users
