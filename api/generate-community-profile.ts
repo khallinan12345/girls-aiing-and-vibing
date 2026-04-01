@@ -174,12 +174,15 @@ async function uploadProfile(
 // ─── Step 3: Fetch existing module structure from Supabase ────────────────
 
 async function fetchModuleStructure(): Promise<Map<string, CategoryGroup>> {
+  // Use Oloibiri, Nigeria as the canonical reference — new communities get
+  // the same number of modules per group as Oloibiri, not the global total.
   const { data, error } = await supabase
     .from('learning_modules')
     .select(
       'category, sub_category, title, description, outcomes, grade_level, learning_or_certification, assessment_category'
     )
     .in('category', ['AI Proficiency', 'Skills'])
+    .eq('city_town', 'Oloibiri')
     .order('category')
     .order('sub_category');
 
