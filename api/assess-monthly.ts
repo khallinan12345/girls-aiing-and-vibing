@@ -1088,6 +1088,28 @@ function buildUserCard(
     ${historyRows}
   </table>
 
+  <!-- ── Score Evidence ──────────────────────────────────────── -->
+  <div style="border-top:1px solid #d0e8d8;background:#f8fbf9;padding:13px 16px;">
+    <div style="font-size:11px;font-weight:600;color:#1a3d2b;margin-bottom:10px;">📝 Score Evidence</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      ${([
+        ["🧠 Cognitive", s.cognitive_score, s.cognitive_evidence],
+        ["🔍 Critical Thinking", s.critical_thinking_score, s.critical_thinking_evidence],
+        ["⚙️ Problem Solving", s.problem_solving_score, s.problem_solving_evidence],
+        ["🎨 Creativity", s.creativity_score, s.creativity_evidence],
+        ["⚡ PUE", s.pue_score, s.pue_evidence],
+      ] as [string, number, string[]][]).map(([label, score, evidence]) => `
+      <div style="flex:1;min-width:180px;background:#fff;border:1px solid #d0e8d8;border-radius:8px;padding:8px 10px;">
+        <div style="font-size:10px;font-weight:700;color:#1a3d2b;margin-bottom:5px;display:flex;align-items:center;gap:5px;">
+          ${label} ${sc(score)}
+        </div>
+        <ul style="margin:0;padding-left:14px;font-size:10px;color:#374151;line-height:1.7;">
+          ${(evidence || []).map((e) => `<li style="margin-bottom:2px;">${e}</li>`).join("") || `<li style="color:#9ca3af;">No evidence recorded.</li>`}
+        </ul>
+      </div>`).join("")}
+    </div>
+  </div>
+
   <div style="padding:13px 16px;border-top:1px solid #d0e8d8;background:#fafffe;">
     <div style="font-size:11px;font-weight:600;color:#1a3d2b;margin-bottom:8px;">⚡ PUE Domain Coverage</div>
     <div style="display:flex;gap:20px;flex-wrap:wrap;">
