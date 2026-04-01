@@ -1646,7 +1646,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const startStr  = startDate.toISOString().split("T")[0];
   const endStr    = endDate.toISOString().split("T")[0];
   const monthLabel = startDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  const baseUrl   = `https://${req.headers.host}/api/assess-monthly`;
+  const baseUrl = process.env.VERCEL_URL
+  ? `https://${process.env.VERCEL_URL}/api/assess-monthly`
+  : `https://${req.headers.host}/api/assess-monthly`;
   const authHeader = { "x-cron-secret": cronSecret! };
 
   // ── MODE 2: Single-user assessment ────────────────────────────────────────
