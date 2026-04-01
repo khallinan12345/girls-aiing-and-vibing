@@ -18,13 +18,13 @@
  * Sends a rich longitudinal email report to khallinan1@udayton.edu.
  *
  * Required env vars:
- *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY,
+ *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
  *   RESEND_API_KEY, CRON_SECRET
  */
 
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-
+export const maxDuration = 600; // 5 min — requires Vercel Pro
 // ─── Excluded Users (admins / facilitators — never assessed or reported) ─────
 // All Kevin Hallinan and Bennywhite Davidson accounts — never assessed or shown in reports
 const EXCLUDED_USER_IDS = new Set([
@@ -1642,7 +1642,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await assessMonthlySkills(userId, startDate, endDate);
       summaries.push({ userId, name, sessionCount, engagedSessionCount, scores: result, status, error });
       console.log(`   → ${status} | sessions: ${sessionCount} | engaged: ${engagedSessionCount}`);
-      if (i < userIds.length - 1) await new Promise((r) => setTimeout(r, 2000));
     }
 
     const durationMs = Date.now() - startTime;
