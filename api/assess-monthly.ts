@@ -1,11 +1,12 @@
 /**
- * MONTHLY SKILLS ASSESSMENT v2.3 — Vercel Cron Handler
- * FIXED:
+ * MONTHLY SKILLS ASSESSMENT v2.4 — Vercel Cron Handler
+ * FIXES:
  * 1. Direct Anthropic API call (no internal /api/chat hop)
  * 2. Correct Anthropic response format (data.content[0].text)
  * 3. System message extracted to top-level param
  * 4. Empty chat_history filtered before no_activity check
  * 5. Correct engaged session counts passed to prompt
+ * 6. offset + limit params to avoid 300s timeout on large cohorts
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -250,7 +251,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const startTime = Date.now();
-  const { start, end } = req.query;
+  const { start, end, offset: offsetParam, limit: limitParam } = req.query;
+
   const startDate = start
     ? new Date(start as string)
     : new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
@@ -263,10 +265,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select("id, name, city")
     .eq("continent", "Africa");
 
-  const users = (profiles || []).filter(p => !EXCLUDED_USER_IDS.has(p.id));
+  // offset + limit allow chunked backfills to avoid the 300s Vercel timeout
+  const offset = offsetParam ? parseInt(offsetParam as string) : 0;
+  const limit  = limitParam  ? parseInt(limitParam  as string) : 15;
+  const users  = (profiles || [])
+    .filter(p => !EXCLUDED_USER_IDS.has(p.id))
+    .slice(offset, offset + limit);
 
   const summaries: any[] = [];
-  const BATCH_SIZE = 3;
+  const BATCH_SIZE = 2; // 2 concurrent Anthropic calls keeps well under timeout
 
   for (let i = 0; i < users.length; i += BATCH_SIZE) {
     const batch = users.slice(i, i + BATCH_SIZE);
@@ -287,10 +294,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   await resend.emails.send({
     from: "AI Assessment <assessments@girls-aiing-and-vibing.vercel.app>",
     to: "khallinan1@udayton.edu",
-    subject: `Monthly Assessment: ${monthLabel}`,
+    subject: `Monthly Assessment: ${monthLabel} (offset ${offset})`,
     html: `
       <h2>Monthly Progress Report: ${monthLabel}</h2>
-      <p>Duration: ${(durationMs / 1000).toFixed(1)}s</p>
+      <p>Chunk: users ${offset}–${offset + limit - 1} &nbsp;|&nbsp; Duration: ${(durationMs / 1000).toFixed(1)}s</p>
       <hr/>
       <table border="1" cellpadding="5" style="border-collapse: collapse;">
         <thead>
@@ -314,11 +321,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({
     month: monthLabel,
     period: `${startDate.toISOString().slice(0, 10)} → ${endDate.toISOString().slice(0, 10)}`,
-    assessed: summaries.filter(s => s.status === "success").length,
-    skipped: summaries.filter(s => s.status === "skipped").length,
+    chunk: `users ${offset}–${offset + limit - 1}`,
+    assessed:   summaries.filter(s => s.status === "success").length,
+    skipped:    summaries.filter(s => s.status === "skipped").length,
     noActivity: summaries.filter(s => s.status === "no_activity").length,
-    errors: summaries.filter(s => s.status === "error").length,
-    errorDetails: summaries.filter(s => s.status === "error").map(s => ({ name: s.name, error: s.error })),
+    errors:     summaries.filter(s => s.status === "error").length,
+    errorDetails: summaries
+      .filter(s => s.status === "error")
+      .map(s => ({ name: s.name, error: s.error })),
     durationMs,
   });
 }
