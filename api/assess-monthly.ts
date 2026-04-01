@@ -1726,20 +1726,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const userIds = await getAfricanUsersNeedingAssessment(startDate, endDate);
     console.log(`📋 Firing ${userIds.length} single-user requests`);
 
-    // Fire all per-user requests without awaiting — each runs in its own Vercel function invocation
-    for (const userId of userIds) {
-      fetch(
-        `${baseUrl}?start=${startStr}&end=${endStr}&userId=${userId}`,
-        { headers: authHeader }
-      ).catch((e) => console.warn(`Fire-and-forget error for ${userId}:`, e.message));
-    }
+    // Await all per-user requests in parallel so Vercel doesn't kill them on response
+    const settled = await Promise.allSettled(
+      userIds.map((userId) =>
+        fetch(
+          `${baseUrl}?start=${startStr}&end=${endStr}&userId=${userId}`,
+          { headers: authHeader }
+        ).then((r) => r.json())
+      )
+    );
+
+    const succeeded = settled.filter((r) => r.status === "fulfilled").length;
+    const failed    = settled.filter((r) => r.status === "rejected").length;
+    console.log(`Orchestrate done -- ${succeeded} succeeded, ${failed} failed`);
 
     return res.status(200).json({
       mode: "orchestrate",
       month: monthLabel,
-      period: `${startStr} → ${endStr}`,
-      fired: userIds.length,
-      message: `${userIds.length} assessment(s) running. Wait ~2 min then call ?mode=report to send the email.`,
+      period: `${startStr} to ${endStr}`,
+      total: userIds.length,
+      succeeded,
+      failed,
+      message: `${succeeded}/${userIds.length} assessed. Now call ?mode=report to send the email.`,
     });
   } catch (err: any) {
     console.error("❌ Orchestrate fatal:", err.message);
