@@ -1,9 +1,11 @@
 /**
- * MONTHLY SKILLS ASSESSMENT v2.2 — Vercel Cron Handler
- * * UPGRADED:
- * 1. Engine: Claude Sonnet 4.6 (via internal api/chat.js)
- * 2. Performance: Batch Processing (3 users/batch) to prevent Vercel Timeouts
- * 3. Resilience: Error handling for individual user failures
+ * MONTHLY SKILLS ASSESSMENT v2.3 — Vercel Cron Handler
+ * FIXED:
+ * 1. Direct Anthropic API call (no internal /api/chat hop)
+ * 2. Correct Anthropic response format (data.content[0].text)
+ * 3. System message extracted to top-level param
+ * 4. Empty chat_history filtered before no_activity check
+ * 5. Correct engaged session counts passed to prompt
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -21,10 +23,10 @@ const EXCLUDED_USER_IDS = new Set([
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// ─── CLAUDE SONNET 4.6 INTEGRATION ──────────────────────────────────────────
+// ─── ANTHROPIC DIRECT INTEGRATION ───────────────────────────────────────────
 
 async function callClaudeChat(messages: any[]) {
-  // Extract system message if present — Anthropic requires it as a top-level param
+  // Anthropic requires system as a top-level param, not inside messages
   const systemMessage = messages.find(m => m.role === "system");
   const userMessages = messages.filter(m => m.role !== "system");
 
@@ -39,7 +41,7 @@ async function callClaudeChat(messages: any[]) {
       model: "claude-sonnet-4-5",
       max_tokens: 4000,
       temperature: 0.2,
-      ...(systemMessage && { system: systemMessage.content }), // ✅ top-level
+      ...(systemMessage && { system: systemMessage.content }),
       messages: userMessages,
     }),
   });
@@ -53,13 +55,7 @@ async function callClaudeChat(messages: any[]) {
   return data.content[0].text;
 }
 
-
-
-  const data = await response.json();
-  return data.choices[0].message.content;
-}
-
-// ─── ALL ORIGINAL PROMPT & CONTEXT LOGIC (RETAINED) ─────────────────────────
+// ─── PROMPT & CONTEXT LOGIC ──────────────────────────────────────────────────
 
 function getCityContext(city: string) {
   if (city === "Ibiade") {
@@ -76,7 +72,6 @@ function getCityContext(city: string) {
   };
 }
 
-// This function contains your massive 2,000-line rubric/prompt logic
 function buildAssessmentPrompt(
   transcript: string,
   engagedCount: number,
@@ -176,7 +171,7 @@ REQUIRED JSON STRUCTURE:
 }`;
 }
 
-// ─── CORE ASSESSMENT ENGINE ────────────────────────────────────────────────
+// ─── CORE ASSESSMENT ENGINE ──────────────────────────────────────────────────
 
 async function assessMonthlySkills(userId: string, startDate: Date, endDate: Date, city: string) {
   try {
@@ -190,17 +185,20 @@ async function assessMonthlySkills(userId: string, startDate: Date, endDate: Dat
       .select("chat_history, created_at, activity").eq("user_id", userId)
       .gte("created_at", startDate.toISOString()).lte("created_at", endDate.toISOString());
 
-    if (!dashboard || dashboard.length === 0) return { status: "no_activity", sessionCount: 0, engagedSessionCount: 0 };
+    if (!dashboard || dashboard.length === 0) {
+      return { status: "no_activity", sessionCount: 0, engagedSessionCount: 0 };
+    }
 
-    // ✅ FIX #2: Filter to only rows with real chat_history BEFORE the engaged check
-    const isEngaged = (r: any) => r.chat_history && r.chat_history.trim() !== "" 
-                                   && r.chat_history.trim() !== "[]" 
-                                   && r.chat_history.trim() !== "null";
+    // Filter to only rows with real chat_history before the engaged check
+    const isEngaged = (r: any) =>
+      r.chat_history &&
+      r.chat_history.trim() !== "" &&
+      r.chat_history.trim() !== "[]" &&
+      r.chat_history.trim() !== "null";
 
     const engagedCurriculumRows = dashboard.filter(d => d.activity !== "playground" && isEngaged(d));
     const engagedPlaygroundRows = dashboard.filter(d => d.activity === "playground" && isEngaged(d));
 
-    // ✅ FIX #2 cont: No_activity if no engaged sessions at all
     if (engagedCurriculumRows.length === 0 && engagedPlaygroundRows.length === 0) {
       return { status: "no_activity", sessionCount: dashboard.length, engagedSessionCount: 0 };
     }
@@ -210,12 +208,13 @@ async function assessMonthlySkills(userId: string, startDate: Date, endDate: Dat
 
     const rawResponse = await callClaudeChat([
       { role: "system", content: "You are an expert educational data scientist. You output ONLY valid JSON." },
-      // ✅ FIX #3: Pass real engaged counts, not dashboard.length or hardcoded 0
-      { role: "user", content: buildAssessmentPrompt(
-          curriculumTranscripts, engagedCurriculumRows.length, 
-          playgroundTranscripts, engagedPlaygroundRows.length, 
+      {
+        role: "user",
+        content: buildAssessmentPrompt(
+          curriculumTranscripts, engagedCurriculumRows.length,
+          playgroundTranscripts, engagedPlaygroundRows.length,
           city
-        ) 
+        )
       }
     ]);
 
@@ -231,10 +230,11 @@ async function assessMonthlySkills(userId: string, startDate: Date, endDate: Dat
 
     if (upsertError) throw upsertError;
 
-    return { 
-      status: "success", result, 
-      sessionCount: dashboard.length, 
-      engagedSessionCount: engagedCurriculumRows.length + engagedPlaygroundRows.length 
+    return {
+      status: "success",
+      result,
+      sessionCount: dashboard.length,
+      engagedSessionCount: engagedCurriculumRows.length + engagedPlaygroundRows.length,
     };
   } catch (err: any) {
     console.error(`Error for ${userId}:`, err.message);
@@ -242,41 +242,46 @@ async function assessMonthlySkills(userId: string, startDate: Date, endDate: Dat
   }
 }
 
-// ─── MAIN CRON HANDLER (BATCHED) ───────────────────────────────────────────
+// ─── MAIN CRON HANDLER (BATCHED) ────────────────────────────────────────────
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) return res.status(401).json({ error: "Unauthorized" });
+  if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
   const startTime = Date.now();
   const { start, end } = req.query;
-  const startDate = start ? new Date(start as string) : new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
-  const endDate = end ? new Date(end as string) : new Date(new Date().getFullYear(), new Date().getMonth(), 0, 23, 59, 59);
+  const startDate = start
+    ? new Date(start as string)
+    : new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+  const endDate = end
+    ? new Date(end as string)
+    : new Date(new Date().getFullYear(), new Date().getMonth(), 0, 23, 59, 59);
 
-  // Fetch target users from Africa
-  const { data: profiles } = await supabase.from("profiles").select("id, name, city").eq("continent", "Africa");
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, name, city")
+    .eq("continent", "Africa");
+
   const users = (profiles || []).filter(p => !EXCLUDED_USER_IDS.has(p.id));
 
   const summaries: any[] = [];
-  const BATCH_SIZE = 3; 
+  const BATCH_SIZE = 3;
 
-  // Process in batches of 3 to keep the function alive and avoid 60s/75s timeouts
   for (let i = 0; i < users.length; i += BATCH_SIZE) {
     const batch = users.slice(i, i + BATCH_SIZE);
-    
+
     const batchResults = await Promise.all(batch.map(async (u) => {
       const assessment = await assessMonthlySkills(u.id, startDate, endDate, u.city || "Oloibiri");
       return { ...assessment, userId: u.id, name: u.name || u.id.slice(0, 8) };
     }));
 
     summaries.push(...batchResults);
-    
-    // Safety delay between batches
+
     if (i + BATCH_SIZE < users.length) await new Promise(r => setTimeout(r, 1000));
   }
 
-  // ─── ORIGINAL EMAIL REPORTING LOGIC ───────────────────────────────────────
-
-  const monthLabel = startDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const monthLabel = startDate.toLocaleString("default", { month: "long", year: "numeric" });
   const durationMs = Date.now() - startTime;
 
   await resend.emails.send({
@@ -297,20 +302,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               <td>${s.name}</td>
               <td>${s.status}</td>
               <td>${s.sessionCount || 0}</td>
-              <td>${s.result?.cognitive_score || '--'}</td>
-              <td>${s.result?.pue_score || '--'}</td>
+              <td>${s.result?.cognitive_score ?? "--"}</td>
+              <td>${s.result?.pue_score ?? "--"}</td>
             </tr>
-          `).join('')}
+          `).join("")}
         </tbody>
       </table>
-    `
+    `,
   });
 
   return res.status(200).json({
     month: monthLabel,
+    period: `${startDate.toISOString().slice(0, 10)} → ${endDate.toISOString().slice(0, 10)}`,
     assessed: summaries.filter(s => s.status === "success").length,
+    skipped: summaries.filter(s => s.status === "skipped").length,
     noActivity: summaries.filter(s => s.status === "no_activity").length,
     errors: summaries.filter(s => s.status === "error").length,
-    durationMs
+    errorDetails: summaries.filter(s => s.status === "error").map(s => ({ name: s.name, error: s.error })),
+    durationMs,
   });
 }
