@@ -24,6 +24,10 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // ─── CLAUDE SONNET 4.6 INTEGRATION ──────────────────────────────────────────
 
 async function callClaudeChat(messages: any[]) {
+  // Extract system message if present — Anthropic requires it as a top-level param
+  const systemMessage = messages.find(m => m.role === "system");
+  const userMessages = messages.filter(m => m.role !== "system");
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -32,20 +36,21 @@ async function callClaudeChat(messages: any[]) {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-5",
       max_tokens: 4000,
       temperature: 0.2,
-      messages,
+      ...(systemMessage && { system: systemMessage.content }), // ✅ top-level
+      messages: userMessages,
     }),
   });
 
   if (!response.ok) {
     const errorData = await response.json();
-    throw new Error(`Anthropic API Error: ${errorData.error?.message || response.statusText}`);
+    throw new Error(`Anthropic API Error: ${JSON.stringify(errorData.error)}`);
   }
 
   const data = await response.json();
-  return data.content[0].text; // ✅ Anthropic native format
+  return data.content[0].text;
 }
 
   const response = await fetch(API_URL, {
