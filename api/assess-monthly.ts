@@ -53,16 +53,7 @@ async function callClaudeChat(messages: any[]) {
   return data.content[0].text;
 }
 
-  const response = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, max_tokens: 4000, temperature: 0.2 }),
-  });
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(`Claude API Error: ${errorData.error || response.statusText}`);
-  }
 
   const data = await response.json();
   return data.choices[0].message.content;
