@@ -18,13 +18,13 @@
  * Sends a rich longitudinal email report to khallinan1@udayton.edu.
  *
  * Required env vars:
- *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+ *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY,
  *   RESEND_API_KEY, CRON_SECRET
  */
 
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-export const maxDuration = 600; // 5 min — requires Vercel Pro
+
 // ─── Excluded Users (admins / facilitators — never assessed or reported) ─────
 // All Kevin Hallinan and Bennywhite Davidson accounts — never assessed or shown in reports
 const EXCLUDED_USER_IDS = new Set([
@@ -1556,21 +1556,11 @@ async function sendEmailReport(
     .filter((id) => !EXCLUDED_USER_IDS.has(id)) as string[];
   const historyMap = await fetchAllHistoricalData(idsWithHistory);
 
-  const results = await Promise.allSettled(
-    userIds.map(async (userId) => {
-      const name = nameMap[userId] || userId.slice(0, 8) + "…";
-      const { result, sessionCount, engagedSessionCount, status, error } =
-        await assessMonthlySkills(userId, startDate, endDate);
-      console.log(`   → ${name} | ${status} | sessions: ${sessionCount}`);
-      return { userId, name, sessionCount, engagedSessionCount, scores: result, status, error } as AssessmentSummary;
-    })
-  );
-  
-  const summaries: AssessmentSummary[] = results.map((r, i) =>
-    r.status === "fulfilled"
-      ? r.value
-      : { userId: userIds[i], name: nameMap[userIds[i]] || "Unknown", sessionCount: 0, engagedSessionCount: 0, scores: null, status: "error" as const, error: r.reason?.message }
-  );
+  const summaryMap = new Map(summaries.map((s) => [s.userId, s]));
+  const allSummaries: AssessmentSummary[] = idsWithHistory.map((id) => {
+    if (summaryMap.has(id)) { const s = summaryMap.get(id)!; s.name = nameMap[id] || "Unknown"; return s; }
+    return { userId: id, name: nameMap[id] || "Unknown", sessionCount: 0, engagedSessionCount: 0, scores: null, status: "skipped" };
+  });
 
   const newCount = summaries.filter((s) => s.status === "success").length;
   // Fetch playground summaries for all assessed users
@@ -1610,6 +1600,27 @@ async function sendEmailReport(
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
+//
+//  Three modes, controlled by query params:
+//
+//  1. ORCHESTRATE (default)
+//     curl /api/assess-monthly?start=YYYY-MM-DD&end=YYYY-MM-DD
+//     → Finds all users needing assessment, fires one ?userId= request per user
+//       (fire-and-forget), returns 200 immediately.
+//
+//  2. SINGLE USER
+//     curl /api/assess-monthly?start=...&end=...&userId=UUID
+//     → Assesses one user and saves to DB. Called by orchestrate mode.
+//
+//  3. REPORT
+//     curl /api/assess-monthly?start=...&end=...&mode=report
+//     → Reads already-saved DB rows for the period and sends the email.
+//       Run this after all single-user calls have finished (allow ~2 min).
+//
+//  Usage sequence:
+//    1. curl ".../api/assess-monthly?start=2026-03-01&end=2026-03-31"
+//    2. Wait ~2 minutes for all per-user functions to complete
+//    3. curl ".../api/assess-monthly?start=2026-03-01&end=2026-03-31&mode=report"
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cronSecret = process.env.CRON_SECRET;
@@ -1618,59 +1629,120 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!isVercelCron && !isManualTrigger) return res.status(401).json({ error: "Unauthorized" });
 
   const qStart = req.query.start as string | undefined;
-  const qEnd = req.query.end as string | undefined;
-  let startDate: Date, endDate: Date;
+  const qEnd   = req.query.end   as string | undefined;
+  const qUser  = req.query.userId as string | undefined;
+  const qMode  = req.query.mode  as string | undefined;
 
+  let startDate: Date, endDate: Date;
   if (qStart && qEnd) {
     startDate = new Date(`${qStart}T00:00:00.000Z`);
-    endDate = new Date(`${qEnd}T23:59:59.999Z`);
+    endDate   = new Date(`${qEnd}T23:59:59.999Z`);
   } else {
     const now = new Date();
     startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    endDate   = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
   }
 
+  const startStr  = startDate.toISOString().split("T")[0];
+  const endStr    = endDate.toISOString().split("T")[0];
   const monthLabel = startDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  console.log(`\n${"═".repeat(60)}\nASSESSMENT v2.0 — ${monthLabel}\n${"═".repeat(60)}`);
-  console.log(`ENV: RESEND=${process.env.RESEND_API_KEY?"✅":"❌"} ANTHROPIC=${process.env.ANTHROPIC_API_KEY?"✅":"❌"}`);
+  const baseUrl   = `https://${req.headers.host}/api/assess-monthly`;
+  const authHeader = { "x-cron-secret": cronSecret! };
 
-  const startTime = Date.now();
+  // ── MODE 2: Single-user assessment ────────────────────────────────────────
+  if (qUser) {
+    console.log(`[single-user] Assessing ${qUser}`);
+    try {
+      const { result, sessionCount, engagedSessionCount, status, error } =
+        await assessMonthlySkills(qUser, startDate, endDate);
+      console.log(`[single-user] → ${status} | sessions: ${sessionCount}`);
+      return res.status(200).json({ userId: qUser, status, sessionCount, engagedSessionCount, error });
+    } catch (err: any) {
+      console.error(`[single-user] Fatal for ${qUser}:`, err.message);
+      return res.status(500).json({ userId: qUser, status: "error", error: err.message });
+    }
+  }
+
+  // ── MODE 3: Report only ────────────────────────────────────────────────────
+  if (qMode === "report") {
+    console.log(`[report] Building email for ${monthLabel}`);
+    const startTime = Date.now();
+    try {
+      const { data: africanProfiles } = await supabase
+        .from("profiles").select("id, name").eq("continent", "Africa");
+      const nameMap: Record<string, string> = {};
+      for (const p of africanProfiles || []) nameMap[p.id] = p.name || "Unknown";
+      const allIds = (africanProfiles || []).map((p) => p.id)
+        .filter((id) => !EXCLUDED_USER_IDS.has(id));
+
+      // Load assessments saved for this period
+      const { data: periodRows } = await supabase
+        .from("user_monthly_assessments")
+        .select("*")
+        .in("user_id", allIds)
+        .gte("measured_at", startDate.toISOString())
+        .lte("measured_at", endDate.toISOString());
+
+      const reportSummaries: AssessmentSummary[] = (periodRows || []).map((row) => ({
+        userId: row.user_id,
+        name: nameMap[row.user_id] || "Unknown",
+        sessionCount: row.session_count || 0,
+        engagedSessionCount: row.engaged_session_count || 0,
+        scores: row as unknown as MonthlySkillsResult,
+        status: "success" as const,
+      }));
+
+      const idsWithHistory = [...new Set((periodRows || []).map((r) => r.user_id))];
+      const reportHistoryMap = await fetchAllHistoricalData(idsWithHistory);
+
+      const reportPlaygroundMap = new Map<string, PlaygroundSummary | null>();
+      await Promise.all(
+        idsWithHistory.map(async (id) => {
+          reportPlaygroundMap.set(id, await fetchPlaygroundSummary(id, startDate, endDate));
+        })
+      );
+
+      let cohortHistory: CohortMonthRecord[] = [];
+      try { cohortHistory = await fetchCohortHistory(EXCLUDED_USER_IDS); } catch { /* non-fatal */ }
+
+      const durationMs = Date.now() - startTime;
+      await sendEmailReport(monthLabel, reportSummaries, startDate, endDate, durationMs);
+
+      return res.status(200).json({
+        mode: "report",
+        month: monthLabel,
+        assessed: reportSummaries.length,
+        durationMs,
+      });
+    } catch (err: any) {
+      console.error("[report] Fatal:", err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // ── MODE 1: Orchestrate ────────────────────────────────────────────────────
+  console.log(`\n${"═".repeat(60)}\nORCHESTRATE — ${monthLabel}\n${"═".repeat(60)}`);
   try {
     const userIds = await getAfricanUsersNeedingAssessment(startDate, endDate);
-    console.log(`\n📋 Users to assess: ${userIds.length}`);
+    console.log(`📋 Firing ${userIds.length} single-user requests`);
 
-    const { data: profiles } = await supabase.from("profiles").select("id, name").in("id", userIds);
-    const nameMap: Record<string, string> = {};
-    for (const p of profiles || []) nameMap[p.id] = p.name || "Unknown";
-
-    const summaries: AssessmentSummary[] = [];
-    for (let i = 0; i < userIds.length; i++) {
-      const userId = userIds[i];
-      const name = nameMap[userId] || userId.slice(0, 8) + "…";
-      console.log(`\n[${i + 1}/${userIds.length}] ${name}`);
-      const { result, sessionCount, engagedSessionCount, status, error } =
-        await assessMonthlySkills(userId, startDate, endDate);
-      summaries.push({ userId, name, sessionCount, engagedSessionCount, scores: result, status, error });
-      console.log(`   → ${status} | sessions: ${sessionCount} | engaged: ${engagedSessionCount}`);
+    // Fire all per-user requests without awaiting — each runs in its own Vercel function invocation
+    for (const userId of userIds) {
+      fetch(
+        `${baseUrl}?start=${startStr}&end=${endStr}&userId=${userId}`,
+        { headers: authHeader }
+      ).catch((e) => console.warn(`Fire-and-forget error for ${userId}:`, e.message));
     }
 
-    const durationMs = Date.now() - startTime;
-    const successCount = summaries.filter((s) => s.status === "success").length;
-    console.log(`\n✅ Done — ${successCount}/${userIds.length} in ${(durationMs/1000).toFixed(1)}s`);
-
-    await sendEmailReport(monthLabel, summaries, startDate, endDate, durationMs);
-
     return res.status(200).json({
+      mode: "orchestrate",
       month: monthLabel,
-      period: `${startDate.toISOString().split("T")[0]} → ${endDate.toISOString().split("T")[0]}`,
-      assessed: successCount,
-      skipped: summaries.filter((s) => s.status === "skipped").length,
-      noActivity: summaries.filter((s) => s.status === "no_activity").length,
-      errors: summaries.filter((s) => s.status === "error").length,
-      durationMs,
+      period: `${startStr} → ${endStr}`,
+      fired: userIds.length,
+      message: `${userIds.length} assessment(s) running. Wait ~2 min then call ?mode=report to send the email.`,
     });
   } catch (err: any) {
-    console.error("❌ Fatal:", err.message);
+    console.error("❌ Orchestrate fatal:", err.message);
     return res.status(500).json({ error: err.message });
   }
 }
