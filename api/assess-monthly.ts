@@ -530,7 +530,8 @@ async function assessMonthlySkills(
 
     if (!content) throw new Error("Empty Claude response");
 
-    const raw = JSON.parse(content);
+    const clean = content.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/,"").trim();
+    const raw = JSON.parse(clean);
     const artifactScore =
       (raw.enterprise_artifact_goal_score || 0) +
       (raw.enterprise_artifact_resource_score || 0) +
