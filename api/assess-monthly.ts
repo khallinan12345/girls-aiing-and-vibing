@@ -459,7 +459,7 @@ async function assessMonthlySkills(
   });
 
   const engagedSessionCount = parsedSessions.filter(
-    (s) => s.messages.filter((m) => m.role === "user").length >= 3
+    (s) => s.messages.filter((m) => m.role === "user").length >= 1
   ).length;
 
   if (engagedSessionCount === 0) {
