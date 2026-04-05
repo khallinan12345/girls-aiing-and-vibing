@@ -41,6 +41,7 @@ import VibeCodingPage from './pages/tech-skills/VibeCodingPage';
 import FullStackDevelopmentPage from './pages/tech-skills/FullStackDevelopmentPage';
 import ImageGenerationPage from './pages/ImageGenerationPage';
 import VideoGenerationPage from './pages/VideoGenerationPage';
+import VideoStudioPage from './pages/VideoStudioPage';
 import VoiceCreationPage from './pages/VoiceCreationPage';
 import AIContentCreationPage from './pages/AIContentCreationPage';
 import AIWorkflowDevPage from './pages/tech-skills/AIWorkflowDevPage';
@@ -180,8 +181,9 @@ const AppContent: React.FC = () => {
         <Route path="/tech-skills/web-development" element={<WebDevelopmentPage />} />
         <Route path="/tech-skills/full-stack-development" element={<FullStackDevelopmentPage />} />
         <Route path="/tech-skills/ai-image-creation" element={<ImageGenerationPage />} />
-        <Route path="/tech-skills/ai-video-creation" element={<VideoGenerationPage />} />
         <Route path="/tech-skills/ai-voice-creation" element={<VoiceCreationPage />} />
+        <Route path="/tech-skills/ai-video-creation" element={<VideoGenerationPage />} />
+        <Route path="/tech-skills/ai-video-studio" element={<VideoStudioPage />} />
         <Route path="/tech-skills/ai-content-creation" element={<AIContentCreationPage />} />
         <Route path="/tech-skills/ai-workflow-development" element={<AIWorkflowDevPage />} />
         <Route path="/tech-skills/ai-for-business" element={<AIForBusinessPage />} />
