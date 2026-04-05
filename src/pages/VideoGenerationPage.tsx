@@ -17,7 +17,7 @@ import {
   Film, Sparkles, Clock, CheckCircle, XCircle,
   Download, RotateCcw, ChevronDown, ChevronUp,
   Volume2, VolumeX, Wand2, MessageSquare, Lightbulb, Save,
-  AlertTriangle,
+  AlertTriangle, ImagePlus, X as XIcon, ArrowRight,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -196,6 +196,12 @@ const VideoGenerationPage: React.FC = () => {
   const [isStepSending,  setIsStepSending]  = useState(false);
   const [isImprovingStep, setIsImprovingStep] = useState(false);
 
+  // ── Image anchoring state ─────────────────────────────────────────────────
+  const [startImage,        setStartImage]        = useState<File | null>(null);
+  const [startImagePreview, setStartImagePreview] = useState<string | null>(null);
+  const [endImage,          setEndImage]          = useState<File | null>(null);
+  const [endImagePreview,   setEndImagePreview]   = useState<string | null>(null);
+
   const FRAMES: Record<number, number> = { 5: 121, 8: 193, 10: 241 };
 
   // ── Fetch communication_level, continent, and weekly usage on mount ───────
@@ -356,6 +362,49 @@ const VideoGenerationPage: React.FC = () => {
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
+  // ── Image helpers ─────────────────────────────────────────────────────────
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = () => reject(new Error('Failed to read image'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleStartImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStartImage(file);
+    setStartImagePreview(URL.createObjectURL(file));
+  };
+
+  const handleEndImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setEndImage(file);
+    setEndImagePreview(URL.createObjectURL(file));
+  };
+
+  const clearStartImage = () => {
+    setStartImage(null);
+    if (startImagePreview) URL.revokeObjectURL(startImagePreview);
+    setStartImagePreview(null);
+    // Clearing the start image also clears end image (end requires start)
+    setEndImage(null);
+    if (endImagePreview) URL.revokeObjectURL(endImagePreview);
+    setEndImagePreview(null);
+  };
+
+  const clearEndImage = () => {
+    setEndImage(null);
+    if (endImagePreview) URL.revokeObjectURL(endImagePreview);
+    setEndImagePreview(null);
+  };
+
+  // Determine current mode for display
+  const imageMode: 'text' | 'start' | 'start-end' =
+    startImage && endImage ? 'start-end' : startImage ? 'start' : 'text';
+
   // ── Start generation ──────────────────────────────────────────────────────
   const handleGenerate = async () => {
     if (!prompt.trim() || isStarting || !user) return;
@@ -373,8 +422,19 @@ const VideoGenerationPage: React.FC = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Not authenticated');
+
+      // Build image params
+      const imagePayload: Record<string, string> = {};
+      if (startImage) {
+        imagePayload.image = await fileToBase64(startImage);
+      }
+      if (endImage) {
+        imagePayload.last_image = await fileToBase64(endImage);
+      }
+
       const { ok, data } = await callEdgeFunction('generate-video', 'POST', session.access_token, {
         prompt: prompt.trim(), negative_prompt: negPrompt.trim(), num_frames: FRAMES[duration],
+        ...imagePayload,
       });
       if (!ok || !data.jobId) throw new Error(data.error ?? 'Failed to start video generation');
       const newJob: VideoJob = {
@@ -398,6 +458,7 @@ const VideoGenerationPage: React.FC = () => {
     if (pollRef.current) clearInterval(pollRef.current);
     setActiveJob(null); setVideoUrl(null); setError(null);
     setSavedUrl(null); setSaveError(null); setDashSaved(false);
+    clearStartImage();
     stopSpeaking();
   };
 
@@ -863,7 +924,131 @@ Return ONLY the improved text. No explanation, no preamble.`
               </div>
             </div>
 
-            {/* ── Critique / Step panel ─────────────────────────────────── */}
+            {/* ── Image anchoring ───────────────────────────────────────── */}
+            <div className="bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 backdrop-blur-sm space-y-4">
+              {/* Mode badge */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-300">
+                    {lvl <= 1 ? '🖼️ Add Images (optional)' : '🖼️ Image Anchoring (optional)'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {lvl <= 1
+                      ? 'Add a start image so the video begins with your picture. Add an end image to finish there too.'
+                      : 'Anchor the first and/or last frame of the video to uploaded images.'}
+                  </p>
+                </div>
+                {/* Mode pill */}
+                <span className={classNames(
+                  'text-xs font-semibold rounded-full px-3 py-1 border shrink-0',
+                  imageMode === 'start-end'
+                    ? 'bg-violet-900/40 border-violet-500/40 text-violet-300'
+                    : imageMode === 'start'
+                    ? 'bg-cyan-900/40 border-cyan-500/40 text-cyan-300'
+                    : 'bg-slate-800 border-slate-600/50 text-slate-500'
+                )}>
+                  {imageMode === 'start-end'
+                    ? (lvl <= 1 ? 'Text + Start + End' : 'Mode 3 — Text + Start + End')
+                    : imageMode === 'start'
+                    ? (lvl <= 1 ? 'Text + Start image' : 'Mode 2 — Text + Start Image')
+                    : (lvl <= 1 ? 'Text only' : 'Mode 1 — Text Only')}
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-4 items-start">
+
+                {/* ── Start image ── */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-slate-400 mb-2">
+                    {lvl <= 1 ? '▶ Start image' : '▶ Start frame'}
+                  </p>
+                  {startImagePreview ? (
+                    <div className="relative group rounded-xl overflow-hidden border border-cyan-500/40 bg-black">
+                      <img src={startImagePreview} alt="Start frame" className="w-full h-32 object-cover" />
+                      <button onClick={clearStartImage} disabled={isGenerating}
+                        className="absolute top-2 right-2 bg-red-600/80 hover:bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
+                        title="Remove start image">
+                        <XIcon size={12} />
+                      </button>
+                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1">
+                        <p className="text-xs text-cyan-300 truncate">{startImage?.name}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className={classNames(
+                      'flex flex-col items-center justify-center gap-2 h-32 rounded-xl border-2 border-dashed cursor-pointer transition-all',
+                      isGenerating
+                        ? 'border-slate-700 opacity-40 cursor-not-allowed'
+                        : 'border-slate-600 hover:border-cyan-500/60 hover:bg-cyan-950/20'
+                    )}>
+                      <ImagePlus size={20} className="text-slate-500" />
+                      <span className="text-xs text-slate-500">
+                        {lvl <= 1 ? 'Upload start image' : 'Upload start frame'}
+                      </span>
+                      <input type="file" accept="image/*" className="hidden"
+                        onChange={handleStartImageChange} disabled={isGenerating} />
+                    </label>
+                  )}
+                </div>
+
+                {/* Arrow connector */}
+                <div className="flex items-center justify-center sm:pt-8">
+                  <ArrowRight size={20} className={classNames(
+                    'transition-colors',
+                    startImage ? 'text-cyan-400' : 'text-slate-700'
+                  )} />
+                </div>
+
+                {/* ── End image ── */}
+                <div className="flex-1 min-w-0">
+                  <p className={classNames('text-xs font-medium mb-2', startImage ? 'text-slate-400' : 'text-slate-600')}>
+                    {lvl <= 1 ? '⏹ End image' : '⏹ End frame'}
+                  </p>
+                  {endImagePreview ? (
+                    <div className="relative group rounded-xl overflow-hidden border border-violet-500/40 bg-black">
+                      <img src={endImagePreview} alt="End frame" className="w-full h-32 object-cover" />
+                      <button onClick={clearEndImage} disabled={isGenerating}
+                        className="absolute top-2 right-2 bg-red-600/80 hover:bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
+                        title="Remove end image">
+                        <XIcon size={12} />
+                      </button>
+                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1">
+                        <p className="text-xs text-violet-300 truncate">{endImage?.name}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className={classNames(
+                      'flex flex-col items-center justify-center gap-2 h-32 rounded-xl border-2 border-dashed transition-all',
+                      !startImage || isGenerating
+                        ? 'border-slate-700 opacity-40 cursor-not-allowed'
+                        : 'border-slate-600 hover:border-violet-500/60 hover:bg-violet-950/20 cursor-pointer'
+                    )}>
+                      <ImagePlus size={20} className="text-slate-500" />
+                      <span className="text-xs text-slate-500 text-center px-2">
+                        {!startImage
+                          ? (lvl <= 1 ? 'Add start image first' : 'Requires start frame')
+                          : (lvl <= 1 ? 'Upload end image' : 'Upload end frame')}
+                      </span>
+                      <input type="file" accept="image/*" className="hidden"
+                        onChange={handleEndImageChange} disabled={!startImage || isGenerating} />
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {/* Tip */}
+              {imageMode !== 'text' && (
+                <p className="text-xs text-slate-500 bg-slate-800/50 rounded-lg px-3 py-2">
+                  💡 {lvl <= 1
+                    ? (imageMode === 'start-end'
+                        ? 'The video will start with your first image and end with your second image.'
+                        : 'The video will start with your image. The prompt controls what happens next.')
+                    : (imageMode === 'start-end'
+                        ? 'LTX-Video will align the first and last frames to your uploaded images. The prompt guides the motion between them.'
+                        : 'LTX-Video will use your image as the first frame. The text prompt guides the visual development.')}
+                </p>
+              )}
+            </div>
             {showCritique && (
               <div className="bg-slate-900/80 border border-amber-500/30 rounded-2xl p-5 backdrop-blur-sm">
                 <div className="flex items-center justify-between mb-3">
@@ -994,7 +1179,14 @@ Return ONLY the improved text. No explanation, no preamble.`
                         ? (isGenerating ? 'Making your video… please wait' : activeJob.status === 'succeeded' ? '🎉 Your video is ready!' : 'Something went wrong')
                         : STATUS_LABEL[activeJob.status]}
                     </p>
-                    <p className="text-xs text-slate-400 truncate mt-0.5">{activeJob.prompt}</p>
+                    <p className="text-xs text-slate-400 truncate mt-0.5">
+                      {activeJob.prompt}
+                      {imageMode !== 'text' && (
+                        <span className="ml-2 text-cyan-400/70">
+                          [{imageMode === 'start-end' ? '🖼️→🖼️' : '🖼️→'}]
+                        </span>
+                      )}
+                    </p>
                     {isGenerating && (
                       <p className="text-xs text-slate-500 mt-1">
                         {lvl <= 1 ? 'This takes about 30–90 seconds. Checking every 3 seconds…'
