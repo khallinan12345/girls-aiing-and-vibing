@@ -254,14 +254,14 @@ const VideoGenerationPage: React.FC = () => {
       ? 'e.g. A girl walking to school in the morning, bright sunshine, green trees'
       : 'e.g. A young student in Nigeria working on a laptop in a sunlit classroom, cinematic warm light, slow pan…',
     durationLabel:  lvl <= 1 ? 'How long?'        : 'Duration',
-    durationHint:   lvl <= 1 ? 'Longer takes more time (~30–90 seconds).'
-                             : 'Longer = slower generation (~30–90s total)',
+    durationHint:   lvl <= 1 ? 'This can take 2–5 minutes. Please be patient!'
+                             : 'Wan 2.1 720p typically takes 2–5 minutes to generate.',
     improveBtnLabel: lvl <= 1 ? '✏️ Improve my English' : '✏️ Improve my English',
     critiqueBtnLabel: lvl <= 1 ? '💡 Help me write a better prompt' : '💡 Critique my Prompt',
     generateBtn:    lvl <= 1 ? 'Make My Video 🎬'  : 'Generate Video',
     footerText:     lvl <= 1
-      ? 'Your video is made by LTX-Video. It takes 30–90 seconds. Your videos are saved in your history.'
-      : 'Powered by LTX-Video (Lightricks) via Replicate. 704×480px · 24fps · Generation time: 30–90s',
+      ? 'Your video is made by Wan 2.1. It can take 2–5 minutes. Please wait — do not close the page!'
+      : 'Powered by Wan 2.1 I2V 720p (WaveSpeed/Alibaba) via Replicate. Generation typically takes 2–5 minutes.',
   };
 
   // ── Load voices ───────────────────────────────────────────────────────────
@@ -469,8 +469,8 @@ const VideoGenerationPage: React.FC = () => {
       setWeeklyCount(c => c + 1);
       startPolling(data.jobId, session.access_token);
       speakText(lvl <= 1
-        ? 'OK! Your video is being made. Please wait about one minute.'
-        : 'Your video generation has started. This usually takes 30 to 90 seconds.');
+        ? 'OK! Your video is being made. This can take 2 to 5 minutes. Please wait and keep the page open.'
+        : 'Your video generation has started. This usually takes 2 to 5 minutes.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
@@ -1213,8 +1213,8 @@ Return ONLY the improved text. No explanation, no preamble.`
                     </p>
                     {isGenerating && (
                       <p className="text-xs text-slate-500 mt-1">
-                        {lvl <= 1 ? 'This takes about 30–90 seconds. Checking every 3 seconds…'
-                                  : 'LTX-Video typically takes 30–90 seconds. Polling every 3s…'}
+                        {lvl <= 1 ? 'This can take 2–5 minutes. Please keep this page open and wait…'
+                                  : 'Wan 2.1 720p typically takes 2–5 minutes. Please keep this page open.'}
                       </p>
                     )}
                   </div>
