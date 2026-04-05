@@ -432,8 +432,32 @@ const VideoGenerationPage: React.FC = () => {
         imagePayload.last_image = await fileToBase64(endImage);
       }
 
+      // ── Anchor prompt injection ──────────────────────────────────────────
+      // LTX-Video requires the prompt to explicitly describe the anchor frames
+      // as the first and last moments of the clip, otherwise it treats the
+      // images as soft guidance rather than hard frame constraints.
+      let anchoredPrompt = prompt.trim();
+      if (startImage && endImage) {
+        anchoredPrompt =
+          `The video begins exactly with this precise scene: ${anchoredPrompt}. ` +
+          `The first frame matches the start image exactly, with identical composition, subjects, lighting, and colours. ` +
+          `The video transitions naturally and ends exactly with the final image, ` +
+          `with the last frame matching the end image precisely in composition, subjects, lighting, and colours. ` +
+          `No deviation from either anchor frame.`;
+      } else if (startImage) {
+        anchoredPrompt =
+          `The video begins exactly with this precise scene: ${anchoredPrompt}. ` +
+          `The first frame matches the start image exactly, with identical composition, subjects, lighting, and colours. ` +
+          `Maintain strict fidelity to the starting image.`;
+      }
+
+      // Strengthen negative prompt when anchors are active
+      const anchoredNegPrompt = startImage
+        ? `${negPrompt.trim()}, inconsistent first frame, mismatched starting scene, different opening composition, frame mismatch, scene change at start${endImage ? ', inconsistent last frame, mismatched ending scene, different closing composition, frame mismatch at end' : ''}`
+        : negPrompt.trim();
+
       const { ok, data } = await callEdgeFunction('generate-video', 'POST', session.access_token, {
-        prompt: prompt.trim(), negative_prompt: negPrompt.trim(), num_frames: FRAMES[duration],
+        prompt: anchoredPrompt, negative_prompt: anchoredNegPrompt, num_frames: FRAMES[duration],
         ...imagePayload,
       });
       if (!ok || !data.jobId) throw new Error(data.error ?? 'Failed to start video generation');
