@@ -1,20 +1,168 @@
-// api/chat.js - Vercel serverless function for Vite project
-// Model: Claude Sonnet 4.6 (Anthropic)
+// api/chat.js - Vercel serverless function with model routing + prompt caching
+//
+// ROUTING LOGIC:
+//   page = 'AILearningPage' | 'EnglishSkillsPage'
+//     → Groq  llama-3.3-70b-versatile  (free, high volume)
+//
+//   page = 'VibeCodingPage' | 'WebDevelopmentPage' |
+//          'FullStackDevelopmentPage' | 'AIWorkflowDevPage'
+//     → Anthropic  claude-sonnet-4-6  (best for code)
+//
+//   page = 'AIPlaygroundPage'
+//     → Anthropic  claude-haiku-4-5-20251001  (default)
+//        OR claude-sonnet-4-6 if playgroundModel === 'claude-sonnet-4-6'
+//
+//   all other pages / no page supplied
+//     → Anthropic  claude-haiku-4-5-20251001  (default)
+//
+// PROMPT CACHING: applied automatically on all Anthropic calls.
+//   The system prompt is marked with cache_control so repeated calls within
+//   the 5-minute TTL are charged at ~10% of normal input cost.
+
+// ── Constants ──────────────────────────────────────────────────────────────────
+
+const GROQ_PAGES   = new Set(['AILearningPage', 'EnglishSkillsPage']);
+const SONNET_PAGES = new Set([
+  'VibeCodingPage',
+  'WebDevelopmentPage',
+  'FullStackDevelopmentPage',
+  'AIWorkflowDevPage',
+]);
+
+const ANTHROPIC_HAIKU  = 'claude-haiku-4-5-20251001';
+const ANTHROPIC_SONNET = 'claude-sonnet-4-6';
+const GROQ_MODEL       = 'llama-3.3-70b-versatile';
+
+// ── Route resolver ─────────────────────────────────────────────────────────────
+
+function resolveRoute(page, playgroundModel) {
+  if (GROQ_PAGES.has(page)) {
+    return { provider: 'groq', model: GROQ_MODEL };
+  }
+  if (SONNET_PAGES.has(page)) {
+    return { provider: 'anthropic', model: ANTHROPIC_SONNET };
+  }
+  if (page === 'AIPlaygroundPage') {
+    const model = playgroundModel === ANTHROPIC_SONNET ? ANTHROPIC_SONNET : ANTHROPIC_HAIKU;
+    return { provider: 'anthropic', model };
+  }
+  // Default: Haiku for all other pages
+  return { provider: 'anthropic', model: ANTHROPIC_HAIKU };
+}
+
+// ── Anthropic call (with prompt caching on system prompt) ──────────────────────
+
+async function callAnthropic(model, messages, system, max_tokens, temperature) {
+  // Wrap system string in a content block with cache_control so Anthropic
+  // caches it for 5 minutes. Repeated calls with the same system prompt
+  // are charged at ~10% of normal input cost (cache reads).
+  const systemPayload = system
+    ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+    : undefined;
+
+  const requestBody = {
+    model,
+    max_tokens,
+    temperature,
+    messages,
+    ...(systemPayload ? { system: systemPayload } : {}),
+  };
+
+  const upstream = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key':          process.env.ANTHROPIC_API_KEY,
+      'anthropic-version':  '2023-06-01',
+      'anthropic-beta':     'prompt-caching-2024-07-31',
+      'Content-Type':       'application/json',
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  const data = await upstream.json();
+
+  if (!upstream.ok) {
+    const err = new Error(data.error?.message || 'Anthropic API error');
+    err.status = upstream.status;
+    err.anthropic_error = data;
+    throw err;
+  }
+
+  // Return OpenAI-shaped response so chatClient.ts needs no changes
+  const text = data?.content?.[0]?.text ?? '';
+  return {
+    id:     data.id,
+    object: 'chat.completion',
+    model:  data.model,
+    choices: [{
+      index:         0,
+      message:       { role: 'assistant', content: text },
+      finish_reason: data.stop_reason ?? 'stop',
+    }],
+    usage: {
+      prompt_tokens:     data.usage?.input_tokens  ?? 0,
+      completion_tokens: data.usage?.output_tokens ?? 0,
+      total_tokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0),
+      // Cache stats for monitoring — ignored by chatClient.ts
+      cache_creation_input_tokens: data.usage?.cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens:     data.usage?.cache_read_input_tokens     ?? 0,
+    },
+    _route: { provider: 'anthropic', model: data.model },
+  };
+}
+
+// ── Groq call ──────────────────────────────────────────────────────────────────
+
+async function callGroq(model, messages, system, max_tokens, temperature) {
+  // Groq uses the OpenAI chat completions format natively.
+  // Prepend system as a system-role message.
+  const groqMessages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...messages,
+  ];
+
+  const upstream = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+      'Content-Type':  'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      messages: groqMessages,
+      max_tokens,
+      temperature,
+    }),
+  });
+
+  const data = await upstream.json();
+
+  if (!upstream.ok) {
+    const err = new Error(data.error?.message || 'Groq API error');
+    err.status = upstream.status;
+    err.groq_error = data;
+    throw err;
+  }
+
+  // Groq already returns OpenAI shape — pass through with route tag
+  return { ...data, _route: { provider: 'groq', model } };
+}
+
+// ── Main handler ───────────────────────────────────────────────────────────────
+
 export default async function handler(req, res) {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Content-Type', 'application/json');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method === 'GET') {
     return res.status(200).json({
-      message: 'Chat API is working (Claude Sonnet 4.6)',
-      method: 'GET',
+      message:   'Chat API is working (model routing enabled)',
+      providers: ['anthropic/haiku', 'anthropic/sonnet', 'groq/llama-3.3-70b'],
+      method:    'GET',
       timestamp: new Date().toISOString(),
     });
   }
@@ -24,9 +172,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    console.log('Chat API - POST request received');
-
-    const { messages, system, max_tokens = 500, temperature = 0.7 } = req.body || {};
+    const {
+      messages,
+      system,
+      max_tokens      = 500,
+      temperature     = 0.7,
+      page            = '',    // e.g. 'AILearningPage'
+      playgroundModel = null,  // e.g. 'claude-sonnet-4-6' or null
+    } = req.body || {};
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Messages array is required' });
@@ -36,68 +189,34 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Anthropic API key not configured' });
     }
 
-    console.log('Making Anthropic request...');
+    const { provider, model } = resolveRoute(page, playgroundModel);
 
-    const requestBody = {
-      model: 'claude-sonnet-4-6',
-      max_tokens,
-      temperature,
-      messages, // Anthropic uses the same [{role, content}] format
-      ...(system ? { system } : {}),
-    };
+    console.log(`[chat.js] page="${page}" → provider=${provider} model=${model}`);
 
-    const upstream = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    console.log('Anthropic response status:', upstream.status);
-    const data = await upstream.json();
-
-    if (!upstream.ok) {
-      console.log('Anthropic API error:', data);
-      return res.status(upstream.status).json({
-        error: `Anthropic API error: ${data.error?.message || 'Unknown error'}`,
-        anthropic_error: data,
-      });
+    if (provider === 'groq') {
+      if (!process.env.GROQ_API_KEY) {
+        // Graceful fallback to Haiku if Groq key is missing
+        console.warn('[chat.js] GROQ_API_KEY not set — falling back to Haiku');
+        const result = await callAnthropic(ANTHROPIC_HAIKU, messages, system, max_tokens, temperature);
+        return res.status(200).json(result);
+      }
+      const result = await callGroq(model, messages, system, max_tokens, temperature);
+      return res.status(200).json(result);
     }
 
-    // Transform Anthropic response → OpenAI shape so chatClient.ts needs no changes
-    // Anthropic: data.content[0].text
-    // OpenAI:    data.choices[0].message.content  ← what chatClient.ts reads
-    const text = data?.content?.[0]?.text ?? '';
-    const openAiShaped = {
-      id: data.id,
-      object: 'chat.completion',
-      model: data.model,
-      choices: [
-        {
-          index: 0,
-          message: { role: 'assistant', content: text },
-          finish_reason: data.stop_reason ?? 'stop',
-        },
-      ],
-      usage: {
-        prompt_tokens:     data.usage?.input_tokens  ?? 0,
-        completion_tokens: data.usage?.output_tokens ?? 0,
-        total_tokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0),
-      },
-    };
-
-    console.log('Returning successful response');
-    return res.status(200).json(openAiShaped);
+    // provider === 'anthropic' (haiku or sonnet)
+    const result = await callAnthropic(model, messages, system, max_tokens, temperature);
+    return res.status(200).json(result);
 
   } catch (error) {
-    console.log('Server error:', error);
-    return res.status(500).json({
-      error: `Server error: ${error.message}`,
-      type: error.constructor.name,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    console.error('[chat.js] Error:', error);
+    const status = error.status || 500;
+    return res.status(status).json({
+      error:           `Server error: ${error.message}`,
+      anthropic_error: error.anthropic_error,
+      groq_error:      error.groq_error,
+      type:            error.constructor?.name,
+      stack:           process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
   }
 }

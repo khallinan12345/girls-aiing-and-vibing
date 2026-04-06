@@ -1537,6 +1537,7 @@ You are a helpful AI learning assistant guiding a student through this learning 
     try {
       setReflectionValidating(true);
       const result = await chatJSON({
+        page: 'AILearningPage',   // → routes to Groq Llama 3.3 70B
         messages: [{
           role: 'user',
           content: `Evaluate whether this learner response is a genuine learning reflection.
@@ -1595,7 +1596,8 @@ Respond ONLY with valid JSON:
         messages,
         system: aiInstructions,
         max_tokens: 500,
-        temperature: 0.7
+        temperature: 0.7,
+        page: 'AILearningPage',   // → routes to Groq Llama 3.3 70B
       });
 
       console.log('[AI Chat] API response received successfully');
@@ -1681,7 +1683,8 @@ CRITICAL: Return ONLY the JSON object. No preamble, no explanation, no markdown.
         messages: [{ role: 'user', content: comprehensivePrompt }],
         system: 'You are a UNESCO AI Competency evaluator. Respond ONLY with valid JSON. Do not include any other text.',
         max_tokens: 1200,
-        temperature: 0.2
+        temperature: 0.2,
+        page: 'AILearningPage',   // → routes to Groq; Haiku fallback if Groq unavailable
       });
 
       console.log('[UNESCO Comprehensive Assessment] Raw response:', assessment);
