@@ -27,6 +27,7 @@ const GROQ_PAGES   = new Set([
   'AILearningPage',
   'EnglishSkillsPage',
   'SkillsDevelopmentPage',        // conversation turns, reflection, English coaching
+  'AgricultureConsultantPage',    // farmer persona chat + evaluation
 ]);
 
 const SONNET_PAGES = new Set([

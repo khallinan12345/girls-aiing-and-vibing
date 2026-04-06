@@ -701,6 +701,7 @@ const AgricultureConsultantPage: React.FC = () => {
       await createDashboardEntry(title);
 
       const reply = await chatText({
+        page: 'AgricultureConsultantPage',  // → Groq Llama 3.3 70B
         messages: [{ role: 'user', content: openingPrompt }],
         system: systemPrompt,
         max_tokens: 350,
@@ -733,6 +734,7 @@ const AgricultureConsultantPage: React.FC = () => {
       else if (mode === 'consult-chat' && selectedPersona) systemPrompt = selectedPersona.systemPrompt;
 
       const reply = await chatText({
+        page: 'AgricultureConsultantPage',  // → Groq Llama 3.3 70B
         messages: withUser.map(m => ({ role: m.role, content: m.content })),
         system: systemPrompt,
         max_tokens: 350,
@@ -766,6 +768,7 @@ const AgricultureConsultantPage: React.FC = () => {
     const conversation = messages.map(m => `${m.role === 'user' ? 'STUDENT CONSULTANT' : (mode === 'consult-chat' ? `FARMER (${selectedPersona?.name})` : 'AI TUTOR')}: ${m.content}`).join('\n\n');
     try {
       const result = await chatJSON({
+        page: 'AgricultureConsultantPage',  // → Groq Llama 3.3 70B
         messages: [{
           role: 'user', content: `You are evaluating a student's performance as an Agriculture Consultant for Oloibiri, Bayelsa State, Nigeria.
 ${mode === 'consult-chat' ? `Farmer persona: ${selectedPersona?.name} — ${selectedPersona?.description}. Situation: ${selectedPersona?.situation}` : `Topic studied: ${selectedTopic?.title}`}
