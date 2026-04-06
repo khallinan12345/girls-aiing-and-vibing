@@ -28,6 +28,10 @@ const GROQ_PAGES   = new Set([
   'EnglishSkillsPage',
   'SkillsDevelopmentPage',        // conversation turns, reflection, English coaching
   'AgricultureConsultantPage',    // farmer persona chat + evaluation
+  'HealthcareNavigatorPage',      // clinical navigator chat + assessment
+  'EntrepreneurshipAdvisorPage',  // startup advisor chat + evaluation
+  'FishingConsultantPage',
+  'AIAmbassadorsPage',
 ]);
 
 const SONNET_PAGES = new Set([
