@@ -576,7 +576,7 @@ const EntrepreneurshipConsultantPage: React.FC = () => {
         title = `Entrepreneurship Consultation — ${selectedPersona.name}`;
       }
       await createEntry(title);
-      const reply = await chatText({ messages: [{ role: 'user', content: prompt }], system: sys, max_tokens: 350 });
+      const reply = await chatText({ page: 'EntrepreneurshipConsultantPage', messages: [{ role: 'user', content: prompt }], system: sys, max_tokens: 350 });
       const msg: ChatMessage = {
         id: crypto.randomUUID(), role: 'assistant',
         content: mode === 'consult-chat' && selectedPersona ? selectedPersona.openingLine : reply,
@@ -597,7 +597,7 @@ const EntrepreneurshipConsultantPage: React.FC = () => {
     setMessages(withUser);
     try {
       const sys = mode === 'learn-chat' && selectedTopic ? TOPIC_SYSTEM_PROMPTS[selectedTopic.id] : (selectedPersona?.systemPrompt ?? '');
-      const reply = await chatText({ messages: withUser.map(m => ({ role: m.role, content: m.content })), system: sys, max_tokens: 350 });
+      const reply = await chatText({ page: 'EntrepreneurshipConsultantPage', messages: withUser.map(m => ({ role: m.role, content: m.content })), system: sys, max_tokens: 350 });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       const final = [...withUser, aiMsg];
       setMessages(final); await persistChat(final);
@@ -625,6 +625,7 @@ const EntrepreneurshipConsultantPage: React.FC = () => {
     const conv = messages.map(m => `${m.role === 'user' ? 'ADVISOR STUDENT' : (mode === 'consult-chat' ? `ENTREPRENEUR (${selectedPersona?.name})` : 'AI TUTOR')}: ${m.content}`).join('\n\n');
     try {
       const result = await chatJSON({
+        page: 'EntrepreneurshipConsultantPage',  // → Groq Llama 3.3 70B
         messages: [{
           role: 'user', content: `You are evaluating a student's performance as an Entrepreneurship Consultant for young Nigerians in Oloibiri/Bayelsa.
 Entrepreneur persona: ${selectedPersona?.name} — ${selectedPersona?.businessIdea}. Challenge: ${selectedPersona?.mainChallenge}
