@@ -1759,7 +1759,8 @@ LANGUAGE RULES:
         messages,
         system: contextualPrompt,
         max_tokens: 500,
-        temperature: 0.7
+        temperature: 0.7,
+        page: 'SkillsDevelopmentPage',  // → Groq Llama 3.3 70B
       });
 
       console.log('[Skills Chat] API response received successfully');
@@ -1793,6 +1794,7 @@ LANGUAGE RULES:
     try {
       setReflectionValidating(true);
       const result = await chatJSON({
+        page: 'SkillsDevelopmentPage',  // → Groq Llama 3.3 70B
         messages: [{
           role: 'user',
           content: `Evaluate whether this learner response is a genuine learning reflection.
@@ -2364,6 +2366,7 @@ Provide assessment now:`;
     setIsImproving(true);
     try {
       const result = await chatJSON({
+        page: 'SkillsDevelopmentPage',  // → Groq Llama 3.3 70B
         messages: [{
           role: 'user',
           content: `You are an English language coach helping a student in rural Nigeria improve their writing.
@@ -3088,7 +3091,8 @@ Respond with ONLY valid JSON:
       messages,
       system: 'You are an expert at evaluating coding instructions. Respond only with valid JSON.',
       max_tokens: 800,
-      temperature: 0.3
+      temperature: 0.3,
+      page: 'SkillsDevelopmentPage-code',  // → Claude Sonnet 4.6
     });
 
     let parsed: any;
@@ -3125,7 +3129,8 @@ const handleGenerateCodeFromInstructions = async (instructions: string, language
         ? 'You are a web developer. Generate ONLY a complete HTML file with no markdown backticks or explanations.'
         : `You are a code generator. Generate ONLY executable ${language} code with no markdown backticks or explanations.`,
       max_tokens: 2500,
-      temperature: 0.5
+      temperature: 0.5,
+      page: 'SkillsDevelopmentPage-code',  // → Claude Sonnet 4.6
     });
 
     let cleanedCode = code.trim();
@@ -3151,6 +3156,7 @@ const handleCreateVibePromptFromChat = async () => {
       .join('\n\n');
 
     const prompt = await chatText({
+      page: 'SkillsDevelopmentPage-code',  // → Claude Sonnet 4.6
       messages: [{
         role: 'user',
         content: `A student has been working with an AI coding coach to design a coding project. Based on the conversation below, write a clear, complete VIBE CODING PROMPT that captures exactly what they want to build.
@@ -3214,7 +3220,8 @@ Keep it concise and educational.`;
       messages,
       system: 'You are a patient coding tutor. Help students learn from errors, don\'t just fix things for them.',
       max_tokens: 600,
-      temperature: 0.7
+      temperature: 0.7,
+      page: 'SkillsDevelopmentPage-code',  // → Claude Sonnet 4.6
     });
 
     console.log('[Vibe Coding] Debugging advice provided');

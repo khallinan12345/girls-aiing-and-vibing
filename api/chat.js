@@ -1,12 +1,14 @@
 // api/chat.js - Vercel serverless function with model routing + prompt caching
 //
 // ROUTING LOGIC:
-//   page = 'AILearningPage' | 'EnglishSkillsPage'
-//     → Groq  llama-3.3-70b-versatile  (free, high volume)
+//   page = 'AILearningPage' | 'EnglishSkillsPage' |
+//          'SkillsDevelopmentPage'
+//     → Groq  llama-3.3-70b-versatile  (free, high volume learner chat)
 //
 //   page = 'VibeCodingPage' | 'WebDevelopmentPage' |
-//          'FullStackDevelopmentPage' | 'AIWorkflowDevPage'
-//     → Anthropic  claude-sonnet-4-6  (best for code)
+//          'FullStackDevelopmentPage' | 'AIWorkflowDevPage' |
+//          'SkillsDevelopmentPage-code'
+//     → Anthropic  claude-sonnet-4-6  (best for code generation/debugging)
 //
 //   page = 'AIPlaygroundPage'
 //     → Anthropic  claude-haiku-4-5-20251001  (default)
@@ -21,12 +23,18 @@
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const GROQ_PAGES   = new Set(['AILearningPage', 'EnglishSkillsPage']);
+const GROQ_PAGES   = new Set([
+  'AILearningPage',
+  'EnglishSkillsPage',
+  'SkillsDevelopmentPage',        // conversation turns, reflection, English coaching
+]);
+
 const SONNET_PAGES = new Set([
   'VibeCodingPage',
   'WebDevelopmentPage',
   'FullStackDevelopmentPage',
   'AIWorkflowDevPage',
+  'SkillsDevelopmentPage-code',   // code gen, vibe prompt, debugging inside SkillsDev
 ]);
 
 const ANTHROPIC_HAIKU  = 'claude-haiku-4-5-20251001';
@@ -46,7 +54,7 @@ function resolveRoute(page, playgroundModel) {
     const model = playgroundModel === ANTHROPIC_SONNET ? ANTHROPIC_SONNET : ANTHROPIC_HAIKU;
     return { provider: 'anthropic', model };
   }
-  // Default: Haiku for all other pages
+  // Default: Haiku for all other pages (assessments, advice, JSON calls)
   return { provider: 'anthropic', model: ANTHROPIC_HAIKU };
 }
 
@@ -177,7 +185,7 @@ export default async function handler(req, res) {
       system,
       max_tokens      = 500,
       temperature     = 0.7,
-      page            = '',    // e.g. 'AILearningPage'
+      page            = '',    // e.g. 'AILearningPage', 'SkillsDevelopmentPage-code'
       playgroundModel = null,  // e.g. 'claude-sonnet-4-6' or null
     } = req.body || {};
 
