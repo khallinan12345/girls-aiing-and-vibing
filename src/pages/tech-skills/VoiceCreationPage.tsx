@@ -21,8 +21,6 @@ import AppLayout from '../components/layout/AppLayout';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabaseClient';
 import { chatText } from '../lib/chatClient';
-import { useVoice } from '../hooks/useVoice';
-import { VoiceFallback } from '../components/VoiceFallback';
 import {
   Mic, Sparkles, Clock, CheckCircle, XCircle,
   Download, RotateCcw, ChevronDown, ChevronUp,
@@ -226,18 +224,11 @@ const VoiceCreationPage: React.FC = () => {
   const [loadingContinent,   setLoadingContinent]   = useState(true);
 
   // ── UI narration voice (browser TTS) ─────────────────────────────────────
-  const [voiceMode,       setVoiceMode]       = useState<'english' | 'pidgin'>('pidgin'); // Africa default
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoice,   setSelectedVoice]   = useState<SpeechSynthesisVoice | null>(null);
+  const [voiceMode,       setVoiceMode]       = useState<'english' | 'pidgin'>('pidgin');
   const [voiceEnabled,    setVoiceEnabled]    = useState(true);
-
-  // useVoice hook — en-NG priority for Africa, en-GB for others; local voices preferred (works offline)
-  const {
-    speak: hookSpeak,
-    cancel: cancelSpeech,
-    speaking: isSpeaking,
-    fallbackText,
-    clearFallback,
-    selectedVoice,
-  } = useVoice(voiceMode === 'pidgin');
+  const [isSpeaking,      setIsSpeaking]      = useState(false);
 
   // ── English improvement ───────────────────────────────────────────────────
   const [isImproving,    setIsImproving]    = useState(false);
@@ -272,11 +263,7 @@ const VoiceCreationPage: React.FC = () => {
 
     supabase.from('profiles').select('continent')
       .eq('id', user.id).single()
-      .then(({ data }) => {
-        setContinent(data?.continent ?? null);
-        setLoadingContinent(false);
-        setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english');
-      });
+      .then(({ data }) => { setContinent(data?.continent ?? null); setLoadingContinent(false); });
 
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     supabase.from('voice_generations').select('id', { count: 'exact', head: true })
@@ -308,13 +295,52 @@ const VoiceCreationPage: React.FC = () => {
       : 'Powered by MiniMax Speech-02-Turbo via Replicate. ~3–5s generation time.',
   };
 
-  const speakText = useCallback((text: string) => {
-    if (!voiceEnabled) return;
-    const stripped = text.replace(/\*\*/g, '').slice(0, 500);
-    hookSpeak(stripped);
-  }, [voiceEnabled, hookSpeak]);
+  // ── Browser TTS voice (page narration) ───────────────────────────────────
+  useEffect(() => {
+    const load = () => setAvailableVoices(window.speechSynthesis.getVoices());
+    load();
+    window.speechSynthesis.onvoiceschanged = load;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, []);
 
-  const stopSpeaking = () => cancelSpeech();
+  useEffect(() => {
+    if (!availableVoices.length) return;
+    let voice: SpeechSynthesisVoice | undefined;
+    if (voiceMode === 'pidgin') {
+      voice = availableVoices.find(v => v.lang === 'en-NG')
+           || availableVoices.find(v => v.name.toLowerCase().includes('nigeria'))
+           || availableVoices.find(v => v.lang === 'en-ZA')
+           || availableVoices.find(v => v.name === 'Google UK English Female')
+           || availableVoices.find(v => v.lang.startsWith('en'))
+           || availableVoices[0];
+    } else {
+      voice = availableVoices.find(v => v.name === 'Google UK English Female')
+           || availableVoices.find(v => v.lang === 'en-GB' && v.name.toLowerCase().includes('female'))
+           || availableVoices.find(v => v.lang === 'en-GB')
+           || availableVoices.find(v => v.name.includes('Google') && v.lang.startsWith('en'))
+           || availableVoices.find(v => v.lang.startsWith('en'))
+           || availableVoices[0];
+    }
+    setSelectedVoice(voice || null);
+  }, [availableVoices, voiceMode]);
+
+  const speakText = useCallback((text: string) => {
+    if (!voiceEnabled || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const stripped = text.replace(/\*\*/g, '').slice(0, 500);
+    const u = new SpeechSynthesisUtterance(stripped);
+    if (selectedVoice) { u.voice = selectedVoice; u.lang = selectedVoice.lang; }
+    else u.lang = 'en-GB';
+    u.rate = voiceMode === 'pidgin' ? 0.80 : 0.88;
+    u.pitch = voiceMode === 'pidgin' ? 1.0 : 1.05;
+    u.volume = 0.9;
+    u.onstart = () => setIsSpeaking(true);
+    u.onend   = () => setIsSpeaking(false);
+    u.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(u);
+  }, [voiceEnabled, selectedVoice, voiceMode]);
+
+  const stopSpeaking = () => { window.speechSynthesis.cancel(); setIsSpeaking(false); };
 
   // ── Load history ──────────────────────────────────────────────────────────
   const loadHistory = useCallback(async () => {
@@ -625,13 +651,6 @@ const VoiceCreationPage: React.FC = () => {
               </div>
             </div>
           </div>
-
-          {/* Text fallback when TTS unavailable (e.g. no network voice in Nigeria) */}
-          {fallbackText && (
-            <div className="mb-3">
-              <VoiceFallback text={fallbackText} onDismiss={clearFallback} />
-            </div>
-          )}
 
           {/* Tabs */}
           <div className="flex gap-1 bg-slate-900/60 border border-slate-700/40 rounded-lg p-1 w-fit">

@@ -13,13 +13,11 @@ import AppLayout from '../components/layout/AppLayout';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabaseClient';
 import { chatText } from '../lib/chatClient';
-import { useVoice } from '../hooks/useVoice';
-import { VoiceFallback } from '../components/VoiceFallback';
 import {
   Film, Sparkles, Clock, CheckCircle, XCircle,
   Download, RotateCcw, ChevronDown, ChevronUp,
   Volume2, VolumeX, Wand2, MessageSquare, Lightbulb, Save,
-  AlertTriangle,
+  AlertTriangle, ImagePlus, X as XIcon, ArrowRight,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -166,18 +164,11 @@ const VideoGenerationPage: React.FC = () => {
   const [loadingContinent,   setLoadingContinent]   = useState(true);
 
   // ── Voice state ───────────────────────────────────────────────────────────
-  const [voiceMode,       setVoiceMode]       = useState<'english' | 'pidgin'>('pidgin'); // Africa default
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoice,   setSelectedVoice]   = useState<SpeechSynthesisVoice | null>(null);
+  const [voiceMode,       setVoiceMode]       = useState<'english' | 'pidgin'>('pidgin');
   const [voiceEnabled,    setVoiceEnabled]    = useState(true);
-
-  // useVoice hook — en-NG priority for Africa, en-GB for others; local voices preferred (works offline)
-  const {
-    speak: hookSpeak,
-    cancel: cancelSpeech,
-    speaking: isSpeaking,
-    fallbackText,
-    clearFallback,
-    selectedVoice,
-  } = useVoice(voiceMode === 'pidgin');
+  const [isSpeaking,      setIsSpeaking]      = useState(false);
 
   // ── Improve English state ─────────────────────────────────────────────────
   const [isImproving, setIsImproving] = useState(false);
@@ -205,6 +196,12 @@ const VideoGenerationPage: React.FC = () => {
   const [isStepSending,  setIsStepSending]  = useState(false);
   const [isImprovingStep, setIsImprovingStep] = useState(false);
 
+  // ── Image anchoring state ─────────────────────────────────────────────────
+  const [startImage,        setStartImage]        = useState<File | null>(null);
+  const [startImagePreview, setStartImagePreview] = useState<string | null>(null);
+  const [endImage,          setEndImage]          = useState<File | null>(null);
+  const [endImagePreview,   setEndImagePreview]   = useState<string | null>(null);
+
   const FRAMES: Record<number, number> = { 5: 121, 8: 193, 10: 241 };
 
   // ── Fetch communication_level, continent, and weekly usage on mount ───────
@@ -229,7 +226,6 @@ const VideoGenerationPage: React.FC = () => {
       .then(({ data }) => {
         setContinent(data?.continent ?? null);
         setLoadingContinent(false);
-        setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english');
       });
 
     // Weekly usage count (last 7 days, non-failed jobs)
@@ -258,24 +254,70 @@ const VideoGenerationPage: React.FC = () => {
       ? 'e.g. A girl walking to school in the morning, bright sunshine, green trees'
       : 'e.g. A young student in Nigeria working on a laptop in a sunlit classroom, cinematic warm light, slow pan…',
     durationLabel:  lvl <= 1 ? 'How long?'        : 'Duration',
-    durationHint:   lvl <= 1 ? 'Longer takes more time (~30–90 seconds).'
-                             : 'Longer = slower generation (~30–90s total)',
+    durationHint:   lvl <= 1 ? 'This can take 2–5 minutes. Please be patient!'
+                             : 'Wan 2.1 720p typically takes 2–5 minutes to generate.',
     improveBtnLabel: lvl <= 1 ? '✏️ Improve my English' : '✏️ Improve my English',
     critiqueBtnLabel: lvl <= 1 ? '💡 Help me write a better prompt' : '💡 Critique my Prompt',
     generateBtn:    lvl <= 1 ? 'Make My Video 🎬'  : 'Generate Video',
     footerText:     lvl <= 1
-      ? 'Your video is made by LTX-Video. It takes 30–90 seconds. Your videos are saved in your history.'
-      : 'Powered by LTX-Video (Lightricks) via Replicate. 704×480px · 24fps · Generation time: 30–90s',
+      ? 'Your video is made by Wan 2.1. It can take 2–5 minutes. Please wait — do not close the page!'
+      : 'Powered by Wan 2.1 I2V 720p (WaveSpeed/Alibaba) via Replicate. Generation typically takes 2–5 minutes.',
   };
+
+  // ── Load voices ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    const load = () => setAvailableVoices(window.speechSynthesis.getVoices());
+    load();
+    window.speechSynthesis.onvoiceschanged = load;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, []);
+
+  // ── Resolve selected voice ────────────────────────────────────────────────
+  useEffect(() => {
+    if (availableVoices.length === 0) return;
+    let voice: SpeechSynthesisVoice | undefined;
+    if (voiceMode === 'pidgin') {
+      voice =
+        availableVoices.find(v => v.lang === 'en-NG') ||
+        availableVoices.find(v => v.name.toLowerCase().includes('nigeria')) ||
+        availableVoices.find(v => v.lang === 'en-ZA') ||
+        availableVoices.find(v => v.name === 'Google UK English Female') ||
+        availableVoices.find(v => v.name.includes('Google') && v.lang.startsWith('en')) ||
+        availableVoices.find(v => v.lang.startsWith('en')) ||
+        availableVoices[0];
+    } else {
+      voice =
+        availableVoices.find(v => v.name === 'Google UK English Female') ||
+        availableVoices.find(v => v.lang === 'en-GB' && v.name.toLowerCase().includes('female')) ||
+        availableVoices.find(v => v.lang === 'en-GB') ||
+        availableVoices.find(v => v.name.includes('Google') && v.lang.startsWith('en')) ||
+        availableVoices.find(v => v.lang.startsWith('en')) ||
+        availableVoices[0];
+    }
+    setSelectedVoice(voice || null);
+  }, [availableVoices, voiceMode]);
 
   // ── Speak text ────────────────────────────────────────────────────────────
   const speakText = useCallback((text: string) => {
-    if (!voiceEnabled) return;
+    if (!voiceEnabled || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
     const stripped = text.replace(/\*\*/g, '').replace(/#{1,3} /g, '').slice(0, 600);
-    hookSpeak(stripped);
-  }, [voiceEnabled, hookSpeak]);
+    const utterance = new SpeechSynthesisUtterance(stripped);
+    if (selectedVoice) { utterance.voice = selectedVoice; utterance.lang = selectedVoice.lang; }
+    else { utterance.lang = 'en-GB'; }
+    utterance.rate  = voiceMode === 'pidgin' ? 0.80 : 0.88;
+    utterance.pitch = voiceMode === 'pidgin' ? 1.0  : 1.05;
+    utterance.volume = 0.9;
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend   = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  }, [voiceEnabled, selectedVoice, voiceMode]);
 
-  const stopSpeaking = () => cancelSpeech();
+  const stopSpeaking = () => {
+    window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+  };
 
   // ── Load history ──────────────────────────────────────────────────────────
   const loadHistory = useCallback(async () => {
@@ -320,6 +362,49 @@ const VideoGenerationPage: React.FC = () => {
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
+  // ── Image helpers ─────────────────────────────────────────────────────────
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = () => reject(new Error('Failed to read image'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleStartImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStartImage(file);
+    setStartImagePreview(URL.createObjectURL(file));
+  };
+
+  const handleEndImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setEndImage(file);
+    setEndImagePreview(URL.createObjectURL(file));
+  };
+
+  const clearStartImage = () => {
+    setStartImage(null);
+    if (startImagePreview) URL.revokeObjectURL(startImagePreview);
+    setStartImagePreview(null);
+    // Clearing the start image also clears end image (end requires start)
+    setEndImage(null);
+    if (endImagePreview) URL.revokeObjectURL(endImagePreview);
+    setEndImagePreview(null);
+  };
+
+  const clearEndImage = () => {
+    setEndImage(null);
+    if (endImagePreview) URL.revokeObjectURL(endImagePreview);
+    setEndImagePreview(null);
+  };
+
+  // Determine current mode for display
+  const imageMode: 'text' | 'start' | 'start-end' =
+    startImage && endImage ? 'start-end' : startImage ? 'start' : 'text';
+
   // ── Start generation ──────────────────────────────────────────────────────
   const handleGenerate = async () => {
     if (!prompt.trim() || isStarting || !user) return;
@@ -337,8 +422,43 @@ const VideoGenerationPage: React.FC = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Not authenticated');
+
+      // Build image params
+      const imagePayload: Record<string, string> = {};
+      if (startImage) {
+        imagePayload.image = await fileToBase64(startImage);
+      }
+      if (endImage) {
+        imagePayload.last_image = await fileToBase64(endImage);
+      }
+
+      // ── Anchor prompt injection ──────────────────────────────────────────
+      // LTX-Video requires the prompt to explicitly describe the anchor frames
+      // as the first and last moments of the clip, otherwise it treats the
+      // images as soft guidance rather than hard frame constraints.
+      let anchoredPrompt = prompt.trim();
+      if (startImage && endImage) {
+        anchoredPrompt =
+          `The video begins exactly with this precise scene: ${anchoredPrompt}. ` +
+          `The first frame matches the start image exactly, with identical composition, subjects, lighting, and colours. ` +
+          `The video transitions naturally and ends exactly with the final image, ` +
+          `with the last frame matching the end image precisely in composition, subjects, lighting, and colours. ` +
+          `No deviation from either anchor frame.`;
+      } else if (startImage) {
+        anchoredPrompt =
+          `The video begins exactly with this precise scene: ${anchoredPrompt}. ` +
+          `The first frame matches the start image exactly, with identical composition, subjects, lighting, and colours. ` +
+          `Maintain strict fidelity to the starting image.`;
+      }
+
+      // Strengthen negative prompt when anchors are active
+      const anchoredNegPrompt = startImage
+        ? `${negPrompt.trim()}, inconsistent first frame, mismatched starting scene, different opening composition, frame mismatch, scene change at start${endImage ? ', inconsistent last frame, mismatched ending scene, different closing composition, frame mismatch at end' : ''}`
+        : negPrompt.trim();
+
       const { ok, data } = await callEdgeFunction('generate-video', 'POST', session.access_token, {
-        prompt: prompt.trim(), negative_prompt: negPrompt.trim(), num_frames: FRAMES[duration],
+        prompt: anchoredPrompt, negative_prompt: anchoredNegPrompt, num_frames: FRAMES[duration],
+        ...imagePayload,
       });
       if (!ok || !data.jobId) throw new Error(data.error ?? 'Failed to start video generation');
       const newJob: VideoJob = {
@@ -349,8 +469,8 @@ const VideoGenerationPage: React.FC = () => {
       setWeeklyCount(c => c + 1);
       startPolling(data.jobId, session.access_token);
       speakText(lvl <= 1
-        ? 'OK! Your video is being made. Please wait about one minute.'
-        : 'Your video generation has started. This usually takes 30 to 90 seconds.');
+        ? 'OK! Your video is being made. This can take 2 to 5 minutes. Please wait and keep the page open.'
+        : 'Your video generation has started. This usually takes 2 to 5 minutes.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
@@ -362,6 +482,7 @@ const VideoGenerationPage: React.FC = () => {
     if (pollRef.current) clearInterval(pollRef.current);
     setActiveJob(null); setVideoUrl(null); setError(null);
     setSavedUrl(null); setSaveError(null); setDashSaved(false);
+    clearStartImage();
     stopSpeaking();
   };
 
@@ -719,20 +840,11 @@ Return ONLY the improved text. No explanation, no preamble.`
                   </div>
                 )}
                 {voiceEnabled && selectedVoice && (
-                  <span className="text-xs text-slate-500 hidden sm:inline">
-                    {selectedVoice.name}{selectedVoice.localService ? ' · offline' : ''}
-                  </span>
+                  <span className="text-xs text-slate-500 hidden sm:inline">{selectedVoice.name}</span>
                 )}
               </div>
             </div>
           </div>
-
-          {/* Text fallback when TTS unavailable (e.g. no network voice in Nigeria) */}
-          {fallbackText && (
-            <div className="mb-3">
-              <VoiceFallback text={fallbackText} onDismiss={clearFallback} />
-            </div>
-          )}
 
           {/* Tab nav */}
           <div className="flex gap-1 bg-slate-900/60 border border-slate-700/40 rounded-lg p-1 w-fit">
@@ -836,7 +948,131 @@ Return ONLY the improved text. No explanation, no preamble.`
               </div>
             </div>
 
-            {/* ── Critique / Step panel ─────────────────────────────────── */}
+            {/* ── Image anchoring ───────────────────────────────────────── */}
+            <div className="bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 backdrop-blur-sm space-y-4">
+              {/* Mode badge */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-300">
+                    {lvl <= 1 ? '🖼️ Add Images (optional)' : '🖼️ Image Anchoring (optional)'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {lvl <= 1
+                      ? 'Add a start image so the video begins with your picture. Add an end image to finish there too.'
+                      : 'Anchor the first and/or last frame of the video to uploaded images.'}
+                  </p>
+                </div>
+                {/* Mode pill */}
+                <span className={classNames(
+                  'text-xs font-semibold rounded-full px-3 py-1 border shrink-0',
+                  imageMode === 'start-end'
+                    ? 'bg-violet-900/40 border-violet-500/40 text-violet-300'
+                    : imageMode === 'start'
+                    ? 'bg-cyan-900/40 border-cyan-500/40 text-cyan-300'
+                    : 'bg-slate-800 border-slate-600/50 text-slate-500'
+                )}>
+                  {imageMode === 'start-end'
+                    ? (lvl <= 1 ? 'Text + Start + End' : 'Mode 3 — Text + Start + End')
+                    : imageMode === 'start'
+                    ? (lvl <= 1 ? 'Text + Start image' : 'Mode 2 — Text + Start Image')
+                    : (lvl <= 1 ? 'Text only' : 'Mode 1 — Text Only')}
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-4 items-start">
+
+                {/* ── Start image ── */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-slate-400 mb-2">
+                    {lvl <= 1 ? '▶ Start image' : '▶ Start frame'}
+                  </p>
+                  {startImagePreview ? (
+                    <div className="relative group rounded-xl overflow-hidden border border-cyan-500/40 bg-black">
+                      <img src={startImagePreview} alt="Start frame" className="w-full h-32 object-cover" />
+                      <button onClick={clearStartImage} disabled={isGenerating}
+                        className="absolute top-2 right-2 bg-red-600/80 hover:bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
+                        title="Remove start image">
+                        <XIcon size={12} />
+                      </button>
+                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1">
+                        <p className="text-xs text-cyan-300 truncate">{startImage?.name}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className={classNames(
+                      'flex flex-col items-center justify-center gap-2 h-32 rounded-xl border-2 border-dashed cursor-pointer transition-all',
+                      isGenerating
+                        ? 'border-slate-700 opacity-40 cursor-not-allowed'
+                        : 'border-slate-600 hover:border-cyan-500/60 hover:bg-cyan-950/20'
+                    )}>
+                      <ImagePlus size={20} className="text-slate-500" />
+                      <span className="text-xs text-slate-500">
+                        {lvl <= 1 ? 'Upload start image' : 'Upload start frame'}
+                      </span>
+                      <input type="file" accept="image/*" className="hidden"
+                        onChange={handleStartImageChange} disabled={isGenerating} />
+                    </label>
+                  )}
+                </div>
+
+                {/* Arrow connector */}
+                <div className="flex items-center justify-center sm:pt-8">
+                  <ArrowRight size={20} className={classNames(
+                    'transition-colors',
+                    startImage ? 'text-cyan-400' : 'text-slate-700'
+                  )} />
+                </div>
+
+                {/* ── End image ── */}
+                <div className="flex-1 min-w-0">
+                  <p className={classNames('text-xs font-medium mb-2', startImage ? 'text-slate-400' : 'text-slate-600')}>
+                    {lvl <= 1 ? '⏹ End image' : '⏹ End frame'}
+                  </p>
+                  {endImagePreview ? (
+                    <div className="relative group rounded-xl overflow-hidden border border-violet-500/40 bg-black">
+                      <img src={endImagePreview} alt="End frame" className="w-full h-32 object-cover" />
+                      <button onClick={clearEndImage} disabled={isGenerating}
+                        className="absolute top-2 right-2 bg-red-600/80 hover:bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
+                        title="Remove end image">
+                        <XIcon size={12} />
+                      </button>
+                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1">
+                        <p className="text-xs text-violet-300 truncate">{endImage?.name}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className={classNames(
+                      'flex flex-col items-center justify-center gap-2 h-32 rounded-xl border-2 border-dashed transition-all',
+                      !startImage || isGenerating
+                        ? 'border-slate-700 opacity-40 cursor-not-allowed'
+                        : 'border-slate-600 hover:border-violet-500/60 hover:bg-violet-950/20 cursor-pointer'
+                    )}>
+                      <ImagePlus size={20} className="text-slate-500" />
+                      <span className="text-xs text-slate-500 text-center px-2">
+                        {!startImage
+                          ? (lvl <= 1 ? 'Add start image first' : 'Requires start frame')
+                          : (lvl <= 1 ? 'Upload end image' : 'Upload end frame')}
+                      </span>
+                      <input type="file" accept="image/*" className="hidden"
+                        onChange={handleEndImageChange} disabled={!startImage || isGenerating} />
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {/* Tip */}
+              {imageMode !== 'text' && (
+                <p className="text-xs text-slate-500 bg-slate-800/50 rounded-lg px-3 py-2">
+                  💡 {lvl <= 1
+                    ? (imageMode === 'start-end'
+                        ? 'The video will start with your first image and end with your second image.'
+                        : 'The video will start with your image. The prompt controls what happens next.')
+                    : (imageMode === 'start-end'
+                        ? 'LTX-Video will align the first and last frames to your uploaded images. The prompt guides the motion between them.'
+                        : 'LTX-Video will use your image as the first frame. The text prompt guides the visual development.')}
+                </p>
+              )}
+            </div>
             {showCritique && (
               <div className="bg-slate-900/80 border border-amber-500/30 rounded-2xl p-5 backdrop-blur-sm">
                 <div className="flex items-center justify-between mb-3">
@@ -967,11 +1203,18 @@ Return ONLY the improved text. No explanation, no preamble.`
                         ? (isGenerating ? 'Making your video… please wait' : activeJob.status === 'succeeded' ? '🎉 Your video is ready!' : 'Something went wrong')
                         : STATUS_LABEL[activeJob.status]}
                     </p>
-                    <p className="text-xs text-slate-400 truncate mt-0.5">{activeJob.prompt}</p>
+                    <p className="text-xs text-slate-400 truncate mt-0.5">
+                      {activeJob.prompt}
+                      {imageMode !== 'text' && (
+                        <span className="ml-2 text-cyan-400/70">
+                          [{imageMode === 'start-end' ? '🖼️→🖼️' : '🖼️→'}]
+                        </span>
+                      )}
+                    </p>
                     {isGenerating && (
                       <p className="text-xs text-slate-500 mt-1">
-                        {lvl <= 1 ? 'This takes about 30–90 seconds. Checking every 3 seconds…'
-                                  : 'LTX-Video typically takes 30–90 seconds. Polling every 3s…'}
+                        {lvl <= 1 ? 'This can take 2–5 minutes. Please keep this page open and wait…'
+                                  : 'Wan 2.1 720p typically takes 2–5 minutes. Please keep this page open.'}
                       </p>
                     )}
                   </div>

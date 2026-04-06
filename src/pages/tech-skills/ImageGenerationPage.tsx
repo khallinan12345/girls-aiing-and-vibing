@@ -144,10 +144,9 @@ const ImageGenerationPage: React.FC = () => {
   const [loadingContinent,   setLoadingContinent]   = useState(true);
 
   // ── Voice state ───────────────────────────────────────────────────────────
-  const [voiceMode,    setVoiceMode]    = useState<'english' | 'pidgin'>('pidgin'); // Africa default; updated after profile loads
+  const [voiceMode,    setVoiceMode]    = useState<'english' | 'pidgin'>('pidgin'); // Africa default
   const [voiceEnabled, setVoiceEnabled] = useState(true);
 
-  // useVoice hook — en-NG priority for Africa, en-GB for others; local voices preferred (works offline)
   const {
     speak: hookSpeak,
     cancel: cancelSpeech,
@@ -195,7 +194,6 @@ const ImageGenerationPage: React.FC = () => {
       .then(({ data }) => {
         setContinent(data?.continent ?? null);
         setLoadingContinent(false);
-        // Default Nigerian voice for Africa; British for everyone else
         setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english');
       });
 
