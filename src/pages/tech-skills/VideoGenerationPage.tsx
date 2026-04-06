@@ -9,10 +9,10 @@
 //   • Full generation + polling + history
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import AppLayout from '../components/layout/AppLayout';
-import { useAuth } from '../hooks/useAuth';
-import { supabase } from '../lib/supabaseClient';
-import { chatText } from '../lib/chatClient';
+import AppLayout from '../../components/layout/AppLayout';
+import { useAuth } from '../../hooks/useAuth';
+import { supabase } from '../../lib/supabaseClient';
+import { chatText } from '../../lib/chatClient';
 import {
   Film, Sparkles, Clock, CheckCircle, XCircle,
   Download, RotateCcw, ChevronDown, ChevronUp,

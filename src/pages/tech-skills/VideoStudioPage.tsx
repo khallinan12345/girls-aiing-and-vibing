@@ -5,9 +5,9 @@
 import React, {
   useState, useEffect, useRef, useCallback, useMemo,
 } from 'react';
-import AppLayout from '../components/layout/AppLayout';
-import { useAuth } from '../hooks/useAuth';
-import { supabase } from '../lib/supabaseClient';
+import AppLayout from '../../components/layout/AppLayout';
+import { useAuth } from '../../hooks/useAuth';
+import { supabase } from '../../lib/supabaseClient';
 import classNames from 'classnames';
 import {
   Film, Music, Mic, Type, Play, Pause, SkipBack,

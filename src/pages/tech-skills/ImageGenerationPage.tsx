@@ -12,12 +12,12 @@
 //   • Save session to dashboard (image_prompt, image_url, image_critique, image_chat_history)
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import AppLayout from '../components/layout/AppLayout';
-import { useAuth } from '../hooks/useAuth';
-import { supabase } from '../lib/supabaseClient';
-import { chatText } from '../lib/chatClient';
-import { useVoice } from '../hooks/useVoice';
-import { VoiceFallback } from '../components/VoiceFallback';
+import AppLayout from '../../components/layout/AppLayout';
+import { useAuth } from '../../hooks/useAuth';
+import { supabase } from '../../lib/supabaseClient';
+import { chatText } from '../../lib/chatClient';
+import { useVoice } from '../../hooks/useVoice';
+import { VoiceFallback } from '../../components/VoiceFallback';
 import {
   ImagePlus, Sparkles, Clock, CheckCircle, XCircle,
   Download, RotateCcw, ChevronDown, ChevronUp,
