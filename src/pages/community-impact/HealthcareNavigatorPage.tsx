@@ -904,7 +904,7 @@ const HealthcareNavigatorPage: React.FC = () => {
         title = `Health Consultation — ${selectedPersona.name}`;
       }
       await createEntry(title);
-      const reply = await chatText({ messages: [{ role: 'user', content: prompt }], system: sys, max_tokens: 350 });
+      const reply = await chatText({ page: 'HealthcareNavigatorPage', messages: [{ role: 'user', content: prompt }], system: sys, max_tokens: 350 });
       const msg: ChatMessage = {
         id: crypto.randomUUID(), role: 'assistant',
         content: mode === 'consult-chat' && selectedPersona ? selectedPersona.openingLine : reply,
@@ -925,7 +925,7 @@ const HealthcareNavigatorPage: React.FC = () => {
     setMessages(withUser);
     try {
       const sys = mode === 'learn-chat' && selectedTopic ? TOPIC_SYSTEM_PROMPTS[selectedTopic.id] : (selectedPersona?.systemPrompt ?? '');
-      const reply = await chatText({ messages: withUser.map(m => ({ role: m.role, content: m.content })), system: sys, max_tokens: 380 });
+      const reply = await chatText({ page: 'HealthcareNavigatorPage', messages: withUser.map(m => ({ role: m.role, content: m.content })), system: sys, max_tokens: 380 });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       const final = [...withUser, aiMsg];
       setMessages(final);
@@ -1007,7 +1007,7 @@ Based on WHO IMCI guidelines and the Bayelsa/Nigeria disease burden context, pro
 Format your response clearly with these exact headings. Use plain language — this navigator may not have advanced medical training.
 ${CLINICAL_CONTEXT}`;
 
-      const result = await chatText({ messages: [{ role: 'user', content: prompt }], system: 'You are a WHO IMCI clinical decision support system. Be specific, practical, and clear. Always prioritise patient safety. Never overstate certainty.', max_tokens: 900 });
+      const result = await chatText({ page: 'HealthcareNavigatorPage', messages: [{ role: 'user', content: prompt }], system: 'You are a WHO IMCI clinical decision support system. Be specific, practical, and clear. Always prioritise patient safety. Never overstate certainty.', max_tokens: 900 });
       setAssessResult(result);
       await createEntry(`Health Assessment — ${a.patientName || 'unnamed'} (${ageStr})`);
       setMode('assess-result');
@@ -1022,6 +1022,7 @@ ${CLINICAL_CONTEXT}`;
     const conv = messages.map(m => `${m.role === 'user' ? 'NAVIGATOR STUDENT' : `PATIENT (${selectedPersona?.name})`}: ${m.content}`).join('\n\n');
     try {
       const result = await chatJSON({
+        page: 'HealthcareNavigatorPage',  // → Groq Llama 3.3 70B
         messages: [{
           role: 'user', content: `Evaluate this Community Health Navigator student's clinical consultation performance in Oloibiri, Nigeria.
 Patient persona: ${selectedPersona?.name} — ${selectedPersona?.presentation}
