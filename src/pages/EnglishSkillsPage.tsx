@@ -390,6 +390,7 @@ Return ONLY valid JSON:
 }`;
 
   const result = await chatJSON({
+    page: 'EnglishSkillsPage',  // → Groq Llama 3.3 70B
     messages: [{ role: 'user', content: prompt }],
     system: 'You are an expert English language evaluator. Return only valid JSON.',
     max_tokens: 1200,
@@ -413,6 +414,7 @@ Return ONLY valid JSON: { "improved_text": "...", "explanation": "..." }
 Explanation: 2–3 warm sentences to the student explaining WHAT changed and WHY.`;
 
   const result = await chatJSON({
+    page: 'EnglishSkillsPage',  // → Groq Llama 3.3 70B
     messages: [{ role: 'user', content: prompt }],
     system: 'You are an English language coach. Return only valid JSON.',
     max_tokens: 600,
@@ -943,6 +945,7 @@ Respond ONLY with valid JSON:
 
     try {
       const result = await chatJSON({
+        page: 'EnglishSkillsPage',  // → Groq Llama 3.3 70B
         messages: [{ role: 'user', content: prompt }],
         system: 'You are a learner profile expert making careful, evidence-based incremental updates. Return only valid JSON.',
         max_tokens: 700,
@@ -1022,6 +1025,7 @@ Respond ONLY with valid JSON:
     try {
       const sysPrompt = selectedStage.systemPrompt.replace('{TOPIC}', t) + buildCommLevelBlock(communicationLevel);
       const welcome = await chatText({
+        page: 'EnglishSkillsPage',  // → Groq Llama 3.3 70B
         messages: [{ role: 'user', content: `The student has chosen the topic: "${t}". Give a warm 2-sentence welcome and ask your very first question or prompt. Be friendly and encouraging.` }],
         system: sysPrompt,
         max_tokens: 400,
@@ -1064,6 +1068,7 @@ Respond ONLY with valid JSON:
     try {
       const sysPrompt = selectedStage.systemPrompt.replace('{TOPIC}', topic) + buildCommLevelBlock(communicationLevel);
       const aiText = await chatText({
+        page: 'EnglishSkillsPage',  // → Groq Llama 3.3 70B
         messages: withUser.map(m => ({ role: m.role, content: m.content })),
         system: sysPrompt,
         max_tokens: 400,
