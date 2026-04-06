@@ -845,7 +845,7 @@ const FishingConsultantPage: React.FC = () => {
         title = `Fishing Consultation — ${selectedPersona.name}`;
       }
       await createDashboardEntry(title);
-      const reply = await chatText({ messages: [{ role: 'user', content: openingPrompt }], system: systemPrompt, max_tokens: 350 });
+      const reply = await chatText({ page: 'FishingConsultantPage', messages: [{ role: 'user', content: openingPrompt }], system: systemPrompt, max_tokens: 350 });
       const msg: ChatMessage = {
         id: crypto.randomUUID(), role: 'assistant',
         content: mode === 'consult-chat' && selectedPersona ? selectedPersona.openingLine : reply,
@@ -868,7 +868,7 @@ const FishingConsultantPage: React.FC = () => {
       const systemPrompt = mode === 'learn-chat' && selectedTopic
         ? TOPIC_SYSTEM_PROMPTS[selectedTopic.id]
         : (selectedPersona?.systemPrompt ?? '');
-      const reply = await chatText({ messages: withUser.map(m => ({ role: m.role, content: m.content })), system: systemPrompt, max_tokens: 350 });
+      const reply = await chatText({ page: 'FishingConsultantPage', messages: withUser.map(m => ({ role: m.role, content: m.content })), system: systemPrompt, max_tokens: 350 });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       const final = [...withUser, aiMsg];
       setMessages(final);
@@ -897,6 +897,7 @@ const FishingConsultantPage: React.FC = () => {
     const conversation = messages.map(m => `${m.role === 'user' ? 'STUDENT CONSULTANT' : (mode === 'consult-chat' ? `FISHER (${selectedPersona?.name})` : 'AI TUTOR')}: ${m.content}`).join('\n\n');
     try {
       const result = await chatJSON({
+        page: 'FishingConsultantPage',  // → Groq Llama 3.3 70B
         messages: [{
           role: 'user', content: `You are evaluating a student's performance as a Fishing Consultant for Oloibiri, Bayelsa State, Nigeria.
 ${mode === 'consult-chat' ? `Fisher persona: ${selectedPersona?.name} — ${selectedPersona?.description}. Situation: ${selectedPersona?.situation}` : `Topic: ${selectedTopic?.title}`}
