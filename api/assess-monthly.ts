@@ -1773,9 +1773,9 @@ async function sendEmailReport(
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 //
-//  Four modes, controlled by query params:
+//  Five modes, controlled by query params:
 //
-//  1. ORCHESTRATE (default)
+//  1. ORCHESTRATE (default) — cron: 0 2 1 * *
 //     curl /api/assess-monthly?start=YYYY-MM-DD&end=YYYY-MM-DD
 //     → Builds transcripts for all users, submits ONE Anthropic batch request,
 //       returns batchId immediately (no polling — avoids Vercel timeout).
@@ -1793,14 +1793,16 @@ async function sendEmailReport(
 //     curl /api/assess-monthly?start=...&end=...&mode=report
 //     → Reads saved DB rows for the period and sends the email report.
 //
-//  Usage sequence:
-//    1. curl ".../api/assess-monthly?start=2026-04-01&end=2026-04-30"
-//       → Returns: { batchId: "msgbatch_xxx", nextStep: "?mode=poll&batchId=..." }
-//    2. Wait ~2 minutes, then:
-//       curl ".../api/assess-monthly?...&mode=poll&batchId=msgbatch_xxx"
-//       → If still processing: call again in 30s
-//       → If done: saves all results, returns nextStep for report
-//    3. curl ".../api/assess-monthly?start=...&end=...&mode=report"
+//  5. POLL-AND-REPORT (automated) — cron: 0 4 1 * *
+//     curl /api/assess-monthly?mode=poll-and-report
+//     → Finds the most recent Anthropic batch, waits for it to be ended,
+//       saves all results to DB, then sends the email report automatically.
+//       Designed to run 2 hours after ORCHESTRATE — batch will always be done.
+//       No batchId required — looks up the latest batch from Anthropic API.
+//
+//  Automatic monthly sequence (via vercel.json crons):
+//    02:00 UTC on 1st → ORCHESTRATE  (submits batch)
+//    04:00 UTC on 1st → POLL-AND-REPORT (saves results + sends email)
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cronSecret = process.env.CRON_SECRET;
@@ -1896,6 +1898,262 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     } catch (err: any) {
       console.error("[report] Fatal:", err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // ── MODE 5: Poll-and-Report (automated cron at 4 AM on 1st) ────────────────
+  // Finds the most recent Anthropic batch, checks it is ended, saves all
+  // results to DB, then sends the email report. No batchId needed — looks up
+  // the latest batch automatically. Runs 2 hours after ORCHESTRATE so the
+  // batch is guaranteed to be complete.
+  if (qMode === "poll-and-report") {
+    console.log(`[poll-and-report] Auto mode for ${monthLabel}`);
+    const startTime = Date.now();
+
+    try {
+      // Step A: Find the most recently submitted batch from Anthropic
+      const listRes = await fetch("https://api.anthropic.com/v1/messages/batches?limit=5", {
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY!,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "message-batches-2024-09-24",
+        },
+      });
+
+      if (!listRes.ok) {
+        const err = await listRes.json();
+        throw new Error(`Failed to list batches: ${JSON.stringify(err)}`);
+      }
+
+      const listData = await listRes.json();
+      const batches = listData.data || [];
+
+      // Find the most recent batch that is ended (or still processing)
+      const latestBatch = batches[0];
+      if (!latestBatch) throw new Error("No batches found in Anthropic account");
+
+      console.log(`[poll-and-report] Latest batch: ${latestBatch.id} status: ${latestBatch.processing_status}`);
+
+      // If still processing (shouldn't happen at 4 AM but handle gracefully)
+      if (latestBatch.processing_status !== "ended") {
+        console.warn(`[poll-and-report] Batch ${latestBatch.id} still processing — this is unexpected at 4 AM`);
+        return res.status(200).json({
+          mode: "poll-and-report",
+          batchId: latestBatch.id,
+          processing_status: latestBatch.processing_status,
+          message: "Batch not yet ended — try again in 10 minutes",
+        });
+      }
+
+      // Step B: Fetch batch results JSONL
+      const resultsRes = await fetch(latestBatch.results_url, {
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY!,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "message-batches-2024-09-24",
+        },
+      });
+
+      const resultsText = await resultsRes.text();
+      const batchResults = new Map<string, string>();
+      for (const line of resultsText.trim().split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const r = JSON.parse(line);
+          if (r.result?.type === "succeeded") {
+            batchResults.set(r.custom_id, r.result.message.content[0].text);
+          } else {
+            console.warn(`[poll-and-report] Failed result for ${r.custom_id}:`, r.result?.error);
+          }
+        } catch { /* skip malformed line */ }
+      }
+
+      console.log(`[poll-and-report] ${batchResults.size} results fetched from batch ${latestBatch.id}`);
+
+      // Step C: Load batch job metadata from DB
+      let userIds: string[] = [];
+      let sessionCounts: Record<string, number> = {};
+      let engagedCounts: Record<string, number> = {};
+      let pgCounts: Record<string, number> = {};
+      try {
+        const { data: jobRow } = await supabase
+          .from("batch_jobs").select("*").eq("batch_id", latestBatch.id).single();
+        if (jobRow) {
+          userIds = (jobRow.user_ids || []) as string[];
+          sessionCounts = jobRow.session_counts || {};
+          engagedCounts = jobRow.engaged_counts || {};
+          pgCounts = jobRow.pg_counts || {};
+        }
+      } catch { /* batch_jobs table may not exist — fall back to batchResults keys */ }
+
+      if (!userIds.length) userIds = [...batchResults.keys()] as string[];
+
+      // Step D: Process and save each result to DB
+      let succeeded = 0; let failed = 0;
+      await Promise.allSettled(
+        userIds.map(async (userId) => {
+          const content = batchResults.get(userId);
+          if (!content) {
+            failed++;
+            console.warn(`[poll-and-report] No result for ${userId.slice(0, 8)}`);
+            return;
+          }
+          try {
+            const clean = content.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "").trim();
+            const raw = JSON.parse(clean);
+            const artifactScore =
+              (raw.enterprise_artifact_goal_score || 0) + (raw.enterprise_artifact_resource_score || 0) +
+              (raw.enterprise_artifact_plan_score || 0) + (raw.enterprise_artifact_constraint_score || 0) +
+              (raw.enterprise_artifact_quant_score || 0) + (raw.enterprise_artifact_risk_score || 0);
+
+            const result: MonthlySkillsResult = {
+              ...raw, enterprise_artifact_score: artifactScore,
+              ai_playground_session_count: pgCounts[userId] || 0,
+              ai_playground_word_count: raw.ai_playground_word_count || 0,
+              ai_playground_summary: raw.ai_playground_summary || "No AI Playground activity recorded this period.",
+              ai_prof_application_gpt: raw.ai_prof_application_gpt || 0,
+              ai_prof_ethics_gpt: raw.ai_prof_ethics_gpt || 0,
+              ai_prof_understanding_gpt: raw.ai_prof_understanding_gpt || 0,
+              ai_prof_verification_gpt: raw.ai_prof_verification_gpt || 0,
+              ai_prof_gpt_narrative: raw.ai_prof_gpt_narrative || "",
+              ai_prof_application_score: null, ai_prof_ethics_score: null,
+              ai_prof_understanding_score: null, ai_prof_verification_score: null,
+              ai_prof_cert_level: "Not Attempted",
+              cert_attempted_count: 0, cert_passed_count: 0,
+              cert_names_attempted: [], cert_names_passed: [], cert_avg_score: null, cert_summary: "",
+            };
+
+            const certData = await fetchUserCertData(userId);
+            let certSummary = "No certifications attempted yet.";
+            if (certData.cert_attempted_count > 0) {
+              try {
+                certSummary = await callClaudeHaiku(
+                  "You write concise, encouraging educational progress summaries.",
+                  `Write a 2-sentence summary for a monthly report about a learner certification activity at an AI learning lab in rural Nigeria.
+Certifications attempted: ${certData.cert_names_attempted.join(", ")}
+Certifications passed (score >= 2.25/3): ${certData.cert_names_passed.length > 0 ? certData.cert_names_passed.join(", ") : "None yet"}
+Average cert score: ${certData.cert_avg_score ?? "N/A"}/3
+AI Proficiency cert level: ${certData.ai_prof_cert_level}
+AI Proficiency dimension scores (0-3): Application=${certData.ai_prof_application_score ?? "N/A"}, Ethics=${certData.ai_prof_ethics_score ?? "N/A"}, Understanding=${certData.ai_prof_understanding_score ?? "N/A"}, Verification=${certData.ai_prof_verification_score ?? "N/A"}
+Be encouraging and specific. Note strongest and weakest dimensions if AI Proficiency scores exist.`,
+                  150
+                );
+              } catch { /* non-fatal */ }
+            }
+
+            result.cert_attempted_count = certData.cert_attempted_count;
+            result.cert_passed_count = certData.cert_passed_count;
+            result.cert_names_attempted = certData.cert_names_attempted;
+            result.cert_names_passed = certData.cert_names_passed;
+            result.cert_avg_score = certData.cert_avg_score;
+            result.cert_summary = certSummary;
+            result.ai_prof_application_score = certData.ai_prof_application_score;
+            result.ai_prof_ethics_score = certData.ai_prof_ethics_score;
+            result.ai_prof_understanding_score = certData.ai_prof_understanding_score;
+            result.ai_prof_verification_score = certData.ai_prof_verification_score;
+            result.ai_prof_cert_level = certData.ai_prof_cert_level;
+
+            const { error: insertError } = await supabase.from("user_monthly_assessments").insert({
+              user_id: userId, measured_at: endDate.toISOString(),
+              assessment_model: "claude-sonnet-4-6-batch", assessment_version: "v2.1",
+              session_count: sessionCounts[userId] || 0,
+              engaged_session_count: engagedCounts[userId] || 0,
+              cognitive_score: result.cognitive_score, cognitive_evidence: result.cognitive_evidence,
+              critical_thinking_score: result.critical_thinking_score, critical_thinking_evidence: result.critical_thinking_evidence,
+              problem_solving_score: result.problem_solving_score, problem_solving_evidence: result.problem_solving_evidence,
+              creativity_score: result.creativity_score, creativity_evidence: result.creativity_evidence,
+              pue_score: result.pue_score, pue_evidence: result.pue_evidence_quotes,
+              pue_energy_constraint_pct: result.pue_energy_constraint_pct, pue_market_pricing_pct: result.pue_market_pricing_pct,
+              pue_battery_load_pct: result.pue_battery_load_pct, pue_enterprise_planning_pct: result.pue_enterprise_planning_pct,
+              pue_learner_initiated_pct: result.pue_learner_initiated_pct, pue_ai_introduced_pct: result.pue_ai_introduced_pct,
+              pue_multi_domain_pct: result.pue_multi_domain_pct, pue_local_context_pct: result.pue_local_context_pct,
+              pue_summary: result.pue_summary,
+              scaffold_clarification_per_session: result.scaffold_clarification_per_session,
+              scaffold_decomposition_per_session: result.scaffold_decomposition_per_session,
+              scaffold_correction_total_per_session: result.scaffold_correction_total_per_session,
+              scaffold_explicit_correction_per_session: result.scaffold_explicit_correction_per_session,
+              scaffold_gentle_redirect_per_session: result.scaffold_gentle_redirect_per_session,
+              scaffold_consecutive_correction_runs: result.scaffold_consecutive_correction_runs,
+              scaffold_convergence_trend: result.scaffold_convergence_trend,
+              scaffold_convergence_narrative: result.scaffold_convergence_narrative,
+              reasoning_definitional_pct: result.reasoning_definitional_pct,
+              reasoning_responsive_pct: result.reasoning_responsive_pct,
+              reasoning_elaborative_pct: result.reasoning_elaborative_pct,
+              reasoning_structured_pct: result.reasoning_structured_pct,
+              reasoning_chain_count: result.reasoning_chain_count,
+              metacog_verification_rate: result.metacog_verification_rate,
+              metacog_reactive_rate: result.metacog_reactive_rate,
+              metacog_strategic_rate: result.metacog_strategic_rate,
+              metacog_narrative: result.metacog_narrative,
+              role_teaching_intent_count: result.role_teaching_intent_count,
+              role_community_application_count: result.role_community_application_count,
+              role_enterprise_orientation_count: result.role_enterprise_orientation_count,
+              role_intergenerational_count: result.role_intergenerational_count,
+              role_readiness_narrative: result.role_readiness_narrative,
+              role_readiness_signals: result.role_readiness_signals,
+              enterprise_artifact_score: result.enterprise_artifact_score,
+              enterprise_artifact_goal_score: result.enterprise_artifact_goal_score,
+              enterprise_artifact_resource_score: result.enterprise_artifact_resource_score,
+              enterprise_artifact_plan_score: result.enterprise_artifact_plan_score,
+              enterprise_artifact_constraint_score: result.enterprise_artifact_constraint_score,
+              enterprise_artifact_quant_score: result.enterprise_artifact_quant_score,
+              enterprise_artifact_risk_score: result.enterprise_artifact_risk_score,
+              enterprise_artifact_evidence: result.enterprise_artifact_evidence,
+              ai_playground_session_count: result.ai_playground_session_count,
+              ai_playground_word_count: result.ai_playground_word_count,
+              ai_playground_summary: result.ai_playground_summary,
+              ai_prof_application_score: certData.ai_prof_application_score,
+              ai_prof_ethics_score: certData.ai_prof_ethics_score,
+              ai_prof_understanding_score: certData.ai_prof_understanding_score,
+              ai_prof_verification_score: certData.ai_prof_verification_score,
+              ai_prof_min_score: certData.ai_prof_min_score,
+              ai_prof_cert_level: certData.ai_prof_cert_level,
+              ai_prof_application_gpt: result.ai_prof_application_gpt,
+              ai_prof_ethics_gpt: result.ai_prof_ethics_gpt,
+              ai_prof_understanding_gpt: result.ai_prof_understanding_gpt,
+              ai_prof_verification_gpt: result.ai_prof_verification_gpt,
+              ai_prof_gpt_narrative: result.ai_prof_gpt_narrative,
+              cert_attempted_count: result.cert_attempted_count,
+              cert_passed_count: result.cert_passed_count,
+              cert_names_attempted: result.cert_names_attempted,
+              cert_names_passed: result.cert_names_passed,
+              cert_avg_score: result.cert_avg_score,
+              cert_summary: result.cert_summary,
+            });
+
+            if (insertError) throw insertError;
+            succeeded++;
+            console.log(`[poll-and-report] ✓ ${userId.slice(0, 8)} saved`);
+          } catch (err: any) {
+            failed++;
+            console.error(`[poll-and-report] ✗ ${userId.slice(0, 8)}: ${err.message}`);
+          }
+        })
+      );
+
+      console.log(`[poll-and-report] DB save complete: ${succeeded} succeeded, ${failed} failed`);
+
+      // Step E: Send the email report
+      // sendEmailReport reads from DB directly — pass succeeded count as synthetic summaries
+      // so the email subject shows the correct new assessment count
+      const syntheticSummaries: AssessmentSummary[] = Array(succeeded).fill({
+        userId: '', name: '', sessionCount: 0, engagedSessionCount: 0,
+        scores: null, status: 'success' as const,
+      });
+      await sendEmailReport(monthLabel, syntheticSummaries, startDate, endDate, Date.now() - startTime);
+
+      return res.status(200).json({
+        mode: "poll-and-report",
+        month: monthLabel,
+        batchId: latestBatch.id,
+        succeeded,
+        failed,
+        durationMs: Date.now() - startTime,
+        message: `${succeeded} learners saved and email report sent for ${monthLabel}.`,
+      });
+    } catch (err: any) {
+      console.error("[poll-and-report] Fatal:", err.message);
       return res.status(500).json({ error: err.message });
     }
   }
