@@ -788,15 +788,15 @@ Evaluate on 5 dimensions (0–3 each):
 Return valid JSON only:
 {
   "scores": { "diagnosis": 0-3, "knowledge": 0-3, "climate": 0-3, "practical": 0-3, "communication": 0-3 },
-  "evidence": { "diagnosis": "...", "knowledge": "...", "climate": "...", "practical": "...", "communication": "..." },
+  "evidence": { "diagnosis": "<1-2 sentences max>", "knowledge": "<1-2 sentences max>", "climate": "<1-2 sentences max>", "practical": "<1-2 sentences max>", "communication": "<1-2 sentences max>" },
   "overall_score": 0.0-3.0,
   "can_advance": true/false,
   "encouragement": "2-3 warm, specific sentences",
   "main_improvement": "1-2 sentences on the single most important improvement"
 }`,
         }],
-        system: 'You are an expert agricultural education evaluator. Be specific, cite actual things said. Be fair and constructive.',
-        max_tokens: 800, temperature: 0.3,
+        system: 'You are an expert agricultural education evaluator. Be specific, cite actual things said. Be fair and constructive. Keep each evidence field to 1-2 sentences maximum.',
+        max_tokens: 2000, temperature: 0.3,
       });
       setEvaluation(result);
       await persistChat(messages, result);

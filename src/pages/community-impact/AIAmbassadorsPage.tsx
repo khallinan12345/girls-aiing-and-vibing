@@ -527,7 +527,7 @@ const AIAmbassadorsPage: React.FC = () => {
         { role: 'system', content: selectedPersona.systemPrompt },
         ...withUser.map(m => ({ role: m.role, content: m.content })),
       ];
-      const reply = await chatText({ messages: history.slice(1), system: history[0].content, max_tokens: 300 });
+      const reply = await chatText({ page: 'AIAmbassadorsPage', messages: history.slice(1), system: history[0].content, max_tokens: 300 });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       const finalMsgs = [...withUser, aiMsg];
       setMessages(finalMsgs);
@@ -565,6 +565,7 @@ const AIAmbassadorsPage: React.FC = () => {
     const conversation = messages.map(m => `${m.role === 'user' ? 'STUDENT (Ambassador)' : `COMMUNITY MEMBER (${selectedPersona.name})`}: ${m.content}`).join('\n\n');
     try {
       const result = await chatJSON({
+        page: 'AIAmbassadorsPage',  // → Groq Llama 3.3 70B
         messages: [{
           role: 'user', content: `You are evaluating a student's performance as an AI Ambassador — someone teaching a community member about AI.
 
@@ -600,11 +601,11 @@ Respond ONLY as valid JSON:
     "respect": <0-3>
   },
   "evidence": {
-    "explanation": "<specific quote or observation from the conversation>",
-    "relevance": "<specific quote or observation>",
-    "objections": "<specific quote or observation>",
-    "actionable": "<specific quote or observation>",
-    "respect": "<specific quote or observation>"
+    "explanation": "<1-2 sentences max>",
+    "relevance": "<1-2 sentences max>",
+    "objections": "<1-2 sentences max>",
+    "actionable": "<1-2 sentences max>",
+    "respect": "<1-2 sentences max>"
   },
   "overall_score": <0.0-3.0>,
   "can_advance": <true/false>,
@@ -612,8 +613,8 @@ Respond ONLY as valid JSON:
   "main_improvement": "<1-2 sentences>"
 }`,
         }],
-        system: 'You are an expert educator evaluating community engagement skills. Be specific, fair, and constructive. Reference actual things said in the conversation.',
-        max_tokens: 800, temperature: 0.3,
+        system: 'You are an expert educator evaluating community engagement skills. Be specific, fair, and constructive. Keep each evidence field to 1-2 sentences maximum.',
+        max_tokens: 2000, temperature: 0.3,
       });
       setEvaluation(result);
       await persistChat(messages, result);

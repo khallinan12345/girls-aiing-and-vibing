@@ -1040,7 +1040,7 @@ Evaluate on 5 dimensions (0–3 each):
 Return valid JSON only:
 {
   "scores": {"assessment":0-3,"triage":0-3,"safety":0-3,"communication":0-3,"referral":0-3},
-  "evidence": {"assessment":"...","triage":"...","safety":"...","communication":"...","referral":"..."},
+  "evidence": {"assessment":"<1-2 sentences max>","triage":"<1-2 sentences max>","safety":"<1-2 sentences max>","communication":"<1-2 sentences max>","referral":"<1-2 sentences max>"},
   "overall_score": 0.0-3.0,
   "can_advance": true/false,
   "encouragement": "2-3 specific warm sentences",
@@ -1048,7 +1048,7 @@ Return valid JSON only:
 }`,
         }],
         system: 'You are a clinical educator evaluating community health navigator trainees. Be specific. Prioritise patient safety in your evaluation.',
-        max_tokens: 800, temperature: 0.3,
+        max_tokens: 2000, temperature: 0.3,
       });
       setEvaluation(result); await persistChat(messages, result); setShowEvalModal(true);
     } catch (e) { console.error(e); }

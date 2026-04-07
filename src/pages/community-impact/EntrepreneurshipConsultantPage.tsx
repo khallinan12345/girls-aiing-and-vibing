@@ -643,7 +643,7 @@ Evaluate on 5 dimensions (0–3 each):
 Return valid JSON only:
 {
   "scores": {"diagnosis":0-3,"knowledge":0-3,"practical":0-3,"action":0-3,"communication":0-3},
-  "evidence": {"diagnosis":"...","knowledge":"...","practical":"...","action":"...","communication":"..."},
+  "evidence": {"diagnosis":"<1-2 sentences max>","knowledge":"<1-2 sentences max>","practical":"<1-2 sentences max>","action":"<1-2 sentences max>","communication":"<1-2 sentences max>"},
   "overall_score": 0.0-3.0,
   "can_advance": true/false,
   "encouragement": "2-3 specific warm sentences",
@@ -651,7 +651,7 @@ Return valid JSON only:
 }`
         }],
         system: 'You are an expert evaluator of entrepreneurship consulting skills for young Nigerians. Be specific. Cite actual things said.',
-        max_tokens: 800, temperature: 0.3,
+        max_tokens: 2000, temperature: 0.3,
       });
       setEvaluation(result); await persistChat(messages, result); setShowEvalModal(true);
     } catch (e) { console.error(e); }
