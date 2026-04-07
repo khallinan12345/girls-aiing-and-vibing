@@ -14,5 +14,16 @@
       "path": "/api/daily-report",
       "schedule": "0 11 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "api/assess-monthly.ts": {
+      "maxDuration": 300
+    },
+    "api/daily-report.ts": {
+      "maxDuration": 60
+    },
+    "api/chat.js": {
+      "maxDuration": 30
+    }
+  }
 }
