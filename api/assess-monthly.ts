@@ -197,8 +197,7 @@ async function pollBatchResults(
 
       const text = await resultsRes.text();
       const results = new Map<string, string>();
-      for (const line of text.trim().split("
-")) {
+      for (const line of text.trim().split("\n")) {
         if (!line.trim()) continue;
         try {
           const r = JSON.parse(line);
