@@ -28,10 +28,6 @@ const GROQ_PAGES   = new Set([
   'EnglishSkillsPage',
   'SkillsDevelopmentPage',        // conversation turns, reflection, English coaching
   'AgricultureConsultantPage',    // farmer persona chat + evaluation
-  'HealthcareNavigatorPage',      // clinical navigator chat + assessment
-  'EntrepreneurshipAdvisorPage',  // startup advisor chat + evaluation
-  'FishingConsultantPage',
-  'AIAmbassadorsPage',
 ]);
 
 const SONNET_PAGES = new Set([
@@ -45,6 +41,66 @@ const SONNET_PAGES = new Set([
 const ANTHROPIC_HAIKU  = 'claude-haiku-4-5-20251001';
 const ANTHROPIC_SONNET = 'claude-sonnet-4-6';
 const GROQ_MODEL       = 'llama-3.3-70b-versatile';
+
+// ── Pricing table (per million tokens, USD) ───────────────────────────────────
+// Matches current Anthropic + Groq pricing as of April 2026
+
+const PRICING = {
+  // Anthropic models
+  'claude-sonnet-4-6':           { input: 3.00,  output: 15.00, cacheWrite: 3.75,  cacheRead: 0.30  },
+  'claude-haiku-4-5-20251001':   { input: 1.00,  output: 5.00,  cacheWrite: 1.25,  cacheRead: 0.10  },
+  // Groq (free tier — effectively $0 for our usage level)
+  'llama-3.3-70b-versatile':     { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  },
+};
+
+function estimateCost(model, inputTokens, outputTokens, cacheHitTokens = 0, cacheWriteTokens = 0) {
+  const p = PRICING[model] || { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+  const MTok = 1_000_000;
+  // Standard input — subtract cached tokens (they're billed separately)
+  const standardInput = Math.max(0, inputTokens - cacheHitTokens - cacheWriteTokens);
+  return (
+    (standardInput    / MTok) * p.input      +
+    (cacheWriteTokens / MTok) * p.cacheWrite  +
+    (cacheHitTokens   / MTok) * p.cacheRead   +
+    (outputTokens     / MTok) * p.output
+  );
+}
+
+// ── Cost logger ───────────────────────────────────────────────────────────────
+// Writes to Supabase api_cost_log table (fire-and-forget, non-blocking)
+
+async function logCost({ page, provider, model, inputTokens, outputTokens,
+                          cacheHitTokens, cacheWriteTokens, userId, city }) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) return; // skip if not configured
+
+  const estimatedCost = estimateCost(model, inputTokens, outputTokens, cacheHitTokens, cacheWriteTokens);
+
+  try {
+    await fetch(`${supabaseUrl}/rest/v1/api_cost_log`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'apikey':        supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Prefer':        'return=minimal',
+      },
+      body: JSON.stringify({
+        page:               page || 'unknown',
+        provider,
+        model,
+        input_tokens:       inputTokens,
+        output_tokens:      outputTokens,
+        cache_hit_tokens:   cacheHitTokens,
+        cache_write_tokens: cacheWriteTokens,
+        estimated_cost_usd: estimatedCost,
+        user_id:            userId || null,
+        city:               city   || null,
+      }),
+    });
+  } catch { /* never block the response for logging */ }
+}
 
 // ── Route resolver ─────────────────────────────────────────────────────────────
 
@@ -192,6 +248,8 @@ export default async function handler(req, res) {
       temperature     = 0.7,
       page            = '',    // e.g. 'AILearningPage', 'SkillsDevelopmentPage-code'
       playgroundModel = null,  // e.g. 'claude-sonnet-4-6' or null
+      userId          = null,  // optional — for per-learner cost tracking
+      city            = null,  // optional — 'Oloibiri' | 'Ibiade'
     } = req.body || {};
 
     if (!messages || !Array.isArray(messages)) {
@@ -211,14 +269,40 @@ export default async function handler(req, res) {
         // Graceful fallback to Haiku if Groq key is missing
         console.warn('[chat.js] GROQ_API_KEY not set — falling back to Haiku');
         const result = await callAnthropic(ANTHROPIC_HAIKU, messages, system, max_tokens, temperature);
+        // Log cost (fire-and-forget)
+        logCost({
+          page, provider: 'anthropic', model: ANTHROPIC_HAIKU,
+          inputTokens:       result.usage?.prompt_tokens     ?? 0,
+          outputTokens:      result.usage?.completion_tokens ?? 0,
+          cacheHitTokens:    result.usage?.cache_read_input_tokens    ?? 0,
+          cacheWriteTokens:  result.usage?.cache_creation_input_tokens ?? 0,
+          userId, city,
+        });
         return res.status(200).json(result);
       }
       const result = await callGroq(model, messages, system, max_tokens, temperature);
+      // Log cost (Groq = $0 but track volume)
+      logCost({
+        page, provider: 'groq', model,
+        inputTokens:  result.usage?.prompt_tokens     ?? 0,
+        outputTokens: result.usage?.completion_tokens ?? 0,
+        cacheHitTokens: 0, cacheWriteTokens: 0,
+        userId, city,
+      });
       return res.status(200).json(result);
     }
 
     // provider === 'anthropic' (haiku or sonnet)
     const result = await callAnthropic(model, messages, system, max_tokens, temperature);
+    // Log cost (fire-and-forget)
+    logCost({
+      page, provider: 'anthropic', model,
+      inputTokens:       result.usage?.prompt_tokens     ?? 0,
+      outputTokens:      result.usage?.completion_tokens ?? 0,
+      cacheHitTokens:    result.usage?.cache_read_input_tokens    ?? 0,
+      cacheWriteTokens:  result.usage?.cache_creation_input_tokens ?? 0,
+      userId, city,
+    });
     return res.status(200).json(result);
 
   } catch (error) {

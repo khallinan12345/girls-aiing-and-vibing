@@ -67,6 +67,18 @@ interface UserProfile {
   name: string | null;
 }
 
+interface DailyCostSummary {
+  totalCostUsd: number;
+  anthropicCostUsd: number;
+  groqRequests: number;
+  anthropicRequests: number;
+  cacheHitTokens: number;
+  totalInputTokens: number;
+  cacheSavingsUsd: number;
+  byPage: { page: string; cost: number; requests: number; provider: string }[];
+  available: boolean;   // false if api_cost_log table doesn't exist yet
+}
+
 // ─── Data Fetching ────────────────────────────────────────────────────────────
 
 /**
@@ -191,6 +203,81 @@ async function fetchMetrics(logDate: string, cohortIds: string[], city: string):
   };
 }
 
+// ─── Cost Fetching ───────────────────────────────────────────────────────────
+
+const PRICING_PER_MTOK: Record<string, { input: number; output: number }> = {
+  "claude-sonnet-4-6":         { input: 3.00,  output: 15.00 },
+  "claude-haiku-4-5-20251001": { input: 1.00,  output: 5.00  },
+  "llama-3.3-70b-versatile":   { input: 0.00,  output: 0.00  },
+};
+
+async function fetchDailyCosts(
+  dayStartUTC: string,
+  dayEndUTC: string
+): Promise<DailyCostSummary> {
+  const empty: DailyCostSummary = {
+    totalCostUsd: 0, anthropicCostUsd: 0,
+    groqRequests: 0, anthropicRequests: 0,
+    cacheHitTokens: 0, totalInputTokens: 0, cacheSavingsUsd: 0,
+    byPage: [], available: false,
+  };
+
+  try {
+    const { data, error } = await supabase
+      .from("api_cost_log")
+      .select("page, provider, model, input_tokens, output_tokens, cache_hit_tokens, estimated_cost_usd")
+      .gte("logged_at", dayStartUTC)
+      .lte("logged_at", dayEndUTC)
+      .limit(10000);
+
+    // Table doesn't exist yet — return gracefully
+    if (error) {
+      console.warn("   api_cost_log not available:", error.message);
+      return empty;
+    }
+
+    const rows = data || [];
+    if (rows.length === 0) return { ...empty, available: true };
+
+    const totalCostUsd      = rows.reduce((s, r) => s + (r.estimated_cost_usd || 0), 0);
+    const anthropicCostUsd  = rows.filter(r => r.provider === "anthropic").reduce((s, r) => s + (r.estimated_cost_usd || 0), 0);
+    const groqRequests      = rows.filter(r => r.provider === "groq").length;
+    const anthropicRequests = rows.filter(r => r.provider === "anthropic").length;
+    const cacheHitTokens    = rows.reduce((s, r) => s + (r.cache_hit_tokens || 0), 0);
+    const totalInputTokens  = rows.reduce((s, r) => s + (r.input_tokens || 0), 0);
+    // Cache savings: what it would have cost without caching (full input price) vs actual cache price (10%)
+    const cacheSavingsUsd   = rows.reduce((s, r) => {
+      const p = PRICING_PER_MTOK[r.model] || { input: 0, output: 0 };
+      return s + ((r.cache_hit_tokens || 0) / 1_000_000) * p.input * 0.90;
+    }, 0);
+
+    // Group by page for the breakdown table
+    const pageMap = new Map<string, { cost: number; requests: number; provider: string }>();
+    rows.forEach(r => {
+      const existing = pageMap.get(r.page) || { cost: 0, requests: 0, provider: r.provider };
+      pageMap.set(r.page, {
+        cost:     existing.cost + (r.estimated_cost_usd || 0),
+        requests: existing.requests + 1,
+        provider: r.provider,
+      });
+    });
+
+    const byPage = [...pageMap.entries()]
+      .map(([page, val]) => ({ page, ...val }))
+      .sort((a, b) => b.cost - a.cost)
+      .slice(0, 10); // top 10 pages by cost
+
+    return {
+      totalCostUsd, anthropicCostUsd, groqRequests, anthropicRequests,
+      cacheHitTokens, totalInputTokens, cacheSavingsUsd,
+      byPage, available: true,
+    };
+  } catch (err: any) {
+    console.warn("   fetchDailyCosts error:", err.message);
+    return empty;
+  }
+}
+
 // ─── Email HTML ───────────────────────────────────────────────────────────────
 
 function catRow(label: string, count: number, total: number): string {
@@ -292,7 +379,97 @@ function buildCohortPanel(m: DailyMetrics): string {
   </div>`;
 }
 
-function buildEmailHtml(oloibiri: DailyMetrics, ibiade: DailyMetrics, dateLabel: string): string {
+function buildCostSection(cost: DailyCostSummary): string {
+  if (!cost.available) {
+    return `
+  <div style="margin:20px 0;padding:14px 16px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;font-size:11px;color:#92400e;">
+    <strong>API cost tracking not yet active.</strong> Deploy the updated <code>chat.js</code> and run <code>create_api_cost_log.sql</code> in Supabase to enable daily cost reporting.
+  </div>`;
+  }
+
+  if (cost.anthropicRequests === 0 && cost.groqRequests === 0) {
+    return `
+  <div style="margin:20px 0;padding:14px 16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;font-size:11px;color:#6b7280;">
+    No API calls logged today.
+  </div>`;
+  }
+
+  const fmtCost = (n: number) => n < 0.001 ? "<$0.001" : `$${n.toFixed(3)}`;
+  const cacheRate = cost.totalInputTokens > 0
+    ? Math.round(cost.cacheHitTokens / cost.totalInputTokens * 100)
+    : 0;
+
+  const pageRows = cost.byPage.map(p => {
+    const isGroq = p.provider === "groq";
+    return `
+    <tr style="border-top:1px solid #e5e7eb;">
+      <td style="padding:5px 10px;font-size:11px;color:#374151;">${p.page}</td>
+      <td style="padding:5px 10px;text-align:center;">
+        <span style="font-size:9px;padding:2px 6px;border-radius:10px;font-weight:600;background:${isGroq ? "#d1fae5" : "#dbeafe"};color:${isGroq ? "#065f46" : "#1e40af"};">
+          ${isGroq ? "Groq" : "Anthropic"}
+        </span>
+      </td>
+      <td style="padding:5px 10px;text-align:center;font-size:11px;color:#374151;">${p.requests}</td>
+      <td style="padding:5px 10px;text-align:right;font-size:11px;font-weight:600;color:${p.cost > 0.01 ? "#991b1b" : "#374151"};">${fmtCost(p.cost)}</td>
+    </tr>`;
+  }).join("");
+
+  return `
+  <div style="margin:20px 0;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+    <div style="background:linear-gradient(135deg,#1e1b4b 0%,#312e81 100%);padding:14px 20px;">
+      <div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#a5b4fc;margin-bottom:3px;font-weight:600;">API Cost Report</div>
+      <div style="font-size:15px;font-weight:700;color:#fff;">Today's AI Spend</div>
+    </div>
+    <div style="padding:16px 20px;">
+
+      <!-- KPI chips -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+        <div style="flex:1;min-width:100px;background:#eff6ff;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;font-weight:800;color:#1e40af;">${fmtCost(cost.anthropicCostUsd)}</div>
+          <div style="font-size:8px;color:#1e40af;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;margin-top:3px;">Anthropic cost</div>
+        </div>
+        <div style="flex:1;min-width:100px;background:#f0fdf4;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;font-weight:800;color:#166534;">$0.00</div>
+          <div style="font-size:8px;color:#166534;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;margin-top:3px;">Groq cost (free)</div>
+        </div>
+        <div style="flex:1;min-width:100px;background:#fefce8;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;font-weight:800;color:#854d0e;">${fmtCost(cost.cacheSavingsUsd)}</div>
+          <div style="font-size:8px;color:#854d0e;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;margin-top:3px;">Cache saved</div>
+        </div>
+        <div style="flex:1;min-width:100px;background:#f5f3ff;border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:20px;font-weight:800;color:#4c1d95;">${cacheRate}%</div>
+          <div style="font-size:8px;color:#4c1d95;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;margin-top:3px;">Cache hit rate</div>
+        </div>
+      </div>
+
+      <!-- Summary line -->
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:#374151;">
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+          <div>Anthropic requests: <strong>${cost.anthropicRequests}</strong></div>
+          <div>Groq requests: <strong>${cost.groqRequests}</strong></div>
+          <div>Total requests: <strong>${cost.anthropicRequests + cost.groqRequests}</strong></div>
+        </div>
+      </div>
+
+      <!-- Page breakdown table -->
+      ${cost.byPage.length > 0 ? `
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead>
+          <tr style="background:#f5f3ff;">
+            <th style="padding:6px 10px;text-align:left;font-size:9px;color:#4c1d95;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Page</th>
+            <th style="padding:6px 10px;text-align:center;font-size:9px;color:#4c1d95;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Provider</th>
+            <th style="padding:6px 10px;text-align:center;font-size:9px;color:#4c1d95;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Requests</th>
+            <th style="padding:6px 10px;text-align:right;font-size:9px;color:#4c1d95;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Cost</th>
+          </tr>
+        </thead>
+        <tbody>${pageRows}</tbody>
+      </table>` : ""}
+
+    </div>
+  </div>`;
+}
+
+function buildEmailHtml(oloibiri: DailyMetrics, ibiade: DailyMetrics, dateLabel: string, cost: DailyCostSummary): string {
   const totalActive = oloibiri.activeUsers + ibiade.activeUsers;
   const totalLearners = oloibiri.totalAfricaUsers + ibiade.totalAfricaUsers;
 
@@ -331,6 +508,8 @@ function buildEmailHtml(oloibiri: DailyMetrics, ibiade: DailyMetrics, dateLabel:
   <div style="padding:20px 24px;">
     ${buildCohortPanel(oloibiri)}
     ${buildCohortPanel(ibiade)}
+
+    ${buildCostSection(cost)}
 
     <!-- Footer -->
     <div style="border-top:1px solid #e5e7eb;padding-top:12px;color:#9ca3af;font-size:10px;">
@@ -373,10 +552,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log(`  Oloibiri cohort: ${oloibiriIds.length} users`);
     console.log(`  Ibiade cohort:   ${ibiadeIds.length} users`);
 
-    // ── Fetch metrics for both cohorts in parallel ───────────────────────────
-    const [oloibiriMetrics, ibiadeMetrics] = await Promise.all([
+    // ── Fetch metrics + cost data in parallel ────────────────────────────────
+    const dayStartUTC = new Date(`${logDate}T00:00:00+01:00`).toISOString();
+    const dayEndUTC   = new Date(`${logDate}T23:59:59+01:00`).toISOString();
+
+    const [oloibiriMetrics, ibiadeMetrics, costSummary] = await Promise.all([
       fetchMetrics(logDate, oloibiriIds, "Oloibiri"),
       fetchMetrics(logDate, ibiadeIds,   "Ibiade"),
+      fetchDailyCosts(dayStartUTC, dayEndUTC),
     ]);
 
     const logMetrics = (label: string, m: DailyMetrics) => {
@@ -384,6 +567,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     logMetrics("Oloibiri", oloibiriMetrics);
     logMetrics("Ibiade",   ibiadeMetrics);
+    console.log(`  [Cost] Anthropic: $${costSummary.anthropicCostUsd.toFixed(4)} · Groq: ${costSummary.groqRequests} reqs · Cache saved: $${costSummary.cacheSavingsUsd.toFixed(4)} · Available: ${costSummary.available}`);
 
     // ── Upsert one row per cohort into daily_activity_log ───────────────────
     // Note: daily_activity_log needs composite unique key on (log_date, city)
@@ -405,6 +589,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         cert_attempted_today:    m.certAttemptedToday,
         total_activities:        m.totalActivities,
         total_africa_users:      m.totalAfricaUsers,
+        // Cost columns — stored once per day (not per cohort, so both rows get same values)
+        cost_anthropic_usd:      costSummary.available ? costSummary.anthropicCostUsd : null,
+        cost_groq_requests:      costSummary.available ? costSummary.groqRequests : null,
+        cost_cache_savings_usd:  costSummary.available ? costSummary.cacheSavingsUsd : null,
+        cost_cache_hit_rate_pct: costSummary.available && costSummary.totalInputTokens > 0
+          ? Math.round(costSummary.cacheHitTokens / costSummary.totalInputTokens * 100) : null,
+        cost_total_requests:     costSummary.available ? (costSummary.anthropicRequests + costSummary.groqRequests) : null,
       }));
       const { error } = await supabase
         .from("daily_activity_log")
@@ -424,7 +615,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         emailError = "RESEND_API_KEY not set";
         console.warn("⚠️  RESEND_API_KEY not set — skipping email");
       } else {
-        const html = buildEmailHtml(oloibiriMetrics, ibiadeMetrics, dateLabel);
+        const html = buildEmailHtml(oloibiriMetrics, ibiadeMetrics, dateLabel, costSummary);
         const totalActive = oloibiriMetrics.activeUsers + ibiadeMetrics.activeUsers;
         const activeLabel = `${totalActive} active (${oloibiriMetrics.activeUsers} Oloibiri · ${ibiadeMetrics.activeUsers} Ibiade)`;
         const emailRes = await fetch("https://api.resend.com/emails", {
