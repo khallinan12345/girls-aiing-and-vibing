@@ -556,10 +556,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dayStartUTC = new Date(`${logDate}T00:00:00+01:00`).toISOString();
     const dayEndUTC   = new Date(`${logDate}T23:59:59+01:00`).toISOString();
 
+    // Cost window uses full UTC day to catch all timestamps regardless of timezone
+    // Slightly wider than the WAT window to avoid missing edge-case logs
+    const costStartUTC = new Date(`${logDate}T00:00:00Z`).toISOString();
+    const costEndUTC   = new Date(`${logDate}T23:59:59Z`).toISOString();
+    console.log(`  Cost window: ${costStartUTC} → ${costEndUTC}`);
+
     const [oloibiriMetrics, ibiadeMetrics, costSummary] = await Promise.all([
       fetchMetrics(logDate, oloibiriIds, "Oloibiri"),
       fetchMetrics(logDate, ibiadeIds,   "Ibiade"),
-      fetchDailyCosts(dayStartUTC, dayEndUTC),
+      fetchDailyCosts(costStartUTC, costEndUTC),
     ]);
 
     const logMetrics = (label: string, m: DailyMetrics) => {
