@@ -15,8 +15,8 @@ import {
   Users, ChevronDown, Loader2, AlertCircle, RefreshCw,
   Award, BookOpen, CheckCircle, Clock, Circle,
   ChevronUp, Trophy, User, BarChart2, Code, Brain,
-  Target, Lightbulb, MessageSquare, Cpu,
-  DollarSign, TrendingUp, Zap, Activity,
+  Target, Lightbulb, MessageSquare, Cpu, Briefcase,
+  DollarSign, TrendingUp, Zap, Activity, Filter,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -42,14 +42,6 @@ interface ActivityRow {
   web_dev_evaluation?: any;
   vibe_cert_evaluation?: any;
   [key: string]: any;
-}
-
-interface StudentSessionRow {
-  user_id: string;
-  category_activity: string | null;
-  progress: string | null;
-  activity: string | null;
-  updated_at: string | null;
 }
 
 // ─── Cost types ──────────────────────────────────────────────────────────────
@@ -129,233 +121,6 @@ const extractEvalScores = (row: ActivityRow): { label: string; score: number }[]
       label: k.replace('certification_evaluation_', '').replace('_score', '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
       score: v as number,
     }));
-
-type StudentSummary = {
-  id: string;
-  name: string;
-  email: string;
-  totalEngaged: number;
-  byCategory: Record<string, number>;
-  certAttempted: number;
-  certAchieved: number;
-  completionRate: number;
-  lastActiveAt: string | null;
-};
-
-const normalizeCategory = (category: string | null | undefined): string => {
-  const c = (category || '').trim();
-  return c.length ? c : 'Uncategorized';
-};
-
-const isEngagedSession = (progress: string | null | undefined): boolean =>
-  progress === 'started' || progress === 'completed';
-
-const StudentLearnerTable: React.FC<{
-  learners: Learner[];
-  sessionRows: StudentSessionRow[];
-  loading: boolean;
-  error: string | null;
-  onSelectLearner: (id: string) => void;
-  selectedId: string;
-}> = ({ learners, sessionRows, loading, error, onSelectLearner, selectedId }) => {
-  const [search, setSearch] = useState('');
-  const [sortKey, setSortKey] = useState<'name' | 'total' | 'certAttempted' | 'certAchieved' | 'completionRate' | 'lastActive'>('total');
-  const [sortAsc, setSortAsc] = useState(false);
-
-  const summaries: StudentSummary[] = learners.map((l) => {
-    const rows = sessionRows.filter((r) => r.user_id === l.id);
-    const engaged = rows.filter((r) => isEngagedSession(r.progress));
-    const byCategory: Record<string, number> = {};
-    for (const row of engaged) {
-      const key = normalizeCategory(row.category_activity);
-      byCategory[key] = (byCategory[key] || 0) + 1;
-    }
-    const certRows = rows.filter((r) => (r.category_activity || '') === 'Certification');
-    const certAttempted = certRows.filter((r) => isEngagedSession(r.progress)).length;
-    const certAchieved = certRows.filter((r) => r.progress === 'completed').length;
-    const completed = rows.filter((r) => r.progress === 'completed').length;
-    const completionRate = rows.length > 0 ? (completed / rows.length) * 100 : 0;
-    const lastActiveAt = rows.reduce<string | null>((acc, r) => {
-      if (!r.updated_at) return acc;
-      if (!acc) return r.updated_at;
-      return r.updated_at > acc ? r.updated_at : acc;
-    }, null);
-
-    return {
-      id: l.id,
-      name: l.name || '(no name)',
-      email: l.email || '',
-      totalEngaged: engaged.length,
-      byCategory,
-      certAttempted,
-      certAchieved,
-      completionRate,
-      lastActiveAt,
-    };
-  });
-
-  const allCategoryNames = [...new Set(summaries.flatMap((s) => Object.keys(s.byCategory)))].sort();
-
-  const filtered = summaries.filter((s) =>
-    search === '' ||
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    s.email.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const sorted = [...filtered].sort((a, b) => {
-    let av: string | number = '';
-    let bv: string | number = '';
-    if (sortKey === 'name') {
-      av = a.name.toLowerCase();
-      bv = b.name.toLowerCase();
-    } else if (sortKey === 'total') {
-      av = a.totalEngaged;
-      bv = b.totalEngaged;
-    } else if (sortKey === 'certAttempted') {
-      av = a.certAttempted;
-      bv = b.certAttempted;
-    } else if (sortKey === 'certAchieved') {
-      av = a.certAchieved;
-      bv = b.certAchieved;
-    } else if (sortKey === 'completionRate') {
-      av = a.completionRate;
-      bv = b.completionRate;
-    } else {
-      av = a.lastActiveAt || '';
-      bv = b.lastActiveAt || '';
-    }
-
-    if (av < bv) return sortAsc ? -1 : 1;
-    if (av > bv) return sortAsc ? 1 : -1;
-    return 0;
-  });
-
-  const toggleSort = (key: typeof sortKey) => {
-    if (sortKey === key) setSortAsc((v) => !v);
-    else {
-      setSortKey(key);
-      setSortAsc(false);
-    }
-  };
-
-  const SortMark: React.FC<{ keyName: typeof sortKey }> = ({ keyName }) => {
-    if (sortKey !== keyName) return null;
-    return sortAsc ? <ChevronUp size={11} className="inline ml-1 text-purple-500" /> : <ChevronDown size={11} className="inline ml-1 text-purple-500" />;
-  };
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-6">
-      <div className="px-5 py-4 border-b border-gray-100">
-        <div className="flex items-center gap-3 flex-wrap">
-          <h2 className="text-sm font-bold text-gray-800">Student Learner Overview</h2>
-          <span className="text-xs text-gray-400">{filtered.length} learners</span>
-          <input
-            type="text"
-            placeholder="Search by name or email..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="ml-auto w-full sm:w-72 border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
-          />
-        </div>
-      </div>
-
-      {loading && (
-        <div className="flex items-center justify-center gap-2 py-12 text-gray-500 text-sm">
-          <Loader2 size={16} className="animate-spin" /> Loading learner session summary...
-        </div>
-      )}
-
-      {!loading && error && (
-        <div className="p-4 text-sm text-red-600 flex items-center gap-2">
-          <AlertCircle size={15} /> {error}
-        </div>
-      )}
-
-      {!loading && !error && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th onClick={() => toggleSort('name')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Student<SortMark keyName="name" /></th>
-                <th onClick={() => toggleSort('total')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Engaged Sessions<SortMark keyName="total" /></th>
-                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Sessions by Category</th>
-                <th onClick={() => toggleSort('certAttempted')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Cert Attempted<SortMark keyName="certAttempted" /></th>
-                <th onClick={() => toggleSort('certAchieved')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Cert Achieved<SortMark keyName="certAchieved" /></th>
-                <th onClick={() => toggleSort('completionRate')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Completion Rate<SortMark keyName="completionRate" /></th>
-                <th onClick={() => toggleSort('lastActive')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Last Active<SortMark keyName="lastActive" /></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {sorted.map((s) => (
-                <tr key={s.id} className={classNames('hover:bg-purple-50 transition-colors', selectedId === s.id ? 'bg-purple-50/70' : '')}>
-                  <td className="px-4 py-3">
-                    <a
-                      href="#student-dashboard-detail"
-                      onClick={(e) => { e.preventDefault(); onSelectLearner(s.id); }}
-                      className="font-semibold text-purple-700 hover:underline text-left"
-                    >
-                      {s.name}
-                    </a>
-                    <div className="text-[11px] text-gray-400">{s.email}</div>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-gray-700">{s.totalEngaged}</td>
-                  <td className="px-4 py-3">
-                    {allCategoryNames.length === 0 ? (
-                      <span className="text-gray-300">-</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {allCategoryNames.map((cat) => (
-                          <span key={`${s.id}-${cat}`} className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-200">
-                            {cat}: {s.byCategory[cat] || 0}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-gray-700">{s.certAttempted}</td>
-                  <td className="px-4 py-3 font-mono text-gray-700">{s.certAchieved}</td>
-                  <td className="px-4 py-3">
-                    <span className={classNames(
-                      'px-2 py-0.5 rounded-full border text-[11px] font-semibold',
-                      s.completionRate >= 70 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                      s.completionRate >= 40 ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                      'bg-gray-50 text-gray-600 border-gray-200'
-                    )}>
-                      {s.completionRate.toFixed(0)}%
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">
-                    {s.lastActiveAt ? new Date(s.lastActiveAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '—'}
-                  </td>
-                </tr>
-              ))}
-              {sorted.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">
-                    {search ? 'No learners match that search.' : 'No student sessions found yet.'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-            {sorted.length > 0 && (
-              <tfoot className="bg-gray-50 border-t border-gray-200">
-                <tr>
-                  <td className="px-4 py-2.5 text-[11px] font-bold text-gray-700">Totals ({sorted.length})</td>
-                  <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{sorted.reduce((sum, row) => sum + row.totalEngaged, 0)}</td>
-                  <td className="px-4 py-2.5 text-[11px] text-gray-500">Aggregate across categories</td>
-                  <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{sorted.reduce((sum, row) => sum + row.certAttempted, 0)}</td>
-                  <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{sorted.reduce((sum, row) => sum + row.certAchieved, 0)}</td>
-                  <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800">{sorted.length > 0 ? `${(sorted.reduce((sum, row) => sum + row.completionRate, 0) / sorted.length).toFixed(0)}%` : '—'}</td>
-                  <td className="px-4 py-2.5 text-[11px] text-gray-500">—</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      )}
-    </div>
-  );
-};
 
 // ─── ScorePill ────────────────────────────────────────────────────────────────
 
@@ -551,6 +316,7 @@ interface CostOverviewProps {
 const CostOverviewPanel: React.FC<CostOverviewProps> = ({
   rows, loading, error, days, setDays, groupBy, setGroupBy, onRefresh
 }) => {
+  const totalCost      = rows.reduce((s, r) => s + r.estimated_cost_usd, 0);
   const anthropicCost  = rows.filter(r => r.provider === 'anthropic').reduce((s, r) => s + r.estimated_cost_usd, 0);
   const totalInTok     = rows.reduce((s, r) => s + r.input_tokens, 0);
   const totalCacheHit  = rows.reduce((s, r) => s + r.cache_hit_tokens, 0);
@@ -1144,9 +910,6 @@ const AdminStudentDashboard: React.FC = () => {
   const [costGroupBy,     setCostGroupBy]     = useState<'page' | 'model' | 'provider'>('page');
   const [learnerCostRows, setLearnerCostRows] = useState<CostRow[]>([]);
   const [loadingLearnerCost, setLoadingLearnerCost] = useState(false);
-  const [studentSessionRows, setStudentSessionRows] = useState<StudentSessionRow[]>([]);
-  const [loadingStudentSummary, setLoadingStudentSummary] = useState(false);
-  const [studentSummaryError, setStudentSummaryError] = useState<string | null>(null);
 
   // Fetch overall cost data
   const fetchCostData = useCallback(async (days: number) => {
@@ -1192,30 +955,6 @@ const AdminStudentDashboard: React.FC = () => {
     if (!selectedId) setLearnerCostRows([]);
   }, [selectedId, activeTab, fetchLearnerCost]);
 
-  const fetchStudentSummary = useCallback(async () => {
-    if (!learners.length) {
-      setStudentSessionRows([]);
-      return;
-    }
-    setLoadingStudentSummary(true);
-    setStudentSummaryError(null);
-    try {
-      const learnerIds = learners.map((l) => l.id);
-      const { data, error } = await supabase
-        .from('dashboard')
-        .select('user_id, category_activity, progress, activity, updated_at')
-        .in('user_id', learnerIds)
-        .order('updated_at', { ascending: false });
-      if (error) throw error;
-      setStudentSessionRows((data || []) as StudentSessionRow[]);
-    } catch (err: any) {
-      setStudentSummaryError(err.message || 'Failed to load student session summary');
-      setStudentSessionRows([]);
-    } finally {
-      setLoadingStudentSummary(false);
-    }
-  }, [learners]);
-
   // Fetch all Nigerian learners
   useEffect(() => {
     (async () => {
@@ -1235,11 +974,6 @@ const AdminStudentDashboard: React.FC = () => {
       }
     })();
   }, []);
-
-  useEffect(() => {
-    if (activeTab !== 'student') return;
-    fetchStudentSummary();
-  }, [activeTab, fetchStudentSummary]);
 
   // Fetch selected learner's dashboard rows
   const fetchData = useCallback(async (userId: string) => {
@@ -1273,6 +1007,38 @@ const AdminStudentDashboard: React.FC = () => {
   const filteredLearning = filterCat === 'all' ? learningRows : learningRows.filter(a => a.category_activity === filterCat);
   const completedLearning = learningRows.filter(a => a.progress === 'completed').length;
   const completedCerts    = certRows.filter(a => a.progress === 'completed').length;
+
+  // ── Session counts ──────────────────────────────────────────────────────────
+  // A "session" = a dashboard row that has chat_history (learner engaged)
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+  // All categories we want to count — including english_skills from activity field
+  const SESSION_CATEGORIES = [
+    { key: 'AI Learning',          label: 'AI Learning',          match: (a: ActivityRow) => a.category_activity === 'AI Learning' || (a.category_activity === 'AI Proficiency' && !a.activity?.toLowerCase().includes('certification')) },
+    { key: 'Skills Development',   label: 'Skills Development',   match: (a: ActivityRow) => a.category_activity === 'Skills Development' || a.category_activity === 'Vibe Coding' },
+    { key: 'English Skills',       label: 'English Skills',       match: (a: ActivityRow) => a.activity === 'english_skills' || a.category_activity?.toLowerCase().includes('english') },
+    { key: 'Certifications',       label: 'Certifications',       match: (a: ActivityRow) => a.category_activity === 'Certification' },
+    { key: 'Community Impact',     label: 'Community Impact',     match: (a: ActivityRow) => ['Agriculture Consultant','Fishing Consultant','Healthcare Navigator','Entrepreneurship Consultant','AI Ambassadors'].some(c => a.activity?.includes(c) || a.category_activity?.includes(c)) },
+    { key: 'Other',                label: 'Other',                match: (a: ActivityRow) => true }, // catch-all — computed last
+  ];
+
+  // Only rows with chat history (engaged sessions)
+  const engaged = activities.filter(a => a.chat_history && a.chat_history !== '[]' && a.chat_history !== 'null');
+
+  // Build session table rows
+  const sessionRows = SESSION_CATEGORIES.map((cat, idx) => {
+    const isOther = idx === SESSION_CATEGORIES.length - 1;
+    const prior = SESSION_CATEGORIES.slice(0, idx);
+    const rows = isOther
+      ? engaged.filter(a => !prior.some(p => p.match(a)))
+      : engaged.filter(a => cat.match(a));
+    const thisMonth = rows.filter(a => (a.updated_at || a.created_at) >= monthStart);
+    return { label: cat.label, allTime: rows.length, thisMonth: thisMonth.length };
+  }).filter(r => r.allTime > 0 || r.label !== 'Other');
+
+  const totalAllTime   = engaged.length;
+  const totalThisMonth = engaged.filter(a => (a.updated_at || a.created_at) >= monthStart).length;
 
   return (
     <AppLayout>
@@ -1311,15 +1077,6 @@ const AdminStudentDashboard: React.FC = () => {
 
         {/* ── STUDENT ACTIVITY TAB ────────────────────────────────────── */}
         {activeTab === 'student' && <div>
-        <StudentLearnerTable
-          learners={learners}
-          sessionRows={studentSessionRows}
-          loading={loadingStudentSummary || loadingLearners}
-          error={studentSummaryError || learnersError}
-          onSelectLearner={(id) => setSelectedId(id)}
-          selectedId={selectedId}
-        />
-
         {/* Learner selector */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
           <label className="block text-sm font-semibold text-gray-700 mb-2">Select Learner</label>
@@ -1375,7 +1132,6 @@ const AdminStudentDashboard: React.FC = () => {
           )}
         </div>
 
-        <div id="student-dashboard-detail">
         {/* Loading */}
         {loadingData && (
           <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
@@ -1411,6 +1167,67 @@ const AdminStudentDashboard: React.FC = () => {
                 </div>
               ))}
             </div>
+
+            {/* ── Session Summary Table ───────────────────────────────────── */}
+            {sessionRows.length > 0 && (
+              <section>
+                <h2 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
+                  <BarChart2 size={16} className="text-blue-600" /> Sessions
+                </h2>
+                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider">Category</th>
+                        <th className="px-4 py-2.5 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">All time</th>
+                        <th className="px-4 py-2.5 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                          This month
+                          <span className="ml-1 text-gray-400 font-normal normal-case">
+                            ({new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })})
+                          </span>
+                        </th>
+                        <th className="px-4 py-2.5 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider w-32">Trend</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {sessionRows.map(row => {
+                        const maxAllTime = Math.max(...sessionRows.map(r => r.allTime), 1);
+                        const pct = Math.round(row.allTime / maxAllTime * 100);
+                        return (
+                          <tr key={row.label} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-700">{row.label}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="text-lg font-black text-gray-900">{row.allTime}</span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {row.thisMonth > 0
+                                ? <span className="text-sm font-bold text-purple-700">{row.thisMonth}</span>
+                                : <span className="text-sm text-gray-300">—</span>}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                                  <div className="h-1.5 rounded-full bg-blue-400 transition-all" style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="text-[10px] text-gray-400 w-6 text-right">{pct}%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="bg-gray-50 border-t border-gray-200">
+                      <tr>
+                        <td className="px-4 py-2.5 text-xs font-bold text-gray-600">Total</td>
+                        <td className="px-4 py-2.5 text-center text-sm font-black text-gray-900">{totalAllTime}</td>
+                        <td className="px-4 py-2.5 text-center text-sm font-bold text-purple-700">{totalThisMonth > 0 ? totalThisMonth : '—'}</td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </section>
+            )}
 
             {/* Certifications */}
             {certRows.length > 0 && (
@@ -1476,7 +1293,6 @@ const AdminStudentDashboard: React.FC = () => {
             <p className="text-sm">Select a learner above to view their dashboard.</p>
           </div>
         )}
-        </div>
         </div>}
 
         {/* ── COST OVERVIEW TAB ─────────────────────────────────────────── */}
