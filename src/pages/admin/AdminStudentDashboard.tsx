@@ -49,7 +49,8 @@ interface StudentSessionRow {
   category_activity: string | null;
   progress: string | null;
   activity: string | null;
-  updated_at: string | null;
+  created_at: string | null;   // when activity was FIRST started — use for "this month"
+  updated_at: string | null;   // bumped every chat message — use for "last active" only
 }
 
 // ─── Cost types ──────────────────────────────────────────────────────────────
@@ -162,10 +163,11 @@ const StudentLearnerTable: React.FC<{
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<'name' | 'total' | 'monthTotal' | 'certAttempted' | 'certAchieved' | 'completionRate' | 'lastActive'>('total');
   const [sortAsc, setSortAsc] = useState(false);
-  // Use UTC month boundaries to avoid timezone issues.
-  // monthStartMs = milliseconds for midnight UTC on the 1st of the current month.
-  // We parse each updated_at string to a timestamp for comparison — this handles
-  // both "+00:00" and "Z" suffix formats that Supabase may return.
+  // monthStartMs = UTC midnight on the 1st of the current month.
+  // We use created_at (not updated_at) for the "this month" count because
+  // updated_at is bumped on every chat message and would make nearly every
+  // row appear as current-month. created_at records when the activity was
+  // first started and never changes.
   const _now = new Date();
   const monthStartMs = Date.UTC(_now.getUTCFullYear(), _now.getUTCMonth(), 1);
 
@@ -173,8 +175,7 @@ const StudentLearnerTable: React.FC<{
     const rows = sessionRows.filter((r) => r.user_id === l.id);
     const engaged = rows.filter((r) => isEngagedSession(r.progress));
     const currentMonthEngaged = engaged.filter((r) => {
-      if (!r.updated_at) return false;
-      const ts = Date.parse(r.updated_at);
+      const ts = Date.parse(r.created_at || '');
       return !isNaN(ts) && ts >= monthStartMs;
     }).length;
     const byCategory: Record<string, number> = {};
@@ -1222,7 +1223,7 @@ const AdminStudentDashboard: React.FC = () => {
       const learnerIds = learners.map((l) => l.id);
       const { data, error } = await supabase
         .from('dashboard')
-        .select('user_id, category_activity, progress, activity, updated_at')
+        .select('user_id, category_activity, progress, activity, created_at, updated_at')
         .in('user_id', learnerIds)
         .order('updated_at', { ascending: false });
       if (error) throw error;
