@@ -162,12 +162,21 @@ const StudentLearnerTable: React.FC<{
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<'name' | 'total' | 'monthTotal' | 'certAttempted' | 'certAchieved' | 'completionRate' | 'lastActive'>('total');
   const [sortAsc, setSortAsc] = useState(false);
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  // Use UTC month boundaries to avoid timezone issues.
+  // monthStartMs = milliseconds for midnight UTC on the 1st of the current month.
+  // We parse each updated_at string to a timestamp for comparison — this handles
+  // both "+00:00" and "Z" suffix formats that Supabase may return.
+  const _now = new Date();
+  const monthStartMs = Date.UTC(_now.getUTCFullYear(), _now.getUTCMonth(), 1);
 
   const summaries: StudentSummary[] = learners.map((l) => {
     const rows = sessionRows.filter((r) => r.user_id === l.id);
     const engaged = rows.filter((r) => isEngagedSession(r.progress));
-    const currentMonthEngaged = engaged.filter((r) => r.updated_at && new Date(r.updated_at) >= monthStart).length;
+    const currentMonthEngaged = engaged.filter((r) => {
+      if (!r.updated_at) return false;
+      const ts = Date.parse(r.updated_at);
+      return !isNaN(ts) && ts >= monthStartMs;
+    }).length;
     const byCategory: Record<string, number> = {};
     for (const row of engaged) {
       const key = normalizeCategory(row.category_activity);
