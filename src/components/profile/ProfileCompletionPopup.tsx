@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
-import { User, GraduationCap, Globe, School, MapPin } from 'lucide-react';
+import { User, GraduationCap, Globe, MapPin, Key, Building2 } from 'lucide-react';
 
 interface ProfileCompletionPopupProps {
   userId: string;
@@ -10,28 +10,21 @@ interface ProfileCompletionPopupProps {
   onComplete: () => void;
 }
 
-interface ProfileFormData {
+// What we fetch from an org when a learner enters a join code
+interface OrgContext {
+  id: string;
   name: string;
-  role: 'student' | 'teacher';
-  grade_level: string;
-  gender: 'female' | 'male' | 'other';
   continent: string;
   country: string;
-  state: string;
-  city: string;
-  school_name: string;
+  state: string | null;
+  city: string | null;
+  learner_age_min: number | null;
+  learner_age_max: number | null;
+  learner_gender: 'female' | 'male' | 'both' | null;
 }
 
-// Continents
-const CONTINENTS = [
-  'Africa',
-  'Asia',
-  'Australia',
-  'North America',
-  'South America',
-];
+const CONTINENTS = ['Africa','Asia','Australia','North America','South America'];
 
-// Countries grouped by continent
 const COUNTRIES_BY_CONTINENT: Record<string, string[]> = {
   Africa: [
     'Algeria','Angola','Benin','Botswana','Burkina Faso','Burundi','Cabo Verde',
@@ -72,590 +65,509 @@ const COUNTRIES_BY_CONTINENT: Record<string, string[]> = {
   ],
 };
 
-// City dropdown options by continent
-const CITY_OPTIONS: Record<string, string[]> = {
-  Africa:          ['Oloibiri area', 'Other'],
-  'North America': ['Cincinnati', 'Dayton', 'Other'],
-};
-
-// School/organization dropdown for African users
-const AFRICA_SCHOOL_OPTIONS = ['Davidson AI Innovation Lab', 'Other'];
-
-// All 36 Nigerian states + FCT
 const NIGERIA_STATES = [
-  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa',
-  'Benue', 'Borno', 'Cross River', 'Delta', 'Ebonyi', 'Edo',
-  'Ekiti', 'Enugu', 'FCT (Abuja)', 'Gombe', 'Imo', 'Jigawa',
-  'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara',
-  'Lagos', 'Nasarawa', 'Niger', 'Ogun', 'Ondo', 'Osun',
-  'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara',
+  'Abia','Adamawa','Akwa Ibom','Anambra','Bauchi','Bayelsa',
+  'Benue','Borno','Cross River','Delta','Ebonyi','Edo',
+  'Ekiti','Enugu','FCT (Abuja)','Gombe','Imo','Jigawa',
+  'Kaduna','Kano','Katsina','Kebbi','Kogi','Kwara',
+  'Lagos','Nasarawa','Niger','Ogun','Ondo','Osun',
+  'Oyo','Plateau','Rivers','Sokoto','Taraba','Yobe','Zamfara',
 ];
 
-// Auto-populate city_town for known Nigerian states
 const NIGERIA_STATE_CITY_MAP: Record<string, string> = {
-  'Ogun':    'Ibiade',
+  'Ogun': 'Ibiade',
   'Bayelsa': 'Oloibiri',
 };
 
+const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId, email, onComplete }) => {
+  const [role, setRole] = useState<'learner' | 'leader'>('learner');
 
+  // ── Shared fields ──────────────────────────────────────────────────────────
+  const [name, setName] = useState('');
+  const [gender, setGender] = useState<'female' | 'male' | 'other'>('female');
 
-const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({
-  userId,
-  email,
-  onComplete,
-}) => {
-  const [formData, setFormData] = useState<ProfileFormData>({
-    name: '',
-    role: 'student',
-    grade_level: '3',
-    gender: 'female',
-    continent: '',
-    country: '',
-    state: '',
-    city: '',
-    school_name: '',
-  });
+  // ── Learner-only ───────────────────────────────────────────────────────────
+  const [joinCode, setJoinCode] = useState('');
+  const [joinCodeStatus, setJoinCodeStatus] = useState<'idle'|'checking'|'found'|'not_found'>('idle');
+  const [orgCtx, setOrgCtx] = useState<OrgContext | null>(null);  // filled when join code found
+  const [gradeLevel, setGradeLevel] = useState('3');
+
+  // ── Leader-only ────────────────────────────────────────────────────────────
+  const [orgName, setOrgName] = useState('');
+  const [orgDescription, setOrgDescription] = useState('');
+  const [continent, setContinent] = useState('');
+  const [country, setCountry] = useState('');
+  const [state, setState] = useState('');
+  const [city, setCity] = useState('');
+  const [ageMin, setAgeMin] = useState('');
+  const [ageMax, setAgeMax] = useState('');
+  const [learnerGender, setLearnerGender] = useState<'female'|'male'|'both'>('both');
+
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [cityChoice, setCityChoice] = useState('');
-  const [schoolChoice, setSchoolChoice] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const handleInputChange = (field: keyof ProfileFormData, value: string) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+  // ── Join code lookup ───────────────────────────────────────────────────────
+  const handleJoinCodeChange = async (code: string) => {
+    const upper = code.toUpperCase();
+    setJoinCode(upper);
+    if (upper.length < 6) { setJoinCodeStatus('idle'); setOrgCtx(null); return; }
+    setJoinCodeStatus('checking');
+    const { data } = await supabase
+      .from('organizations')
+      .select('id, name, continent, country, state, city, learner_age_min, learner_age_max, learner_gender')
+      .eq('join_code', upper)
+      .maybeSingle();
+    if (data) {
+      setJoinCodeStatus('found');
+      setOrgCtx(data as OrgContext);
+      // Auto-set gender if org is single-gender
+      if (data.learner_gender === 'female') setGender('female');
+      if (data.learner_gender === 'male')   setGender('male');
+    } else {
+      setJoinCodeStatus('not_found');
+      setOrgCtx(null);
+    }
   };
 
-  
+  // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    // Basic validation
-    if (!formData.name.trim()) {
-      setError('Please enter your name');
-      return;
-    }
-    if (formData.role === 'student' && !formData.grade_level) {
-      setError('Please select your grade level');
-      return;
-    }
-    if (!formData.continent) {
-      setError('Please select your continent');
-      return;
-    }
-    if (!formData.country) {
-      setError('Please select your country');
-      return;
+    if (!name.trim()) { setError('Please enter your name'); return; }
+
+    if (role === 'leader') {
+      if (!orgName.trim()) { setError('Please enter your organization name'); return; }
+      if (!continent)      { setError('Please select your continent'); return; }
+      if (!country)        { setError('Please select your country'); return; }
+      if (!ageMin || !ageMax) { setError('Please enter the learner age range'); return; }
+      if (parseInt(ageMin) >= parseInt(ageMax)) {
+        setError('Minimum age must be less than maximum age'); return;
+      }
     }
 
     setIsSubmitting(true);
-
     try {
-      // Verify session & user
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-      if (sessionError || !session?.user) {
-        throw new Error('No active session');
-      }
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session?.user) throw new Error('No active session');
       const actualUserId = session.user.id;
-      const actualEmail = session.user.email;
+      const actualEmail  = session.user.email;
 
-      // Build profile payload (include continent) :contentReference[oaicite:0]{index=0}
-      const profileData = {
-        id: actualUserId,
-        email: actualEmail || email,
-        name: formData.name,
-        role: formData.role,
-        grade_level:
-          formData.role === 'student'
-            ? parseInt(formData.grade_level, 10)
-            : null,
-        gender: formData.gender,
-        continent: formData.continent,     // ← NEW
-        country: formData.country,
-        state: formData.state || null,
-        city: formData.city || null,
-        school_name: formData.school_name || null,
+      let organization_id: string | null = null;
+      let join_code_used: string | null  = null;
+
+      // ── LEADER: create org ─────────────────────────────────────────────────
+      if (role === 'leader') {
+        const { data: codeData } = await supabase.rpc('generate_join_code');
+        const newCode = codeData as string;
+        const { data: orgData, error: orgError } = await supabase
+          .from('organizations')
+          .insert({
+            name:             orgName.trim(),
+            description:      orgDescription.trim() || null,
+            join_code:        newCode,
+            leader_id:        actualUserId,
+            continent,
+            country,
+            state:            state  || null,
+            city:             city   || null,
+            learner_age_min:  parseInt(ageMin),
+            learner_age_max:  parseInt(ageMax),
+            learner_gender:   learnerGender,
+          })
+          .select('id, join_code')
+          .single();
+        if (orgError) throw new Error('Could not create organization: ' + orgError.message);
+        organization_id = orgData.id;
+        localStorage.setItem('my_org_join_code', orgData.join_code);
+        localStorage.setItem('my_org_name', orgName.trim());
+      }
+
+      // ── LEARNER with code: link to org ─────────────────────────────────────
+      if (role === 'learner' && orgCtx) {
+        organization_id = orgCtx.id;
+        join_code_used  = joinCode;
+      }
+
+      // ── Determine location: learner inherits from org if linked ────────────
+      const profileContinent = role === 'learner' ? (orgCtx?.continent ?? '') : continent;
+      const profileCountry   = role === 'learner' ? (orgCtx?.country   ?? '') : country;
+      const profileState     = role === 'learner' ? (orgCtx?.state     ?? null) : (state || null);
+      const profileCity      = role === 'learner' ? (orgCtx?.city      ?? null) : (city  || null);
+
+      const profilePayload: Record<string, any> = {
+        id:                actualUserId,
+        email:             actualEmail || email,
+        name:              name.trim(),
+        role,
+        gender,
+        continent:         profileContinent || null,
+        country:           profileCountry   || null,
+        state:             profileState,
+        city:              profileCity,
+        organization_id,
+        join_code_used,
         profile_completed: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        created_at:        new Date().toISOString(),
+        updated_at:        new Date().toISOString(),
       };
 
-      // Upsert into profiles
-      const { data: existing, error: checkError } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', actualUserId)
-        .maybeSingle();
-      if (checkError) throw checkError;
-
-      if (existing) {
-        await supabase
-          .from('profiles')
-          .update(profileData)
-          .eq('id', actualUserId);
-      } else {
-        await supabase.from('profiles').insert(profileData);
+      if (role === 'learner') {
+        profilePayload.grade_level = parseInt(gradeLevel, 10);
       }
 
-      // Seed dashboard activities for students by continent
-      if (formData.role === 'student') {
-        const continentParam = formData.continent;
-        console.log(
-          `[ProfileCompletionPopup] 🎓 Seeding dashboard for continent=${continentParam}`
-        );
+      const { data: existing } = await supabase.from('profiles').select('id').eq('id', actualUserId).maybeSingle();
+      if (existing) {
+        await supabase.from('profiles').update(profilePayload).eq('id', actualUserId);
+      } else {
+        await supabase.from('profiles').insert(profilePayload);
+      }
 
-        // 1) Try RPC: create_grade_appropriate_dashboard_activities_by_continent
+      // ── Seed dashboard activities for learners ─────────────────────────────
+      if (role === 'learner') {
+        const seedContinent = profileContinent || 'Africa';
         const { error: rpcError } = await supabase.rpc(
           'create_grade_appropriate_dashboard_activities_by_continent',
-          {
-            user_id_param: actualUserId,
-            continent_param: continentParam,
-          }
+          { user_id_param: actualUserId, continent_param: seedContinent }
         );
-
         if (rpcError) {
-          console.warn(
-            '[ProfileCompletionPopup] ⚠️ Continent RPC failed, falling back…',
-            rpcError
-          );
-
-          // 2) Fallback: fetch modules by continent directly :contentReference[oaicite:1]{index=1}
-          const userGrade = parseInt(formData.grade_level, 10);
-         
-          const { data: modules, error: moduleError } = await supabase
-            .from('learning_modules')
-            .select('learning_module_id, title, category, grade_level')
-            .eq('continent', continentParam)
-            .eq('public', 1)
-            .in('grade_level', [userGrade, 4])   // ← pulls both the student’s grade and grade 4
-            .limit(10);
-
-          if (moduleError) {
-            console.warn(
-              '[ProfileCompletionPopup] ⚠️ Module fetch error:',
-              moduleError
-            );
-          } else if (modules && modules.length > 0) {
-            const dashboardActivities = modules.map((mod) => ({
-              user_id: actualUserId,
-              learning_module_id: mod.learning_module_id,
-              status: 'not_started',
-              progress: 0,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            }));
-            const { error: insertError } = await supabase
-            .from('dashboard')          // ← use your real table name
-            .insert(dashboardActivities);
-            if (insertError) {
-              console.warn(
-                '[ProfileCompletionPopup] ⚠️ Dashboard insert error:',
-                insertError
-              );
-            } else {
-              console.log(
-                `[ProfileCompletionPopup] ✅ Created ${dashboardActivities.length} activities for ${continentParam}`
-              );
-            }
-          } else {
-            console.log(
-              '[ProfileCompletionPopup] ℹ️ No modules found for',
-              continentParam
+          const { data: modules } = await supabase
+            .from('learning_modules').select('learning_module_id, title, category, grade_level')
+            .eq('continent', seedContinent).eq('public', 1)
+            .in('grade_level', [parseInt(gradeLevel, 10), 4]).limit(10);
+          if (modules?.length) {
+            await supabase.from('dashboard').insert(
+              modules.map(mod => ({
+                user_id: actualUserId, learning_module_id: mod.learning_module_id,
+                status: 'not_started', progress: 0,
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+              }))
             );
           }
-        } else {
-          console.log(
-            `[ProfileCompletionPopup] ✅ RPC seeded activities for ${continentParam}`
-          );
         }
       }
 
-      // Done!
       onComplete();
     } catch (err: any) {
-      console.error('[ProfileCompletionPopup] 💥 Error:', err);
+      console.error('[ProfileCompletionPopup]', err);
       setError(err.message || 'Something went wrong');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // ── Whether the learner must choose their own gender ──────────────────────
+  // Only show gender picker to learners if org has mixed genders OR no org linked
+  const learnerNeedsGender = role === 'learner' && (!orgCtx || orgCtx.learner_gender === 'both');
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[95vh] overflow-y-auto">
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[95vh] overflow-y-auto">
         <div className="p-6">
-          {/* Header */}
           <div className="flex items-center mb-6">
             <div className="p-3 bg-blue-100 rounded-full mr-4">
               <User className="h-6 w-6 text-blue-600" />
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">
-                Complete Your Profile
-              </h2>
-              <p className="text-sm text-gray-600">
-                Help us personalize your learning experience
-              </p>
+              <h2 className="text-xl font-semibold text-gray-900">Complete Your Profile</h2>
+              <p className="text-sm text-gray-500">Help us personalize your experience</p>
             </div>
           </div>
 
-          {/* Error */}
           {error && (
-            <div className="mb-4 p-3 bg-red-50 border-red-200 rounded-lg">
-              <p className="text-red-800 text-sm">{error}</p>
-            </div>
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{error}</div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Name */}
+          <form onSubmit={handleSubmit} className="space-y-5">
+
+            {/* ── Role picker ─────────────────────────────────────────────── */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Full Name *
+                <GraduationCap className="inline mr-1" size={15} /> I am a: *
               </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) =>
-                  handleInputChange('name', e.target.value)
-                }
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { value: 'learner', label: 'Learner / Student', desc: 'I am here to learn' },
+                  { value: 'leader', label: 'Leader / Educator', desc: 'I lead a learning group' },
+                ].map(opt => (
+                  <label key={opt.value}
+                    className={'flex flex-col p-3 border-2 rounded-lg cursor-pointer transition-colors ' +
+                      (role === opt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300')}>
+                    <input type="radio" name="role" value={opt.value} checked={role === opt.value}
+                      onChange={() => setRole(opt.value as any)} className="sr-only" />
+                    <span className="text-sm font-semibold text-gray-900">{opt.label}</span>
+                    <span className="text-xs text-gray-500 mt-0.5">{opt.desc}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Name (everyone) ─────────────────────────────────────────── */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+              <input type="text" value={name} onChange={e => setName(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter your full name"
-                required
-              />
+                placeholder="Enter your full name" required />
             </div>
 
-            {/* Role */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <GraduationCap className="inline mr-1" />
-                I am a: *
-              </label>
-              <div className="space-y-2">
-                {(['student', 'teacher'] as const).map((r) => (
-                  <label key={r} className="flex items-center">
-                    <input
-                      type="radio"
-                      name="role"
-                      value={r}
-                      checked={formData.role === r}
-                      onChange={(e) =>
-                        handleInputChange(
-                          'role',
-                          e.target.value as any
-                        )
-                      }
-                      className="mr-3"
-                    />
-                    <span>
-                      {r === 'student'
-                        ? 'Student'
-                        : 'Teacher/Educator'}
-                    </span>
+            {/* ══════════════════════════════════════════════════════════════
+                LEARNER FLOW
+            ══════════════════════════════════════════════════════════════ */}
+            {role === 'learner' && (
+              <>
+                {/* Join code */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Key className="inline mr-1" size={14} /> Organization Join Code
+                    <span className="text-gray-400 font-normal ml-1">(optional — ask your leader)</span>
                   </label>
-                ))}
-              </div>
-            </div>
+                  <input type="text" value={joinCode}
+                    onChange={e => handleJoinCodeChange(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 font-mono tracking-widest uppercase"
+                    placeholder="e.g. DAV001" maxLength={6} />
 
-          
-            {/* Grade Level (students only) */}
-            {formData.role === 'student' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Grade Level *
-                </label>
-                <div className="space-y-2">
-                  {(['1', '2', '3'] as const).map((g) => (
-                    <label key={g} className="flex items-start">
-                      <input
-                        type="radio"
-                        name="grade_level"
-                        value={g}
-                        checked={formData.grade_level === g}
-                        onChange={(e) =>
-                          handleInputChange('grade_level', e.target.value)
-                        }
-                        className="mr-3 mt-1"
-                        required
-                      />
-                      <div>
-                        <div className="font-medium text-gray-900">
-                          {g === '1'
-                            ? 'Elementary (Grades 3–5)'
-                            : g === '2'
-                            ? 'Middle School (Grades 6–8)'
-                            : 'High School (Grades 9–12)'}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {g === '1'
-                            ? 'Ages 8–11'
-                            : g === '2'
-                            ? 'Ages 11–14'
-                            : 'Ages 14–18'}
-                        </div>
-                      </div>
-                    </label>
-                  ))}
+                  {joinCodeStatus === 'checking' && (
+                    <p className="mt-1.5 text-xs text-gray-400">Looking up code…</p>
+                  )}
+                  {joinCodeStatus === 'found' && orgCtx && (
+                    <div className="mt-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                      <p className="text-sm font-semibold text-emerald-800">✓ {orgCtx.name}</p>
+                      <p className="text-xs text-emerald-600 mt-0.5">
+                        {[orgCtx.city, orgCtx.state, orgCtx.country].filter(Boolean).join(', ')}
+                      </p>
+                      {(orgCtx.learner_age_min || orgCtx.learner_age_max) && (
+                        <p className="text-xs text-emerald-600">
+                          Ages {orgCtx.learner_age_min}–{orgCtx.learner_age_max}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {joinCodeStatus === 'not_found' && joinCode.length === 6 && (
+                    <p className="mt-1.5 text-sm text-red-600">Code not found — check with your leader</p>
+                  )}
                 </div>
-              </div>
+
+                {/* Gender — only shown if org has mixed genders or no org */}
+                {learnerNeedsGender && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Gender *</label>
+                    <div className="flex gap-4">
+                      {(['female', 'male', 'other'] as const).map(g => (
+                        <label key={g} className="flex items-center">
+                          <input type="radio" name="gender" value={g}
+                            checked={gender === g} onChange={() => setGender(g)}
+                            className="mr-2" required />
+                          <span className="text-sm capitalize">{g}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Level — only shown if no org code (or org found but we still need grade) */}
+                {!orgCtx && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Level *</label>
+                    <div className="space-y-2">
+                      {[
+                        { v: '1', label: 'Elementary (Ages 8–11)' },
+                        { v: '2', label: 'Middle School (Ages 11–14)' },
+                        { v: '3', label: 'High School (Ages 14–18)' },
+                        { v: '4', label: 'Adult Learner (18+)' },
+                      ].map(g => (
+                        <label key={g.v} className="flex items-center">
+                          <input type="radio" name="grade_level" value={g.v}
+                            checked={gradeLevel === g.v} onChange={() => setGradeLevel(g.v)}
+                            className="mr-3" />
+                          <span className="text-sm">{g.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* If no org, show full location fields */}
+                {!orgCtx && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Continent</label>
+                      <select value={continent}
+                        onChange={e => { setContinent(e.target.value); setCountry(''); setCity(''); }}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white">
+                        <option value="">Select a continent (optional)</option>
+                        {CONTINENTS.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    {continent && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          <Globe className="inline mr-1" size={14} /> Country
+                        </label>
+                        <select value={country} onChange={e => setCountry(e.target.value)}
+                          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white">
+                          <option value="">Select a country</option>
+                          {(COUNTRIES_BY_CONTINENT[continent] ?? []).map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <MapPin className="inline mr-1 text-green-600" size={14} /> City / Town
+                      </label>
+                      <input type="text" value={city} onChange={e => setCity(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                        placeholder="Optional" />
+                    </div>
+                  </>
+                )}
+              </>
             )}
 
+            {/* ══════════════════════════════════════════════════════════════
+                LEADER FLOW
+            ══════════════════════════════════════════════════════════════ */}
+            {role === 'leader' && (
+              <>
+                {/* Gender */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Your Gender *</label>
+                  <div className="flex gap-4">
+                    {(['female', 'male', 'other'] as const).map(g => (
+                      <label key={g} className="flex items-center">
+                        <input type="radio" name="gender" value={g}
+                          checked={gender === g} onChange={() => setGender(g)}
+                          className="mr-2" required />
+                        <span className="text-sm capitalize">{g}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
 
-            {/* Gender */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Gender *
-              </label>
-              <div className="space-y-2">
-                {(['female', 'male', 'other'] as const).map((g) => (
-                  <label key={g} className="flex items-center">
-                    <input
-                      type="radio"
-                      name="gender"
-                      value={g}
-                      checked={formData.gender === g}
-                      onChange={(e) =>
-                        handleInputChange('gender', e.target.value)
-                      }
-                      className="mr-3"
-                      required
-                    />
-                    <span className="capitalize">{g}</span>
+                {/* Org details */}
+                <div className="space-y-4 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                  <div className="text-sm font-semibold text-indigo-800 flex items-center gap-2">
+                    <Building2 size={15} /> Your Organization
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Organization Name *</label>
+                    <input type="text" value={orgName} onChange={e => setOrgName(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
+                      placeholder="e.g. Davidson AI Innovation Center" />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Brief Description (optional)</label>
+                    <input type="text" value={orgDescription} onChange={e => setOrgDescription(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
+                      placeholder="What does your group do?" />
+                  </div>
+
+                  {/* Learner demographics */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-2">Learner Age Range *</label>
+                    <div className="flex items-center gap-2">
+                      <input type="number" value={ageMin} onChange={e => setAgeMin(e.target.value)}
+                        className="w-20 px-2 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm text-center"
+                        placeholder="Min" min={3} max={99} />
+                      <span className="text-gray-400 text-sm">to</span>
+                      <input type="number" value={ageMax} onChange={e => setAgeMax(e.target.value)}
+                        className="w-20 px-2 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm text-center"
+                        placeholder="Max" min={3} max={99} />
+                      <span className="text-gray-400 text-xs">years old</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-2">Learner Gender *</label>
+                    <div className="flex gap-4">
+                      {([
+                        { v: 'female', label: 'Female only' },
+                        { v: 'male',   label: 'Male only'   },
+                        { v: 'both',   label: 'Both'        },
+                      ] as const).map(g => (
+                        <label key={g.v} className="flex items-center">
+                          <input type="radio" name="learner_gender" value={g.v}
+                            checked={learnerGender === g.v} onChange={() => setLearnerGender(g.v)}
+                            className="mr-2" />
+                          <span className="text-xs">{g.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-indigo-600">
+                    After completing your profile you will receive a unique 6-character join code to share with your learners.
+                  </p>
+                </div>
+
+                {/* Location */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Continent *</label>
+                  <select value={continent}
+                    onChange={e => { setContinent(e.target.value); setCountry(''); setState(''); setCity(''); }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white" required>
+                    <option value="">Select a continent</option>
+                    {CONTINENTS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                {continent && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <Globe className="inline mr-1" size={14} /> Country *
+                    </label>
+                    <select value={country}
+                      onChange={e => { setCountry(e.target.value); setState(''); setCity(''); }}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white" required>
+                      <option value="">Select a country</option>
+                      {(COUNTRIES_BY_CONTINENT[continent] ?? []).map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <MapPin className="inline mr-1" size={14} /> State / Province
                   </label>
-                ))}
-              </div>
-            </div>
+                  {country === 'Nigeria' ? (
+                    <select value={state}
+                      onChange={e => { setState(e.target.value); setCity(NIGERIA_STATE_CITY_MAP[e.target.value] ?? ''); }}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white">
+                      <option value="">-- Select a state --</option>
+                      {NIGERIA_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  ) : (
+                    <input type="text" value={state} onChange={e => setState(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="Optional" />
+                  )}
+                </div>
 
-            {/* Continent */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Continent *
-              </label>
-              <select
-                value={formData.continent}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  handleInputChange('continent', val);
-                  handleInputChange('country', '');
-                  handleInputChange('city', '');
-                  handleInputChange('school_name', '');
-                  setCityChoice('');
-                  setSchoolChoice('');
-                }}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                required
-              >
-                <option value="">Select a continent</option>
-                {CONTINENTS.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Country — filtered by continent */}
-            {formData.continent && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <Globe className="inline mr-1" />
-                  Country *
-                </label>
-                <select
-                  value={formData.country}
-                  onChange={(e) => {
-                    handleInputChange('country', e.target.value);
-                    handleInputChange('state', '');
-                    handleInputChange('city', '');
-                    setCityChoice('');
-                  }}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                  required
-                >
-                  <option value="">Select a country</option>
-                  {(COUNTRIES_BY_CONTINENT[formData.continent] ?? []).map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <MapPin className="inline mr-1 text-green-600" size={14} /> City / Town / Village *
+                  </label>
+                  <input type="text" value={city} onChange={e => setCity(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter your city, town, or village" />
+                </div>
+              </>
             )}
 
-            {/* State */}
-            <div className="bg-gray-50 p-3 rounded-lg">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <MapPin className="inline mr-1 text-blue-600" />
-                State/Province
-              </label>
-              {formData.country === 'Nigeria' ? (
-                <select
-                  value={formData.state}
-                  onChange={(e) => {
-                    const selectedState = e.target.value;
-                    const autoCity = NIGERIA_STATE_CITY_MAP[selectedState] ?? '';
-                    handleInputChange('state', selectedState);
-                    handleInputChange('city', autoCity);
-                    setCityChoice('');
-                  }}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                >
-                  <option value="">-- Select a state --</option>
-                  {NIGERIA_STATES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  value={formData.state}
-                  onChange={(e) => handleInputChange('state', e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                  placeholder="Optional"
-                />
-              )}
-            </div>
-
-            {/* City — Nigeria: plain input (may be auto-populated by state);
-                   Other Africa / North America: smart dropdown; elsewhere: free text */}
-            <div className="bg-gray-50 p-3 rounded-lg">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <MapPin className="inline mr-1 text-green-600" />
-                City
-              </label>
-              {formData.country === 'Nigeria' ? (
-                <input
-                  type="text"
-                  value={formData.city}
-                  onChange={(e) => handleInputChange('city', e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                  placeholder="e.g., Ibiade, Oloibiri, Lagos"
-                />
-              ) : CITY_OPTIONS[formData.continent] ? (
-                <>
-                  <select
-                    value={cityChoice}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCityChoice(val);
-                      if (val !== 'Other') {
-                        handleInputChange('city', val);
-                        // Auto-populate school for Cincinnati (North America)
-                        if (val === 'Cincinnati') {
-                          handleInputChange('school_name', '100 Black Girls Breaking Barriers in STEM');
-                        } else {
-                          // Clear auto-populated value if switching away from Cincinnati
-                          if (formData.school_name === '100 Black Girls Breaking Barriers in STEM') {
-                            handleInputChange('school_name', '');
-                          }
-                        }
-                      } else {
-                        handleInputChange('city', '');
-                        if (formData.school_name === '100 Black Girls Breaking Barriers in STEM') {
-                          handleInputChange('school_name', '');
-                        }
-                      }
-                    }}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white mb-2"
-                  >
-                    <option value="">Select a city</option>
-                    {CITY_OPTIONS[formData.continent].map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                  {cityChoice === 'Other' && (
-                    <input
-                      type="text"
-                      value={formData.city}
-                      onChange={(e) => handleInputChange('city', e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                      placeholder="Enter your city or town"
-                      autoFocus
-                    />
-                  )}
-                </>
-              ) : (
-                <input
-                  type="text"
-                  value={formData.city}
-                  onChange={(e) => handleInputChange('city', e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                  placeholder="Optional"
-                />
-              )}
-            </div>
-
-            {/* School/Organization */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <School className="inline mr-1" />
-                School/Organization (Optional)
-              </label>
-
-              {/* Africa: dropdown with Davidson AI Innovation Lab or Other */}
-              {formData.continent === 'Africa' ? (
-                <>
-                  <select
-                    value={schoolChoice}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSchoolChoice(val);
-                      if (val !== 'Other') {
-                        handleInputChange('school_name', val);
-                      } else {
-                        handleInputChange('school_name', '');
-                      }
-                    }}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white mb-2"
-                  >
-                    <option value="">Select a school or organization</option>
-                    {AFRICA_SCHOOL_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                  {schoolChoice === 'Other' && (
-                    <input
-                      type="text"
-                      value={formData.school_name}
-                      onChange={(e) => handleInputChange('school_name', e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                      placeholder="Enter your school or organization"
-                      autoFocus
-                    />
-                  )}
-                </>
-              ) : /* North America + Cincinnati: auto-populated read-only field */
-              formData.continent === 'North America' && cityChoice === 'Cincinnati' ? (
-                <input
-                  type="text"
-                  value={formData.school_name}
-                  readOnly
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-600 text-sm cursor-default"
-                />
-              ) : (
-                /* All other users: free text */
-                <input
-                  type="text"
-                  value={formData.school_name}
-                  onChange={(e) => handleInputChange('school_name', e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                  placeholder="Optional"
-                />
-              )}
-            </div>
-
-            {/* Submit */}
-            <div className="pt-4">
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50"
-              >
-                {isSubmitting ? 'Completing...' : 'Complete Profile'}
+            <div className="pt-2">
+              <button type="submit" disabled={isSubmitting}
+                className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium transition-colors">
+                {isSubmitting
+                  ? 'Completing...'
+                  : role === 'leader'
+                  ? 'Create Organization & Complete Profile'
+                  : 'Complete Profile'}
               </button>
             </div>
           </form>
 
-          <div className="mt-4 text-xs text-gray-500 text-center">
-            Signed in as: {email}
-          </div>
+          <div className="mt-4 text-xs text-gray-400 text-center">Signed in as: {email}</div>
         </div>
       </div>
     </div>
