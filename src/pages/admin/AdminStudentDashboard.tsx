@@ -1408,15 +1408,6 @@ const AdminStudentDashboard: React.FC = () => {
   const [loadingStudentSummary, setLoadingStudentSummary] = useState(false);
   const [studentSummaryError, setStudentSummaryError] = useState<string | null>(null);
 
-  // ── Auth guard — MUST be after all hooks ────────────────────────────────────
-  if (authLoading || !user || !authChecked) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Loader2 size={28} className="animate-spin text-purple-500" />
-      </div>
-    );
-  }
-
   // Fetch overall cost data
   const fetchCostData = useCallback(async (days: number) => {
     setLoadingCost(true);
@@ -1540,6 +1531,15 @@ const AdminStudentDashboard: React.FC = () => {
   }, []);
 
   useEffect(() => { if (selectedId) fetchData(selectedId); }, [selectedId, fetchData]);
+
+  // ── Auth guard — after ALL hooks ─────────────────────────────────────────────
+  if (authLoading || !user || !authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-purple-500" />
+      </div>
+    );
+  }
 
   // Derived
   const selectedLearner = learners.find(l => l.id === selectedId) || null;
