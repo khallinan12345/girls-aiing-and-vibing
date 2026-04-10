@@ -1378,15 +1378,6 @@ const AdminStudentDashboard: React.FC = () => {
       });
   }, [isLeader, user?.id]);
 
-  // Render nothing while auth resolves
-  if (authLoading || !user || !authChecked) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Loader2 size={28} className="animate-spin text-purple-500" />
-      </div>
-    );
-  }
-
   const [learners,        setLearners]        = useState<Learner[]>([]);
   const [loadingLearners, setLoadingLearners] = useState(true);
   const [learnersError,   setLearnersError]   = useState<string | null>(null);
@@ -1402,7 +1393,6 @@ const AdminStudentDashboard: React.FC = () => {
   const [platformOrgFilter, setPlatformOrgFilter] = useState<{ id: string; name: string } | null>(null);
 
   // ── Multi-org support for leaders ──────────────────────────────────────────
-  // A leader may lead more than one org — let them pick which one to view.
   const [leaderOrgs, setLeaderOrgs] = useState<{ id: string; name: string; join_code: string; city: string | null }[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
 
@@ -1417,6 +1407,15 @@ const AdminStudentDashboard: React.FC = () => {
   const [studentSessionRows, setStudentSessionRows] = useState<StudentSessionRow[]>([]);
   const [loadingStudentSummary, setLoadingStudentSummary] = useState(false);
   const [studentSummaryError, setStudentSummaryError] = useState<string | null>(null);
+
+  // ── Auth guard — MUST be after all hooks ────────────────────────────────────
+  if (authLoading || !user || !authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-purple-500" />
+      </div>
+    );
+  }
 
   // Fetch overall cost data
   const fetchCostData = useCallback(async (days: number) => {
