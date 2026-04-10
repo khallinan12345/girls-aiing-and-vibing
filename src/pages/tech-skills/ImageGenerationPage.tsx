@@ -2,7 +2,7 @@
 //
 // AI Image Generation — FLUX Schnell via Replicate.
 // Features identical to VideoGenerationPage:
-//   • Africa-only access gate (profiles.continent = "Africa")
+//   • Access gate: Africa + North America (profiles.continent)
 //   • Voice output toggle (UK English 🇬🇧 / Nigerian Pidgin 🇳🇬)
 //   • communication_level adaptive UI text
 //   • "Improve my English" button
@@ -471,7 +471,8 @@ const ImageGenerationPage: React.FC = () => {
     );
   }
 
-  if (continent !== 'Africa') {
+  const allowedContinents = ['Africa', 'North America'];
+  if (continent !== null && !allowedContinents.includes(continent)) {
     return (
       <AppLayout>
         <div className="fixed top-16 left-64 right-0 bottom-0 bg-slate-950 flex items-center justify-center p-8">
@@ -479,12 +480,10 @@ const ImageGenerationPage: React.FC = () => {
             <div className="text-6xl">🌍</div>
             <div className="bg-slate-900/80 border border-slate-700/60 rounded-2xl p-8 backdrop-blur-sm">
               <h2 className="text-xl font-bold text-white mb-3">
-                {lvl <= 1 ? 'This page is for Africa students only.' : 'Africa Region Only'}
+                Region Not Yet Available
               </h2>
               <p className="text-slate-400 text-sm leading-relaxed">
-                {lvl <= 1
-                  ? 'AI Image Creation is a special tool for students in Africa. It is not available in your region right now.'
-                  : 'AI Image Creation is currently available exclusively to learners in Africa as part of the Davidson AI Innovation Center programme.'}
+                AI Image Creation is currently available to learners in Africa and North America. Check back soon as we expand to more regions.
               </p>
             </div>
           </div>
