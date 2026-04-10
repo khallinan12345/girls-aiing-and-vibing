@@ -1101,13 +1101,197 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
   );
 };
 
+
+// ─── PlatformGlobalPanel ──────────────────────────────────────────────────────
+// Shown only to platform_administrator role. Displays all orgs with usage stats.
+
+interface OrgSummaryRow {
+  id: string;
+  name: string;
+  join_code: string;
+  continent: string | null;
+  country: string | null;
+  state: string | null;
+  city: string | null;
+  leader_name: string | null;
+  leader_email: string | null;
+  learner_count: number;
+  active_7d: number;
+  active_30d: number;
+}
+
+const PlatformGlobalPanel: React.FC<{
+  onSelectOrg: (orgId: string, orgName: string) => void;
+}> = ({ onSelectOrg }) => {
+  const [orgs, setOrgs] = useState<OrgSummaryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<keyof OrgSummaryRow>('learner_count');
+  const [sortAsc, setSortAsc] = useState(false);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase.from('org_summary').select('*');
+        if (error) throw error;
+        setOrgs(data || []);
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const toggleSort = (key: keyof OrgSummaryRow) => {
+    if (sortKey === key) setSortAsc(a => !a);
+    else { setSortKey(key); setSortAsc(false); }
+  };
+
+  const filtered = orgs.filter(o =>
+    search === '' ||
+    (o.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (o.country || '').toLowerCase().includes(search.toLowerCase()) ||
+    (o.city || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const sorted = [...filtered].sort((a, b) => {
+    const av = a[sortKey] ?? ''; const bv = b[sortKey] ?? '';
+    if (av < bv) return sortAsc ? -1 : 1;
+    if (av > bv) return sortAsc ?  1 : -1;
+    return 0;
+  });
+
+  const SortMark = ({ k }: { k: keyof OrgSummaryRow }) =>
+    sortKey !== k ? null : sortAsc
+      ? <ChevronUp size={11} className="inline ml-0.5 text-purple-500" />
+      : <ChevronDown size={11} className="inline ml-0.5 text-purple-500" />;
+
+  const totalLearners = sorted.reduce((s, o) => s + (o.learner_count || 0), 0);
+  const totalActive30 = sorted.reduce((s, o) => s + (o.active_30d || 0), 0);
+
+  if (loading) return (
+    <div className="flex items-center justify-center gap-2 py-20 text-gray-500">
+      <Loader2 size={20} className="animate-spin" /> Loading organizations…
+    </div>
+  );
+
+  if (error) return (
+    <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+      {error} — make sure the org_summary view was created by the SQL migration.
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Organizations', value: orgs.length, bg: 'bg-purple-50', icon: <BarChart2 size={16} className="text-purple-500" /> },
+          { label: 'Total learners', value: totalLearners, bg: 'bg-blue-50', icon: <Users size={16} className="text-blue-500" /> },
+          { label: 'Active (30d)', value: totalActive30, bg: 'bg-green-50', icon: <TrendingUp size={16} className="text-green-500" /> },
+          { label: 'Countries', value: new Set(orgs.map(o => o.country).filter(Boolean)).size, bg: 'bg-amber-50', icon: <BarChart2 size={16} className="text-amber-500" /> },
+        ].map(({ label, value, bg, icon }) => (
+          <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
+            {icon}
+            <div>
+              <p className="text-xl font-black text-gray-900">{value}</p>
+              <p className="text-xs text-gray-500">{label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Search */}
+      <input type="text" placeholder="Search by org, country, or city…"
+        value={search} onChange={e => setSearch(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+
+      {/* Table */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                {([
+                  { key: 'name',          label: 'Organization' },
+                  { key: 'continent',     label: 'Continent' },
+                  { key: 'country',       label: 'Country' },
+                  { key: 'city',          label: 'City' },
+                  { key: 'leader_name',   label: 'Leader' },
+                  { key: 'learner_count', label: 'Learners' },
+                  { key: 'active_30d',    label: 'Active 30d' },
+                  { key: 'join_code',     label: 'Join Code' },
+                ] as { key: keyof OrgSummaryRow; label: string }[]).map(({ key, label }) => (
+                  <th key={key} onClick={() => toggleSort(key)}
+                    className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700 select-none">
+                    {label}<SortMark k={key} />
+                  </th>
+                ))}
+                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase">Detail</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {sorted.map(org => (
+                <tr key={org.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3 font-semibold text-gray-900">{org.name}</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs">{org.continent}</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs">{org.country}</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs">{org.city}</td>
+                  <td className="px-4 py-3">
+                    <div className="text-xs text-gray-700">{org.leader_name || '—'}</div>
+                    <div className="text-[10px] text-gray-400">{org.leader_email}</div>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-gray-800">{org.learner_count}</td>
+                  <td className="px-4 py-3 font-mono text-gray-800">{org.active_30d}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-indigo-700 font-bold tracking-widest">{org.join_code}</td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => onSelectOrg(org.id, org.name)}
+                      className="px-2.5 py-1 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors">
+                      View →
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {sorted.length === 0 && (
+                <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-400">
+                  No organizations yet — leaders will appear here after signing up.
+                </td></tr>
+              )}
+            </tbody>
+            {sorted.length > 0 && (
+              <tfoot className="bg-gray-50 border-t border-gray-200">
+                <tr>
+                  <td className="px-4 py-2.5 text-xs font-bold text-gray-600" colSpan={5}>
+                    Total ({sorted.length} orgs)
+                  </td>
+                  <td className="px-4 py-2.5 text-xs font-bold text-gray-800 font-mono">{totalLearners}</td>
+                  <td className="px-4 py-2.5 text-xs font-bold text-gray-800 font-mono">{totalActive30}</td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─── Admin & excluded IDs ─────────────────────────────────────────────────────
 
+// ADMIN_IDS: legacy hard-coded list kept for backwards compatibility.
+// The dashboard now also allows access based on role from the profiles table.
 const ADMIN_IDS = new Set([
   '0e738663-a70e-4fd3-9ba6-718c02e116c2',
   '5d5e0486-e768-4c5d-ba63-d1e4570a352d',
   '8b3f70dc-e5d0-4eb0-af7d-ec6181968213',
 ]);
+
+// Roles that can access the admin dashboard
+const DASHBOARD_ROLES = new Set(['leader', 'platform_administrator']);
 
 const EXCLUDED_IDS = new Set([
   '0e738663-a70e-4fd3-9ba6-718c02e116c2',
@@ -1127,15 +1311,50 @@ const AdminStudentDashboard: React.FC = () => {
   const navigate = useNavigate();
 
   // ── Auth guard ─────────────────────────────────────────────────────────────
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [userOrgId, setUserOrgId] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
   useEffect(() => {
     if (authLoading) return;
-    if (!user || !ADMIN_IDS.has(user.id)) {
-      navigate('/home', { replace: true });
-    }
+    if (!user) { navigate('/home', { replace: true }); return; }
+    // Check role from profiles table
+    supabase.from('profiles').select('role, organization_id')
+      .eq('id', user.id).single()
+      .then(({ data }) => {
+        const role = data?.role ?? '';
+        setUserRole(role);
+        setUserOrgId(data?.organization_id ?? null);
+        setAuthChecked(true);
+        if (!ADMIN_IDS.has(user.id) && !DASHBOARD_ROLES.has(role)) {
+          navigate('/home', { replace: true });
+        }
+      });
   }, [user, authLoading, navigate]);
 
-  // Render nothing while auth resolves or if not admin
-  if (authLoading || !user || !ADMIN_IDS.has(user.id)) {
+  const isPlatformAdmin = ADMIN_IDS.has(user?.id ?? '') || userRole === 'platform_administrator';
+  const isLeader        = userRole === 'leader' && !isPlatformAdmin;
+
+  // Fetch all orgs this leader belongs to (via junction table)
+  useEffect(() => {
+    if (!isLeader || !user?.id) return;
+    supabase
+      .from('profile_organizations')
+      .select('organization_id, organizations(id, name, join_code, city)')
+      .eq('profile_id', user.id)
+      .then(({ data }) => {
+        if (!data?.length) return;
+        const orgs = data
+          .map((r: any) => r.organizations)
+          .filter(Boolean);
+        setLeaderOrgs(orgs);
+        // Auto-select first org (or the one from their profile)
+        setSelectedOrgId(orgs[0]?.id ?? userOrgId);
+      });
+  }, [isLeader, user?.id]);
+
+  // Render nothing while auth resolves
+  if (authLoading || !user || !authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <Loader2 size={28} className="animate-spin text-purple-500" />
@@ -1154,7 +1373,13 @@ const AdminStudentDashboard: React.FC = () => {
   const [filterCat,   setFilterCat]   = useState<string>('all');
 
   // ── Tab state ───────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'student' | 'cost-overview' | 'cost-learner'>('student');
+  const [activeTab, setActiveTab] = useState<'student' | 'platform-global' | 'cost-overview' | 'cost-learner'>('student');
+  const [platformOrgFilter, setPlatformOrgFilter] = useState<{ id: string; name: string } | null>(null);
+
+  // ── Multi-org support for leaders ──────────────────────────────────────────
+  // A leader may lead more than one org — let them pick which one to view.
+  const [leaderOrgs, setLeaderOrgs] = useState<{ id: string; name: string; join_code: string; city: string | null }[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
 
   // ── Cost data ───────────────────────────────────────────────────────────────
   const [costRows,        setCostRows]        = useState<CostRow[]>([]);
@@ -1241,11 +1466,18 @@ const AdminStudentDashboard: React.FC = () => {
     (async () => {
       setLoadingLearners(true);
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('profiles')
-          .select('id, name, email, grade_level, continent, country')
-          .eq('continent', 'Africa')
+          .select('id, name, email, grade_level, continent, country, organization_id')
           .order('name', { ascending: true });
+        // Leaders see only their selected org's learners; platform admins see all
+        if (isLeader) {
+          const orgId = selectedOrgId || userOrgId;
+          if (orgId) query = query.eq('organization_id', orgId);
+        } else {
+          query = query.eq('continent', 'Africa');
+        }
+        const { data, error } = await query;
         if (error) throw error;
         setLearners((data || []).filter(l => !EXCLUDED_IDS.has(l.id)));
       } catch (err: any) {
@@ -1259,7 +1491,7 @@ const AdminStudentDashboard: React.FC = () => {
   useEffect(() => {
     if (activeTab !== 'student') return;
     fetchStudentSummary();
-  }, [activeTab, fetchStudentSummary]);
+  }, [activeTab, fetchStudentSummary, selectedOrgId]);
 
   // Fetch selected learner's dashboard rows
   const fetchData = useCallback(async (userId: string) => {
@@ -1307,16 +1539,17 @@ const AdminStudentDashboard: React.FC = () => {
           <p className="text-sm text-gray-500 ml-9">Student activity, certification scores, and API cost analytics.</p>
         </div>
 
-        {/* Tab bar */}
-        <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
+        {/* Tab bar — platform admins see all tabs; leaders see only Student Activity */}
+        <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit flex-wrap">
           {([
-            { id: 'student',      label: 'Student Activity', icon: <BookOpen size={14} /> },
-            { id: 'cost-overview',label: 'Cost Overview',    icon: <DollarSign size={14} /> },
-            { id: 'cost-learner', label: 'Per-Learner Cost', icon: <Activity size={14} /> },
-          ] as const).map(tab => (
+            { id: 'student',        label: 'Student Activity',  icon: <BookOpen size={14} />,    show: true },
+            { id: 'platform-global',label: 'Global Overview',   icon: <Users size={14} />,       show: isPlatformAdmin },
+            { id: 'cost-overview',  label: 'Cost Overview',     icon: <DollarSign size={14} />,  show: isPlatformAdmin },
+            { id: 'cost-learner',   label: 'Per-Learner Cost',  icon: <Activity size={14} />,    show: isPlatformAdmin },
+          ] as const).filter(t => t.show).map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => setActiveTab(tab.id as any)}
               className={classNames(
                 'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors',
                 activeTab === tab.id
@@ -1331,6 +1564,40 @@ const AdminStudentDashboard: React.FC = () => {
 
         {/* ── STUDENT ACTIVITY TAB ────────────────────────────────────── */}
         {activeTab === 'student' && <div>
+
+        {/* Multi-org selector for leaders */}
+        {isLeader && leaderOrgs.length > 1 && (
+          <div className="flex items-center gap-3 mb-4 flex-wrap">
+            <span className="text-sm font-semibold text-gray-600">Viewing org:</span>
+            <div className="flex gap-2 flex-wrap">
+              {leaderOrgs.map(org => (
+                <button key={org.id}
+                  onClick={() => { setSelectedOrgId(org.id); fetchStudentSummary(); }}
+                  className={classNames(
+                    'px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors',
+                    selectedOrgId === org.id
+                      ? 'bg-purple-600 text-white border-purple-600'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'
+                  )}>
+                  {org.name}
+                  {org.city && <span className="text-xs opacity-70 ml-1">· {org.city}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Org drill-down banner (set when platform admin clicks into an org from global view) */}
+        {platformOrgFilter && (
+          <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+            <span className="text-sm font-semibold text-indigo-800">Viewing: {platformOrgFilter.name}</span>
+            <button onClick={() => { setPlatformOrgFilter(null); setActiveTab('platform-global'); }}
+              className="ml-auto text-xs text-indigo-600 hover:text-indigo-900 border border-indigo-300 rounded px-2 py-1">
+              ← Back to Global
+            </button>
+          </div>
+        )}
+
         <StudentLearnerTable
           learners={learners}
           sessionRows={studentSessionRows}
@@ -1498,6 +1765,18 @@ const AdminStudentDashboard: React.FC = () => {
         )}
         </div>
         </div>}
+
+        {/* ── PLATFORM GLOBAL TAB ─────────────────────────────────────── */}
+        {activeTab === 'platform-global' && (
+          <PlatformGlobalPanel
+            onSelectOrg={(orgId, orgName) => {
+              // Switch to student tab filtered to that org's learners
+              // We do this by setting a filter state
+              setActiveTab('student');
+              setPlatformOrgFilter({ id: orgId, name: orgName });
+            }}
+          />
+        )}
 
         {/* ── COST OVERVIEW TAB ─────────────────────────────────────────── */}
         {activeTab === 'cost-overview' && (
