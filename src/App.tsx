@@ -11,6 +11,9 @@ import {
   useNavigate
 } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
+import { setChatIdentity } from './lib/chatClient';
+import { supabase } from './lib/supabaseClient';
+import { ImpersonationProvider, ImpersonationBanner } from './contexts/ImpersonationContext';
 import ProfileCompletionPopup from './components/profile/ProfileCompletionPopup';
 
 // Auth Pages
@@ -110,6 +113,25 @@ const AppContent: React.FC = () => {
       showPopup
     });
   }, [loading, session, user, needsProfileCompletion, showPopup]);
+
+  // Set chat identity for cost attribution — fires once when user logs in
+  useEffect(() => {
+    if (!user?.id) {
+      setChatIdentity(null, null);
+      return;
+    }
+    supabase
+      .from('profiles')
+      .select('city')
+      .eq('id', user.id)
+      .single()
+      .then(({ data }) => {
+        setChatIdentity(user.id, data?.city ?? null);
+      })
+      .catch(() => {
+        setChatIdentity(user.id, null);
+      });
+  }, [user?.id]);
 
   const handleProfileCompletion = async () => {
     console.log('[AppContent] profile completion triggered');
@@ -245,9 +267,12 @@ function App() {
   }, []);
 
   return (
-    <BrowserRouter>
-      <AppContent />
-    </BrowserRouter>
+    <ImpersonationProvider>
+      <BrowserRouter>
+        <ImpersonationBanner />
+        <AppContent />
+      </BrowserRouter>
+    </ImpersonationProvider>
   );
 }
 

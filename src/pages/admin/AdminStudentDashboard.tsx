@@ -19,6 +19,7 @@ import {
   DollarSign, TrendingUp, Zap, Activity,
 } from 'lucide-react';
 import classNames from 'classnames';
+import { useImpersonation } from '../../contexts/ImpersonationContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -159,8 +160,20 @@ const StudentLearnerTable: React.FC<{
   error: string | null;
   onSelectLearner: (id: string) => void;
   selectedId: string;
-}> = ({ learners, sessionRows, loading, error, onSelectLearner, selectedId }) => {
+  isPlatformAdmin?: boolean;
+}> = ({ learners, sessionRows, loading, error, onSelectLearner, selectedId, isPlatformAdmin }) => {
   const [search, setSearch] = useState('');
+  const { startImpersonation } = useImpersonation();
+  const navigate = useNavigate();
+
+  const handleActAs = async (learnerId: string) => {
+    try {
+      await startImpersonation(learnerId);
+      navigate('/home');
+    } catch (err: any) {
+      alert('Could not load learner profile: ' + err.message);
+    }
+  };
   const [sortKey, setSortKey] = useState<'name' | 'total' | 'monthTotal' | 'certAttempted' | 'certAchieved' | 'completionRate' | 'lastActive'>('total');
   const [sortAsc, setSortAsc] = useState(false);
   // monthStartMs = UTC midnight on the 1st of the current month.
@@ -301,6 +314,7 @@ const StudentLearnerTable: React.FC<{
                 <th onClick={() => toggleSort('certAchieved')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Cert Achieved<SortMark keyName="certAchieved" /></th>
                 <th onClick={() => toggleSort('completionRate')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Completion Rate<SortMark keyName="completionRate" /></th>
                 <th onClick={() => toggleSort('lastActive')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Last Active<SortMark keyName="lastActive" /></th>
+                {isPlatformAdmin && <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Act As</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -346,11 +360,22 @@ const StudentLearnerTable: React.FC<{
                   <td className="px-4 py-3 text-gray-600">
                     {s.lastActiveAt ? new Date(s.lastActiveAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '—'}
                   </td>
+                  {isPlatformAdmin && (
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => handleActAs(s.id)}
+                        title={`Browse the platform as ${s.name}`}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition-colors whitespace-nowrap"
+                      >
+                        👁 Act as
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-400">
+                  <td colSpan={isPlatformAdmin ? 9 : 8} className="px-4 py-10 text-center text-sm text-gray-400">
                     {search ? 'No learners match that search.' : 'No student sessions found yet.'}
                   </td>
                 </tr>
@@ -1605,6 +1630,7 @@ const AdminStudentDashboard: React.FC = () => {
           error={studentSummaryError || learnersError}
           onSelectLearner={(id) => setSelectedId(id)}
           selectedId={selectedId}
+          isPlatformAdmin={isPlatformAdmin}
         />
 
         {/* Learner selector */}
