@@ -239,14 +239,18 @@ const AIPlaygroundPage: React.FC = () => {
 
   const generateTitle = async (firstMessage: string): Promise<string> => {
     try {
-      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 20, messages: [{ role: 'user', content: `Generate a short 3-5 word title for a chat that starts with: "${firstMessage.slice(0, 200)}". Reply with ONLY the title, no quotes or punctuation.` }] })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page: 'AIPlaygroundPage',
+          messages: [{ role: 'user', content: `Generate a short 3-5 word title for a chat that starts with: "${firstMessage.slice(0, 200)}". Reply with ONLY the title, no quotes or punctuation.` }],
+          max_tokens: 20,
+          temperature: 0.3,
+        }),
       });
       const data = await res.json();
-      return data.content?.[0]?.text?.trim() ?? 'New Chat';
+      return data.choices?.[0]?.message?.content?.trim() ?? 'New Chat';
     } catch { return firstMessage.slice(0, 40) || 'New Chat'; }
   };
 
@@ -258,14 +262,20 @@ const AIPlaygroundPage: React.FC = () => {
     const updatedMessages = [...messages, userMsg];
     const apiMessages = updatedMessages.map(m => ({ role: m.role, content: m.attachment ? `[Attached file: ${m.attachment.name}]\n\n${m.attachment.content}\n\n${m.content}` : m.content }));
     try {
-      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: playgroundModel, max_tokens: 2000, system: 'You are a helpful AI assistant. Be clear, thoughtful, and concise.', messages: apiMessages })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page:           'AIPlaygroundPage',
+          playgroundModel: playgroundModel,
+          messages:       apiMessages,
+          system:         'You are a helpful AI assistant. Be clear, thoughtful, and concise.',
+          max_tokens:     2000,
+          temperature:    0.7,
+        }),
       });
       const data = await res.json();
-      const assistantText = data.content?.[0]?.text ?? 'Sorry, I could not generate a response.';
+      const assistantText = data.choices?.[0]?.message?.content ?? 'Sorry, I could not generate a response.';
       const assistantMsg: ChatMessage = { role: 'assistant', content: assistantText, timestamp: new Date().toISOString() };
       const finalMessages = [...updatedMessages, assistantMsg];
       const detected = detectArtifact(assistantText);
