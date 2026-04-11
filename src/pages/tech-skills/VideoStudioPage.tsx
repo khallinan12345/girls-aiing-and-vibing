@@ -148,6 +148,8 @@ const VideoStudioPage: React.FC = () => {
   const [isRendering,    setIsRendering]    = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);   // 0–1
   const [renderMsg,      setRenderMsg]      = useState('');
+  const [renderedUrl,    setRenderedUrl]    = useState<string | null>(null); // preview URL
+  const [renderedName,   setRenderedName]   = useState<string>('');
   const renderCancelRef  = useRef(false);
   const renderCanvasRef  = useRef<HTMLCanvasElement>(null);
 
@@ -538,6 +540,9 @@ const VideoStudioPage: React.FC = () => {
     setRenderProgress(0);
     setRenderMsg('Loading media…');
     renderCancelRef.current = false;
+    // Clear previous render preview
+    setRenderedUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+    setRenderedName('');
 
     const W = 1280;
     const H = 720;
@@ -797,17 +802,13 @@ const VideoStudioPage: React.FC = () => {
       }
 
       const url = URL.createObjectURL(finalBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${safeName}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 15000);
-
       const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
-      setRenderMsg(`Done! ${frameCount} frames, ${mb} MB — saved as ${safeName}.webm`);
-      await new Promise(r => setTimeout(r, 4000));
+
+      // Show inline preview — avoids file:// security restriction in Chrome
+      setRenderedUrl(url);
+      setRenderedName(`${safeName}.webm`);
+      setRenderMsg(`Done! ${frameCount} frames, ${mb} MB`);
+      await new Promise(r => setTimeout(r, 2000));
 
     } catch (err: any) {
       console.error('[Renderer]', err);
@@ -1419,6 +1420,46 @@ const VideoStudioPage: React.FC = () => {
               className="shrink-0 bg-red-800 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors">
               Cancel
             </button>
+          </div>
+        )}
+
+        {/* ── Render preview ───────────────────────────────────────────────── */}
+        {renderedUrl && (
+          <div className="shrink-0 bg-slate-950 border-t border-orange-500/30 px-5 py-4">
+            <div className="flex items-start gap-4 max-w-3xl mx-auto">
+              {/* Inline video player — plays from blob URL, no file:// issue */}
+              <div className="flex-1 rounded-xl overflow-hidden bg-black border border-slate-700 shadow-xl"
+                style={{ aspectRatio: '16/9', maxWidth: 480 }}>
+                <video
+                  src={renderedUrl}
+                  controls
+                  autoPlay
+                  className="w-full h-full"
+                  style={{ display: 'block' }}
+                />
+              </div>
+              {/* Actions */}
+              <div className="flex flex-col gap-3 pt-1">
+                <p className="text-sm font-semibold text-green-400 flex items-center gap-1.5">
+                  <Check size={15} /> Render complete
+                </p>
+                <p className="text-xs text-slate-400">{renderedName}</p>
+                <a
+                  href={renderedUrl}
+                  download={renderedName}
+                  className="flex items-center gap-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg px-4 py-2 text-sm font-semibold transition-colors">
+                  <Download size={14} /> Download
+                </a>
+                <button
+                  onClick={() => { URL.revokeObjectURL(renderedUrl); setRenderedUrl(null); }}
+                  className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg px-4 py-2 text-sm transition-colors">
+                  <X size={14} /> Dismiss
+                </button>
+                <p className="text-[10px] text-slate-500 max-w-[160px] leading-relaxed">
+                  If download doesn't play in Chrome, open in Firefox or VLC — Motion JPEG WebM is not supported by Chrome's native player.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
