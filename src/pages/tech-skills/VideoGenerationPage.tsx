@@ -116,7 +116,25 @@ const VideoCard: React.FC<{ job: VideoJob; onReuse: (p: string) => void }> = ({ 
       {expanded && (
         <div className="px-4 pb-4 space-y-3 border-t border-white/10 pt-3">
           {job.status === 'succeeded' && job.video_url && (
-            <video src={job.video_url} controls className="w-full rounded-lg max-h-72 bg-black" />
+            <div className="space-y-2">
+              {/* Thumbnail — hover to play */}
+              <div className="relative rounded-lg overflow-hidden bg-black" style={{ aspectRatio: '16/9' }}>
+                <video
+                  src={job.video_url}
+                  className="w-full h-full object-cover cursor-pointer"
+                  muted playsInline preload="metadata"
+                  onMouseEnter={e => (e.currentTarget as HTMLVideoElement).play()}
+                  onMouseLeave={e => { const v = e.currentTarget as HTMLVideoElement; v.pause(); v.currentTime = 0; }}
+                  onClick={e => {
+                    const v = e.currentTarget as HTMLVideoElement;
+                    if (v.paused) { v.muted = false; v.play(); } else v.pause();
+                  }}
+                />
+                <div className="absolute bottom-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded pointer-events-none">
+                  hover to preview · click to play with sound
+                </div>
+              </div>
+            </div>
           )}
           {job.status === 'failed' && (
             <p className="text-sm text-red-400 bg-red-900/20 rounded-lg px-3 py-2">{job.error_message ?? 'Generation failed.'}</p>
@@ -127,10 +145,24 @@ const VideoCard: React.FC<{ job: VideoJob; onReuse: (p: string) => void }> = ({ 
               <RotateCcw size={12} /> Reuse prompt
             </button>
             {job.video_url && (
-              <a href={job.video_url} download target="_blank" rel="noopener noreferrer"
+              <button onClick={async () => {
+                const safeName = (job.prompt ?? 'video').slice(0, 40).replace(/[^a-zA-Z0-9_\-]/g, '_');
+                try {
+                  const resp = await fetch(job.video_url!);
+                  const blob = await resp.blob();
+                  const blobUrl = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = blobUrl; a.download = `${safeName}.mp4`;
+                  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                  setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+                } catch {
+                  const a = document.createElement('a');
+                  a.href = job.video_url!; a.download = `${safeName}.mp4`; a.click();
+                }
+              }}
                 className="flex items-center gap-1.5 text-xs bg-cyan-700 hover:bg-cyan-600 text-white rounded-full px-3 py-1.5 transition-colors">
-                <Download size={12} /> Download
-              </a>
+                <Download size={12} /> Download .mp4
+              </button>
             )}
           </div>
         </div>
@@ -176,6 +208,7 @@ const VideoGenerationPage: React.FC = () => {
   // ── Save to bucket state ──────────────────────────────────────────────────
   const [isSaving,       setIsSaving]       = useState(false);
   const [savedUrl,       setSavedUrl]       = useState<string | null>(null);
+  const [videoName,      setVideoName]      = useState<string>('');
   const [saveError,      setSaveError]      = useState<string | null>(null);
 
   // ── Dashboard save state ──────────────────────────────────────────────────
@@ -494,6 +527,59 @@ const VideoGenerationPage: React.FC = () => {
   };
 
   // ── Save video to Supabase Storage bucket ────────────────────────────────
+  // ── Download helpers ─────────────────────────────────────────────────────────
+  const getSafeName = () => {
+    const base = videoName.trim() || prompt.trim().slice(0, 40) || 'My_Video';
+    return base.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  };
+
+  const handleDownloadVideo = async () => {
+    const url = savedUrl ?? videoUrl;
+    if (!url) return;
+    const safeName = getSafeName();
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `${safeName}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    } catch {
+      // Fallback to direct link if CORS blocks fetch
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safeName}.mp4`;
+      a.click();
+    }
+  };
+
+  const handleDownloadLastFrame = () => {
+    const videoEl = document.querySelector<HTMLVideoElement>('.generated-video');
+    if (!videoEl) return;
+    const canvas = document.createElement('canvas');
+    canvas.width  = videoEl.videoWidth  || 640;
+    canvas.height = videoEl.videoHeight || 360;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+    const safeName = getSafeName();
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safeName}_last_frame.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }, 'image/png');
+  };
+
   const handleSaveVideo = async () => {
     if (!videoUrl || !user?.id || !activeJob || isSaving) return;
     setIsSaving(true); setSaveError(null);
@@ -1221,8 +1307,25 @@ Return ONLY the improved text. No explanation, no preamble.`
                 </div>
                 {videoUrl && (
                   <div className="space-y-3">
+                    {/* Video name + last frame */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input
+                        type="text"
+                        value={videoName}
+                        onChange={e => setVideoName(e.target.value)}
+                        placeholder={prompt.trim().slice(0, 40) || 'Name your video…'}
+                        className="flex-1 min-w-0 bg-slate-800 border border-slate-600 text-slate-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-green-400 placeholder-slate-500"
+                      />
+                      <button
+                        onClick={handleDownloadLastFrame}
+                        title="Download current frame as image"
+                        className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg px-3 py-2 text-xs font-semibold transition-colors shrink-0 whitespace-nowrap"
+                      >
+                        🖼 Last frame
+                      </button>
+                    </div>
                     <div className="rounded-xl overflow-hidden bg-black border border-green-500/20">
-                      <video src={savedUrl ?? videoUrl} controls autoPlay loop className="w-full max-h-80" />
+                      <video src={savedUrl ?? videoUrl} controls autoPlay loop className="generated-video w-full max-h-80" />
                     </div>
 
                     {/* Save Video to bucket */}
@@ -1260,10 +1363,10 @@ Return ONLY the improved text. No explanation, no preamble.`
                       <Sparkles size={14} /> {lvl <= 1 ? 'Make another video' : 'Generate another'}
                     </button>
                     {(videoUrl || savedUrl) && (
-                      <a href={savedUrl ?? videoUrl ?? ''} download target="_blank" rel="noopener noreferrer"
+                      <button onClick={handleDownloadVideo}
                         className="flex items-center gap-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
-                        <Download size={14} /> {lvl <= 1 ? 'Download' : 'Download video'}
-                      </a>
+                        <Download size={14} /> {lvl <= 1 ? 'Download .mp4' : 'Download video (.mp4)'}
+                      </button>
                     )}
                     {/* Save session to dashboard */}
                     {!dashSaved ? (
