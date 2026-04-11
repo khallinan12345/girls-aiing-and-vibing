@@ -144,6 +144,13 @@ const VideoStudioPage: React.FC = () => {
   const [isExporting,  setIsExporting]  = useState(false);
   const [exportMsg,    setExportMsg]    = useState('');
 
+  // ── Canvas renderer ────────────────────────────────────────────────────────
+  const [isRendering,    setIsRendering]    = useState(false);
+  const [renderProgress, setRenderProgress] = useState(0);   // 0–1
+  const [renderMsg,      setRenderMsg]      = useState('');
+  const renderCancelRef  = useRef(false);
+  const renderCanvasRef  = useRef<HTMLCanvasElement>(null);
+
   // ── Drag state ─────────────────────────────────────────────────────────────
   const [draggingClip, setDraggingClip] = useState<string | null>(null);
   const timelineRef    = useRef<HTMLDivElement>(null);
@@ -463,6 +470,224 @@ const VideoStudioPage: React.FC = () => {
     }
   };
 
+  // ── Canvas-based real-time renderer ──────────────────────────────────────
+  // Renders all timeline tracks (video + audio + voice + text) into a single
+  // .webm file using HTMLCanvasElement + MediaRecorder + Web Audio API.
+  // No server required. Runs in real-time — a 60s timeline takes ~60s to render.
+
+  const handleRender = async () => {
+    if (clips.length === 0) { alert('Add at least one video clip before rendering.'); return; }
+    if (isRendering) return;
+
+    setIsRendering(true);
+    setRenderProgress(0);
+    setRenderMsg('Loading media…');
+    renderCancelRef.current = false;
+
+    const W = 1280;
+    const H = 720;
+    const FPS = 30;
+    const safeName = videoName.trim().replace(/[^a-zA-Z0-9_\-]/g, '_') || 'project';
+
+    try {
+      // ── 1. Pre-load all video clips as HTMLVideoElement ──────────────────────
+      const videoEls: Map<string, HTMLVideoElement> = new Map();
+      for (const clip of clips) {
+        const v = document.createElement('video');
+        v.src = clip.src;
+        v.crossOrigin = 'anonymous';
+        v.preload = 'auto';
+        v.muted = true;
+        await new Promise<void>((res, rej) => {
+          v.onloadeddata = () => res();
+          v.onerror = () => res(); // continue even if one clip fails
+          v.load();
+        });
+        videoEls.set(clip.id, v);
+      }
+
+      // ── 2. Set up canvas ─────────────────────────────────────────────────────
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d')!;
+
+      // ── 3. Set up Web Audio context for mixing ───────────────────────────────
+      const audioCtx = new AudioContext();
+      const dest = audioCtx.createMediaStreamDestination();
+
+      // Music track
+      let musicSource: AudioBufferSourceNode | null = null;
+      let musicStartTime = 0;
+      if (audioTrack) {
+        try {
+          const resp = await fetch(audioTrack.src);
+          const arrayBuf = await resp.arrayBuffer();
+          const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+          const gainNode = audioCtx.createGain();
+          gainNode.gain.value = audioTrack.volume;
+          musicSource = audioCtx.createBufferSource();
+          musicSource.buffer = audioBuf;
+          musicSource.loop = audioTrack.loop;
+          musicSource.connect(gainNode);
+          gainNode.connect(dest);
+          musicStartTime = audioCtx.currentTime;
+          musicSource.start(0);
+        } catch { /* audio load failed, skip */ }
+      }
+
+      // Voiceover segments — schedule each at its timeline position
+      for (const seg of voiceSegs) {
+        try {
+          const resp = await fetch(seg.src);
+          const arrayBuf = await resp.arrayBuffer();
+          const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+          const gainNode = audioCtx.createGain();
+          gainNode.gain.value = 0.9;
+          const src = audioCtx.createBufferSource();
+          src.buffer = audioBuf;
+          src.connect(gainNode);
+          gainNode.connect(dest);
+          // Schedule to start at seg.timelineStart seconds from now
+          src.start(audioCtx.currentTime + seg.timelineStart);
+        } catch { /* skip failed segments */ }
+      }
+
+      // ── 4. Combine canvas + audio into MediaRecorder ─────────────────────────
+      const canvasStream = canvas.captureStream(FPS);
+      const audioStream = dest.stream;
+      const combined = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioStream.getAudioTracks(),
+      ]);
+
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+        ? 'video/webm;codecs=vp9,opus'
+        : MediaRecorder.isTypeSupported('video/webm')
+        ? 'video/webm'
+        : 'video/mp4';
+
+      const recorder = new MediaRecorder(combined, {
+        mimeType,
+        videoBitsPerSecond: 4_000_000, // 4 Mbps — good quality
+      });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+      recorder.start(100); // collect chunks every 100ms
+
+      // ── 5. Frame-by-frame render loop ────────────────────────────────────────
+      setRenderMsg('Rendering…');
+      const frameInterval = 1 / FPS;
+      let renderTime = 0;
+
+      while (renderTime <= totalDuration && !renderCancelRef.current) {
+        // Black background
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, W, H);
+
+        // Draw active video clip
+        const activeClip = clips.find(c =>
+          renderTime >= c.timelineStart &&
+          renderTime < c.timelineStart + (c.trimEnd - c.trimStart)
+        );
+
+        if (activeClip) {
+          const videoEl = videoEls.get(activeClip.id);
+          if (videoEl) {
+            const clipPos = renderTime - activeClip.timelineStart + activeClip.trimStart;
+            // Seek video element to correct position
+            if (Math.abs(videoEl.currentTime - clipPos) > frameInterval * 2) {
+              videoEl.currentTime = clipPos;
+              // Wait for seek
+              await new Promise<void>(res => {
+                const onSeeked = () => { videoEl.removeEventListener('seeked', onSeeked); res(); };
+                videoEl.addEventListener('seeked', onSeeked);
+                setTimeout(res, 200); // timeout fallback
+              });
+            }
+            // Draw video frame — letterbox to fill 16:9
+            const vw = videoEl.videoWidth || W;
+            const vh = videoEl.videoHeight || H;
+            const scale = Math.min(W / vw, H / vh);
+            const dw = vw * scale;
+            const dh = vh * scale;
+            const dx = (W - dw) / 2;
+            const dy = (H - dh) / 2;
+            try { ctx.drawImage(videoEl, dx, dy, dw, dh); } catch {}
+          }
+        }
+
+        // Draw text overlays
+        const activeOverlays = overlays.filter(o =>
+          renderTime >= o.timelineStart && renderTime < o.timelineStart + o.duration
+        );
+        for (const o of activeOverlays) {
+          ctx.save();
+          ctx.font = `${o.bold ? 'bold ' : ''}${o.fontSize}px 'Space Grotesk', sans-serif`;
+          ctx.fillStyle = o.color;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          // Text shadow
+          ctx.shadowColor = 'rgba(0,0,0,0.9)';
+          ctx.shadowBlur = 8;
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+          const px = (o.x / 100) * W;
+          const py = (o.y / 100) * H;
+          ctx.fillText(o.text, px, py);
+          ctx.restore();
+        }
+
+        // Advance time
+        renderTime += frameInterval;
+        setRenderProgress(Math.min(renderTime / totalDuration, 1));
+        setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}…`);
+
+        // Yield to browser for one frame so UI stays responsive
+        await new Promise(res => setTimeout(res, 0));
+      }
+
+      if (renderCancelRef.current) {
+        recorder.stop();
+        audioCtx.close();
+        setRenderMsg('Cancelled');
+        await new Promise(r => setTimeout(r, 1000));
+        return;
+      }
+
+      // ── 6. Stop recording and download ────────────────────────────────────────
+      setRenderMsg('Finalising…');
+      await new Promise<void>(res => {
+        recorder.onstop = () => res();
+        recorder.stop();
+      });
+      audioCtx.close();
+
+      const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      const finalBlob = new Blob(chunks, { type: mimeType });
+      const url = URL.createObjectURL(finalBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safeName}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+      setRenderMsg(`Done! Saved as ${safeName}.${ext}`);
+      await new Promise(r => setTimeout(r, 3000));
+
+    } catch (err: any) {
+      console.error('[Renderer]', err);
+      setRenderMsg('Render failed: ' + (err.message ?? 'unknown error'));
+      await new Promise(r => setTimeout(r, 3000));
+    } finally {
+      setIsRendering(false);
+      setRenderProgress(0);
+      setRenderMsg('');
+    }
+  };
+
   // ── Save project to Supabase storage ──────────────────────────────────────
   const handleSaveProject = async () => {
     if (!user?.id) return;
@@ -660,12 +885,27 @@ const VideoStudioPage: React.FC = () => {
                 ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {saveProjectMsg}</>
                 : <><Save size={13} /> Save</>}
             </button>
-            {/* Export */}
-            <button onClick={handleExport} disabled={clips.length === 0 || isExporting}
-              className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors shrink-0">
+            {/* Render & Export */}
+            <button onClick={handleExport} disabled={clips.length === 0 || isExporting || isRendering}
+              className="flex items-center gap-1.5 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors shrink-0"
+              title="Download each track as a separate file">
               {isExporting
                 ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {exportMsg}</>
-                : <><Download size={13} /> Export</>}
+                : <><Download size={13} /> Tracks</>}
+            </button>
+            <button
+              onClick={isRendering ? () => { renderCancelRef.current = true; } : handleRender}
+              disabled={clips.length === 0 || isExporting}
+              title="Render all tracks into one merged video file"
+              className={classNames(
+                'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors shrink-0',
+                isRendering
+                  ? 'bg-red-700 hover:bg-red-600 text-white'
+                  : 'bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed text-white'
+              )}>
+              {isRendering
+                ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Cancel</>
+                : <><Film size={13} /> Render .webm</>}
             </button>
           </div>
         </div>
@@ -1024,6 +1264,34 @@ const VideoStudioPage: React.FC = () => {
         </div>
 
         </div>}
+
+        {/* ── Render progress overlay ─────────────────────────────────────── */}
+        {isRendering && (
+          <div className="shrink-0 bg-slate-900 border-t border-orange-500/40 px-5 py-3 flex items-center gap-4">
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-semibold text-orange-400 flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" /> {renderMsg}
+                </span>
+                <span className="text-xs text-slate-400 mono">{Math.round(renderProgress * 100)}%</span>
+              </div>
+              <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                <div
+                  className="h-2 bg-gradient-to-r from-orange-500 to-pink-500 rounded-full transition-all"
+                  style={{ width: `${renderProgress * 100}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">
+                Keep this tab open. Rendering in real-time — one second of video per second elapsed.
+              </p>
+            </div>
+            <button
+              onClick={() => { renderCancelRef.current = true; }}
+              className="shrink-0 bg-red-800 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors">
+              Cancel
+            </button>
+          </div>
+        )}
 
         {/* ── Timeline ────────────────────────────────────────────────────── */}
         {studioView === 'edit' && (
