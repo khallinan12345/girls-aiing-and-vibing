@@ -470,15 +470,15 @@ const AIPlaygroundPage: React.FC = () => {
               </div>
               <div>
                 <p className="text-sm font-semibold text-gray-800">{activeChat?.title ?? 'AI Playground'}</p>
-                <p className="text-xs text-gray-400">Claude Haiku · Free access</p>
+
               </div>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => navigate('/')}
-                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-purple-600 px-3 py-1.5 rounded-lg hover:bg-purple-50 transition-colors border border-gray-200 hover:border-purple-200"
+                className="flex items-center gap-1.5 text-sm font-bold text-purple-700 px-3 py-1.5 rounded-lg bg-purple-100 hover:bg-purple-200 transition-colors border border-purple-200"
               >
-                <Home size={13} />Home
+                <Home size={15} />Home
               </button>
               {/* Voice output toggle */}
               <button
@@ -510,7 +510,7 @@ const AIPlaygroundPage: React.FC = () => {
                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center mb-4 shadow-lg">
                   <Bot size={28} className="text-white" />
                 </div>
-                <h2 className="text-xl font-bold text-gray-800 mb-2">AI Playground</h2>
+                <h2 className="text-2xl font-bold text-gray-800 mb-2">AI Playground</h2>
                 <p className="text-gray-500 text-sm max-w-sm leading-relaxed">
                   Ask anything. Code and documents automatically open in a side panel.
                 </p>
@@ -594,9 +594,11 @@ const AIPlaygroundPage: React.FC = () => {
                 placeholder="Message Claude..." rows={1} disabled={sending || !modelLoaded}
                 className="flex-1 resize-none outline-none text-base text-gray-800 placeholder-gray-400 bg-transparent min-h-[24px] max-h-[200px] leading-6" />
               <span className="flex-shrink-0 text-xs mb-0.5 pr-1" style={{
-                color: playgroundModel.includes('sonnet') ? '#7c3aed' : '#9ca3af',
-                fontWeight: playgroundModel.includes('sonnet') ? 600 : 400,
-              }}>
+                color: '#4b5563',
+                fontWeight: 500,
+              }}
+                title={`model: ${playgroundModel} | loaded: ${modelLoaded}`}
+              >
                 {modelLoaded ? getModelDisplayName(playgroundModel) : '…'}
               </span>
               {/* Voice input button */}
