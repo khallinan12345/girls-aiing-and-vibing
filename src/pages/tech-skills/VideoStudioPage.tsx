@@ -475,6 +475,61 @@ const VideoStudioPage: React.FC = () => {
   // .webm file using HTMLCanvasElement + MediaRecorder + Web Audio API.
   // No server required. Runs in real-time — a 60s timeline takes ~60s to render.
 
+  // Helper: draw one frame at renderTime onto ctx
+  const drawFrame = async (
+    ctx: CanvasRenderingContext2D,
+    W: number, H: number,
+    renderTime: number,
+    videoEls: Map<string, HTMLVideoElement>,
+    frameInterval: number
+  ) => {
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, W, H);
+
+    const activeClip = clips.find(c =>
+      renderTime >= c.timelineStart &&
+      renderTime < c.timelineStart + (c.trimEnd - c.trimStart)
+    );
+
+    if (activeClip) {
+      const videoEl = videoEls.get(activeClip.id);
+      if (videoEl) {
+        const clipPos = Math.min(
+          renderTime - activeClip.timelineStart + activeClip.trimStart,
+          activeClip.trimEnd - 0.001
+        );
+        if (Math.abs(videoEl.currentTime - clipPos) > frameInterval * 1.5) {
+          videoEl.currentTime = clipPos;
+          await new Promise<void>(res => {
+            const t = setTimeout(res, 300);
+            videoEl.addEventListener('seeked', () => { clearTimeout(t); res(); }, { once: true });
+          });
+        }
+        try {
+          const vw = videoEl.videoWidth || W;
+          const vh = videoEl.videoHeight || H;
+          const scale = Math.min(W / vw, H / vh);
+          ctx.drawImage(videoEl, (W - vw * scale) / 2, (H - vh * scale) / 2, vw * scale, vh * scale);
+        } catch {}
+      }
+    }
+
+    // Text overlays
+    overlays.filter(o =>
+      renderTime >= o.timelineStart && renderTime < o.timelineStart + o.duration
+    ).forEach(o => {
+      ctx.save();
+      ctx.font = `${o.bold ? 'bold ' : ''}${o.fontSize}px sans-serif`;
+      ctx.fillStyle = o.color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.9)';
+      ctx.shadowBlur = 8;
+      ctx.fillText(o.text, (o.x / 100) * W, (o.y / 100) * H);
+      ctx.restore();
+    });
+  };
+
   const handleRender = async () => {
     if (clips.length === 0) { alert('Add at least one video clip before rendering.'); return; }
     if (isRendering) return;
@@ -486,11 +541,13 @@ const VideoStudioPage: React.FC = () => {
 
     const W = 1280;
     const H = 720;
-    const FPS = 30;
-    const safeName = videoName.trim().replace(/[^a-zA-Z0-9_\-]/g, '_') || 'project';
+    const FPS = 25;  // 25fps is more reliable for MediaRecorder
+    const MS_PER_FRAME = 1000 / FPS;
+    const frameInterval = 1 / FPS;
+    const safeName = videoName.trim().replace(/[^a-zA-Z0-9_-]/g, '_') || 'project';
 
     try {
-      // ── 1. Pre-load all video clips as HTMLVideoElement ──────────────────────
+      // ── 1. Pre-load all video clips ──────────────────────────────────────────
       const videoEls: Map<string, HTMLVideoElement> = new Map();
       for (const clip of clips) {
         const v = document.createElement('video');
@@ -498,153 +555,110 @@ const VideoStudioPage: React.FC = () => {
         v.crossOrigin = 'anonymous';
         v.preload = 'auto';
         v.muted = true;
-        await new Promise<void>((res, rej) => {
+        await new Promise<void>(res => {
           v.onloadeddata = () => res();
-          v.onerror = () => res(); // continue even if one clip fails
+          v.onerror = () => res();
           v.load();
         });
         videoEls.set(clip.id, v);
       }
 
-      // ── 2. Set up canvas ─────────────────────────────────────────────────────
+      // ── 2. Canvas ────────────────────────────────────────────────────────────
       const canvas = document.createElement('canvas');
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext('2d')!;
 
-      // ── 3. Set up Web Audio context for mixing ───────────────────────────────
+      // Draw a first frame before starting recorder so stream is not empty
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+      await drawFrame(ctx, W, H, 0, videoEls, frameInterval);
+
+      // ── 3. Web Audio ─────────────────────────────────────────────────────────
       const audioCtx = new AudioContext();
       const dest = audioCtx.createMediaStreamDestination();
 
-      // Music track
-      let musicSource: AudioBufferSourceNode | null = null;
-      let musicStartTime = 0;
       if (audioTrack) {
         try {
-          const resp = await fetch(audioTrack.src);
-          const arrayBuf = await resp.arrayBuffer();
-          const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
-          const gainNode = audioCtx.createGain();
-          gainNode.gain.value = audioTrack.volume;
-          musicSource = audioCtx.createBufferSource();
-          musicSource.buffer = audioBuf;
-          musicSource.loop = audioTrack.loop;
-          musicSource.connect(gainNode);
-          gainNode.connect(dest);
-          musicStartTime = audioCtx.currentTime;
-          musicSource.start(0);
-        } catch { /* audio load failed, skip */ }
+          const buf = await (await fetch(audioTrack.src)).arrayBuffer();
+          const decoded = await audioCtx.decodeAudioData(buf);
+          const gain = audioCtx.createGain();
+          gain.gain.value = audioTrack.volume;
+          const src = audioCtx.createBufferSource();
+          src.buffer = decoded;
+          src.loop = audioTrack.loop;
+          src.connect(gain);
+          gain.connect(dest);
+          src.start(0);
+        } catch {}
       }
 
-      // Voiceover segments — schedule each at its timeline position
       for (const seg of voiceSegs) {
         try {
-          const resp = await fetch(seg.src);
-          const arrayBuf = await resp.arrayBuffer();
-          const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
-          const gainNode = audioCtx.createGain();
-          gainNode.gain.value = 0.9;
+          const buf = await (await fetch(seg.src)).arrayBuffer();
+          const decoded = await audioCtx.decodeAudioData(buf);
+          const gain = audioCtx.createGain();
+          gain.gain.value = 0.9;
           const src = audioCtx.createBufferSource();
-          src.buffer = audioBuf;
-          src.connect(gainNode);
-          gainNode.connect(dest);
-          // Schedule to start at seg.timelineStart seconds from now
+          src.buffer = decoded;
+          src.connect(gain);
+          gain.connect(dest);
           src.start(audioCtx.currentTime + seg.timelineStart);
-        } catch { /* skip failed segments */ }
+        } catch {}
       }
 
-      // ── 4. Combine canvas + audio into MediaRecorder ─────────────────────────
-      const canvasStream = canvas.captureStream(FPS);
-      const audioStream = dest.stream;
+      // ── 4. MediaRecorder ─────────────────────────────────────────────────────
+      // Use captureStream(0) — we push frames manually via requestVideoFrameCallback
+      // which ensures MediaRecorder sees every frame we draw.
+      const canvasStream = canvas.captureStream(0);
+      const videoTrack = canvasStream.getVideoTracks()[0] as any;
+
       const combined = new MediaStream([
         ...canvasStream.getVideoTracks(),
-        ...audioStream.getAudioTracks(),
+        ...dest.stream.getAudioTracks(),
       ]);
 
       const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
         ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm')
-        ? 'video/webm'
-        : 'video/mp4';
+        : 'video/webm';
 
       const recorder = new MediaRecorder(combined, {
         mimeType,
-        videoBitsPerSecond: 4_000_000, // 4 Mbps — good quality
+        videoBitsPerSecond: 4_000_000,
       });
       const chunks: Blob[] = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.start(200);
 
-      recorder.start(100); // collect chunks every 100ms
-
-      // ── 5. Frame-by-frame render loop ────────────────────────────────────────
+      // ── 5. Frame loop — tick at real wall-clock speed ─────────────────────────
+      // We advance renderTime by frameInterval each tick and call
+      // requestVideoFrameCallback (or fallback setTimeout) to pace correctly.
+      // captureStream(0) + requestFrame() guarantees each drawn frame is captured.
       setRenderMsg('Rendering…');
-      const frameInterval = 1 / FPS;
       let renderTime = 0;
 
+      const waitFrame = () => new Promise<void>(res => {
+        // requestAnimationFrame gives us a real paint callback
+        requestAnimationFrame(() => res());
+      });
+
       while (renderTime <= totalDuration && !renderCancelRef.current) {
-        // Black background
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, W, H);
+        await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
 
-        // Draw active video clip
-        const activeClip = clips.find(c =>
-          renderTime >= c.timelineStart &&
-          renderTime < c.timelineStart + (c.trimEnd - c.trimStart)
-        );
-
-        if (activeClip) {
-          const videoEl = videoEls.get(activeClip.id);
-          if (videoEl) {
-            const clipPos = renderTime - activeClip.timelineStart + activeClip.trimStart;
-            // Seek video element to correct position
-            if (Math.abs(videoEl.currentTime - clipPos) > frameInterval * 2) {
-              videoEl.currentTime = clipPos;
-              // Wait for seek
-              await new Promise<void>(res => {
-                const onSeeked = () => { videoEl.removeEventListener('seeked', onSeeked); res(); };
-                videoEl.addEventListener('seeked', onSeeked);
-                setTimeout(res, 200); // timeout fallback
-              });
-            }
-            // Draw video frame — letterbox to fill 16:9
-            const vw = videoEl.videoWidth || W;
-            const vh = videoEl.videoHeight || H;
-            const scale = Math.min(W / vw, H / vh);
-            const dw = vw * scale;
-            const dh = vh * scale;
-            const dx = (W - dw) / 2;
-            const dy = (H - dh) / 2;
-            try { ctx.drawImage(videoEl, dx, dy, dw, dh); } catch {}
-          }
+        // Tell the canvas stream to capture this frame now
+        if (videoTrack && typeof videoTrack.requestFrame === 'function') {
+          videoTrack.requestFrame();
         }
 
-        // Draw text overlays
-        const activeOverlays = overlays.filter(o =>
-          renderTime >= o.timelineStart && renderTime < o.timelineStart + o.duration
-        );
-        for (const o of activeOverlays) {
-          ctx.save();
-          ctx.font = `${o.bold ? 'bold ' : ''}${o.fontSize}px 'Space Grotesk', sans-serif`;
-          ctx.fillStyle = o.color;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          // Text shadow
-          ctx.shadowColor = 'rgba(0,0,0,0.9)';
-          ctx.shadowBlur = 8;
-          ctx.shadowOffsetX = 2;
-          ctx.shadowOffsetY = 2;
-          const px = (o.x / 100) * W;
-          const py = (o.y / 100) * H;
-          ctx.fillText(o.text, px, py);
-          ctx.restore();
-        }
-
-        // Advance time
         renderTime += frameInterval;
         setRenderProgress(Math.min(renderTime / totalDuration, 1));
-        setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}…`);
+        // Update UI every ~10 frames to avoid hammering React
+        if (Math.round(renderTime * FPS) % 10 === 0) {
+          setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}…`);
+        }
 
-        // Yield to browser for one frame so UI stays responsive
-        await new Promise(res => setTimeout(res, 0));
+        // Wait for next animation frame — this paces the loop AND
+        // lets the browser flush the canvas to the MediaRecorder
+        await waitFrame();
       }
 
       if (renderCancelRef.current) {
@@ -655,32 +669,38 @@ const VideoStudioPage: React.FC = () => {
         return;
       }
 
-      // ── 6. Stop recording and download ────────────────────────────────────────
+      // ── 6. Finalise and download ──────────────────────────────────────────────
       setRenderMsg('Finalising…');
+      // Give MediaRecorder a moment to flush remaining data
+      await new Promise(r => setTimeout(r, 500));
       await new Promise<void>(res => {
-        recorder.onstop = () => res();
+        recorder.addEventListener('stop', () => res(), { once: true });
         recorder.stop();
       });
       audioCtx.close();
 
-      const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      if (chunks.length === 0) {
+        throw new Error('No video data was captured. Your browser may not support this feature. Try Chrome or Edge.');
+      }
+
       const finalBlob = new Blob(chunks, { type: mimeType });
       const url = URL.createObjectURL(finalBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${safeName}.${ext}`;
+      a.download = `${safeName}.webm`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
 
-      setRenderMsg(`Done! Saved as ${safeName}.${ext}`);
-      await new Promise(r => setTimeout(r, 3000));
+      const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
+      setRenderMsg(`Done! ${mb} MB — saved as ${safeName}.webm`);
+      await new Promise(r => setTimeout(r, 4000));
 
     } catch (err: any) {
       console.error('[Renderer]', err);
       setRenderMsg('Render failed: ' + (err.message ?? 'unknown error'));
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 4000));
     } finally {
       setIsRendering(false);
       setRenderProgress(0);
@@ -1456,10 +1476,44 @@ const VideoStudioPage: React.FC = () => {
                     <div className="playhead-line" style={{ left: playhead * PX_PER_SEC }} />
                     {overlays.map(o => (
                       <div key={o.id}
-                        className="absolute top-1 bottom-1 rounded-md bg-yellow-800/60 border border-yellow-600/40 flex items-center px-2 gap-1"
+                        onClick={e => { e.stopPropagation(); setSelectedOverlay(o.id === selectedOverlay ? null : o.id); }}
+                        className={classNames(
+                          'absolute top-1 bottom-1 rounded-md flex items-center px-2 gap-1 select-none',
+                          selectedOverlay === o.id
+                            ? 'bg-yellow-600/80 border-2 border-yellow-300'
+                            : 'bg-yellow-800/60 border border-yellow-600/40'
+                        )}
                         style={{ left: o.timelineStart * PX_PER_SEC, width: Math.max(o.duration * PX_PER_SEC, 40) }}>
                         <Type size={10} className="text-yellow-400 shrink-0" />
-                        <span className="text-xs text-yellow-300 truncate">{o.text}</span>
+                        <span className="text-xs text-yellow-300 truncate flex-1">{o.text}</span>
+                        <button
+                          onClick={e => { e.stopPropagation(); setOverlays(prev => prev.filter(x => x.id !== o.id)); }}
+                          className="shrink-0 text-yellow-500 hover:text-red-300 transition-colors">
+                          <X size={10} />
+                        </button>
+                        {/* Drag handle — right edge to resize duration */}
+                        <div
+                          className="absolute top-0 right-0 bottom-0 w-3 cursor-ew-resize flex items-center justify-center hover:bg-yellow-400/30 rounded-r-md"
+                          title="Drag to change duration"
+                          onMouseDown={e => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            const startX = e.clientX;
+                            const startDur = o.duration;
+                            const onMove = (ev: MouseEvent) => {
+                              const deltaSec = (ev.clientX - startX) / PX_PER_SEC;
+                              const newDur = Math.max(0.5, startDur + deltaSec);
+                              setOverlays(prev => prev.map(x => x.id === o.id ? { ...x, duration: newDur } : x));
+                            };
+                            const onUp = () => {
+                              window.removeEventListener('mousemove', onMove);
+                              window.removeEventListener('mouseup', onUp);
+                            };
+                            window.addEventListener('mousemove', onMove);
+                            window.addEventListener('mouseup', onUp);
+                          }}>
+                          <GripHorizontal size={8} className="text-yellow-500 rotate-90" />
+                        </div>
                       </div>
                     ))}
                   </div>
