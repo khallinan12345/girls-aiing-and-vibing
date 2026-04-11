@@ -167,6 +167,7 @@ const AIPlaygroundPage: React.FC = () => {
   const [attachment, setAttachment] = useState<{ name: string; content: string; type: string } | null>(null);
   const [artifact, setArtifact] = useState<ArtifactPanel | null>(null);
   const [playgroundModel, setPlaygroundModel] = useState<string>('claude-haiku-4-5-20251001');
+  const [modelLoaded, setModelLoaded] = useState(false); // true once profile fetch resolves
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -190,11 +191,22 @@ const AIPlaygroundPage: React.FC = () => {
     selectedVoice,
   } = useVoice(isAfrica);
 
-  // Fetch continent to set correct voice default
+  // Fetch both continent + ai_playground_model in one query to avoid race conditions.
+  // playgroundModel must be set before the first message is sent.
   useEffect(() => {
     if (!user?.id) return;
-    supabase.from('profiles').select('continent').eq('id', user.id).single()
-      .then(({ data }) => setContinent(data?.continent ?? null));
+    supabase
+      .from('profiles')
+      .select('continent, ai_playground_model')
+      .eq('id', user.id)
+      .single()
+      .then(({ data }) => {
+        if (data?.continent) setContinent(data.continent);
+        setPlaygroundModel(data?.ai_playground_model || 'claude-haiku-4-5-20251001');
+        setModelLoaded(true);
+        console.log('[Playground] model loaded from profile:', data?.ai_playground_model ?? 'haiku (default)');
+      })
+      .catch(() => setModelLoaded(true)); // on error, allow sending with default
   }, [user?.id]);
 
   // Cancel speech when switching chats
@@ -223,17 +235,7 @@ const AIPlaygroundPage: React.FC = () => {
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [userInput]);
-  useEffect(() => {
-    if (!user?.id) return;
-    supabase
-      .from('profiles')
-      .select('ai_playground_model')
-      .eq('id', user.id)
-      .single()
-      .then(({ data }) => {
-        if (data?.ai_playground_model) setPlaygroundModel(data.ai_playground_model);
-      });
-  }, [user?.id]);
+
 
   const handleNewChat = () => { setActiveChatId(null); setUserInput(''); setAttachment(null); setArtifact(null); };
 
@@ -584,7 +586,7 @@ const AIPlaygroundPage: React.FC = () => {
               <button onClick={() => fileInputRef.current?.click()} className="flex-shrink-0 p-1 text-gray-400 hover:text-purple-600 transition-colors mb-0.5" title="Attach file"><Paperclip size={17} /></button>
               <input ref={fileInputRef} type="file" onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css" />
               <textarea ref={textareaRef} value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={handleKeyDown}
-                placeholder="Message Claude..." rows={1} disabled={sending}
+                placeholder="Message Claude..." rows={1} disabled={sending || !modelLoaded}
                 className="flex-1 resize-none outline-none text-base text-gray-800 placeholder-gray-400 bg-transparent min-h-[24px] max-h-[200px] leading-6" />
               <span className="flex-shrink-0 text-xs text-gray-400 mb-0.5 pr-1">{getModelDisplayName(playgroundModel)}</span>
               {/* Voice input button */}
@@ -600,7 +602,7 @@ const AIPlaygroundPage: React.FC = () => {
               >
                 {isListening ? <MicOff size={13} /> : <Mic size={13} />}
               </button>
-              <button onClick={handleSend} disabled={(!userInput.trim() && !attachment) || sending}
+              <button onClick={handleSend} disabled={(!userInput.trim() && !attachment) || sending || !modelLoaded}
                 className="flex-shrink-0 w-8 h-8 rounded-xl bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-white disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity mb-0.5">
                 {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
               </button>
