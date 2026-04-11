@@ -209,6 +209,7 @@ const VideoGenerationPage: React.FC = () => {
   const [isSaving,       setIsSaving]       = useState(false);
   const [savedUrl,       setSavedUrl]       = useState<string | null>(null);
   const [videoName,      setVideoName]      = useState<string>('');
+  const [savedThumbnails, setSavedThumbnails] = useState<{id:string; thumbnailUrl:string; savedVideoUrl:string; prompt:string; savedAt:string}[]>([]);
   const [saveError,      setSaveError]      = useState<string | null>(null);
 
   // ── Dashboard save state ──────────────────────────────────────────────────
@@ -363,6 +364,15 @@ const VideoGenerationPage: React.FC = () => {
       .order('created_at', { ascending: false })
       .limit(20);
     setHistory((data ?? []) as VideoJob[]);
+    // Load saved thumbnails (videos that have been saved to storage)
+    const saved = (data ?? []).filter((d: any) => d.thumbnail_url && d.saved_video_url);
+    setSavedThumbnails(saved.map((d: any) => ({
+      id: d.id,
+      thumbnailUrl: d.thumbnail_url,
+      savedVideoUrl: d.saved_video_url,
+      prompt: d.prompt ?? '',
+      savedAt: d.saved_at ?? d.created_at,
+    })));
     setLoadingHist(false);
   }, [user?.id]);
 
@@ -580,6 +590,19 @@ const VideoGenerationPage: React.FC = () => {
     }, 'image/png');
   };
 
+  // Capture a thumbnail from the generated video element
+  const captureThumbnailBlob = (): Promise<Blob | null> => new Promise(resolve => {
+    const videoEl = document.querySelector<HTMLVideoElement>('.generated-video');
+    if (!videoEl) return resolve(null);
+    const canvas = document.createElement('canvas');
+    canvas.width  = videoEl.videoWidth  || 640;
+    canvas.height = videoEl.videoHeight || 360;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return resolve(null);
+    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.85);
+  });
+
   const handleSaveVideo = async () => {
     if (!videoUrl || !user?.id || !activeJob || isSaving) return;
     setIsSaving(true); setSaveError(null);
@@ -597,6 +620,22 @@ const VideoGenerationPage: React.FC = () => {
 
       if (uploadError) throw uploadError;
 
+      // Capture and upload thumbnail
+      let thumbnailUrl: string | null = null;
+      const thumbBlob = await captureThumbnailBlob();
+      if (thumbBlob) {
+        const thumbPath = `${user.id}/${activeJob.id}_thumb.jpg`;
+        const { error: thumbErr } = await supabase.storage
+          .from('ai-videos')
+          .upload(thumbPath, thumbBlob, { contentType: 'image/jpeg', upsert: true });
+        if (!thumbErr) {
+          const { data: thumbSigned } = await supabase.storage
+            .from('ai-videos')
+            .createSignedUrl(thumbPath, 60 * 60 * 24 * 365 * 10);
+          thumbnailUrl = thumbSigned?.signedUrl ?? null;
+        }
+      }
+
       // Get the permanent signed URL (valid for 10 years)
       const { data: signed } = await supabase.storage
         .from('ai-videos')
@@ -604,10 +643,14 @@ const VideoGenerationPage: React.FC = () => {
 
       const permanentUrl = signed?.signedUrl ?? null;
 
-      // Update the DB row with the saved URL
+      // Update the DB row with the saved URL and thumbnail
       await supabase
         .from('video_generations')
-        .update({ saved_video_url: permanentUrl, saved_at: new Date().toISOString() })
+        .update({
+          saved_video_url: permanentUrl,
+          thumbnail_url:   thumbnailUrl,
+          saved_at:        new Date().toISOString(),
+        })
         .eq('id', activeJob.id);
 
       setSavedUrl(permanentUrl);
@@ -1307,22 +1350,18 @@ Return ONLY the improved text. No explanation, no preamble.`
                 </div>
                 {videoUrl && (
                   <div className="space-y-3">
-                    {/* Video name + last frame */}
-                    <div className="flex items-center gap-2 flex-wrap">
+                    {/* Video title */}
+                    <div className="space-y-1">
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                        Video Title
+                      </label>
                       <input
                         type="text"
                         value={videoName}
                         onChange={e => setVideoName(e.target.value)}
-                        placeholder={prompt.trim().slice(0, 40) || 'Name your video…'}
-                        className="flex-1 min-w-0 bg-slate-800 border border-slate-600 text-slate-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-green-400 placeholder-slate-500"
+                        placeholder={prompt.trim().slice(0, 50) || 'Enter a title for your video…'}
+                        className="w-full bg-slate-800 border border-slate-600 text-slate-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-green-400 placeholder-slate-500"
                       />
-                      <button
-                        onClick={handleDownloadLastFrame}
-                        title="Download current frame as image"
-                        className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg px-3 py-2 text-xs font-semibold transition-colors shrink-0 whitespace-nowrap"
-                      >
-                        🖼 Last frame
-                      </button>
                     </div>
                     <div className="rounded-xl overflow-hidden bg-black border border-green-500/20">
                       <video src={savedUrl ?? videoUrl} controls autoPlay loop className="generated-video w-full max-h-80" />
@@ -1363,10 +1402,16 @@ Return ONLY the improved text. No explanation, no preamble.`
                       <Sparkles size={14} /> {lvl <= 1 ? 'Make another video' : 'Generate another'}
                     </button>
                     {(videoUrl || savedUrl) && (
-                      <button onClick={handleDownloadVideo}
-                        className="flex items-center gap-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
-                        <Download size={14} /> {lvl <= 1 ? 'Download .mp4' : 'Download video (.mp4)'}
-                      </button>
+                      <div className="flex gap-2 flex-wrap">
+                        <button onClick={handleDownloadVideo}
+                          className="flex items-center gap-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
+                          <Download size={14} /> {lvl <= 1 ? 'Download .mp4' : 'Download video (.mp4)'}
+                        </button>
+                        <button onClick={handleDownloadLastFrame}
+                          className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-full px-4 py-2 text-sm font-medium transition-colors">
+                          <Download size={14} /> Download Last Frame
+                        </button>
+                      </div>
                     )}
                     {/* Save session to dashboard */}
                     {!dashSaved ? (
@@ -1399,6 +1444,45 @@ Return ONLY the improved text. No explanation, no preamble.`
                   : <><Film size={20} /> {uiText.generateBtn}</>}
               </button>
             )}
+          </div>
+        )}
+
+        {/* ── Saved video thumbnails ────────────────────────────────────────── */}
+        {view === 'generate' && savedThumbnails.length > 0 && (
+          <div className="space-y-3 mt-2">
+            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+              <Film size={14} /> My Saved Videos
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {savedThumbnails.map(t => (
+                <div key={t.id} className="group relative rounded-xl overflow-hidden bg-slate-900 border border-slate-700/50 cursor-pointer"
+                  onClick={() => window.open(t.savedVideoUrl, '_blank')}
+                  title={t.prompt}>
+                  <div className="relative" style={{ aspectRatio: '16/9' }}>
+                    <img
+                      src={t.thumbnailUrl}
+                      alt={t.prompt}
+                      className="w-full h-full object-cover"
+                      onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                    />
+                    {/* Play overlay */}
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-white/0 group-hover:bg-white/20 flex items-center justify-center transition-all">
+                        <svg className="text-white opacity-0 group-hover:opacity-100 transition-opacity" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M8 5v14l11-7z"/>
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="px-2 py-1.5">
+                    <p className="text-[11px] text-slate-300 truncate">{t.prompt.slice(0, 50)}</p>
+                    <p className="text-[10px] text-slate-500">
+                      {new Date(t.savedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
