@@ -141,9 +141,6 @@ const VideoStudioPage: React.FC = () => {
   const recTimerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Export ─────────────────────────────────────────────────────────────────
-  const [isExporting,  setIsExporting]  = useState(false);
-  const [exportMsg,    setExportMsg]    = useState('');
-
   // ── Canvas renderer ────────────────────────────────────────────────────────
   const [isRendering,    setIsRendering]    = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);   // 0–1
@@ -416,63 +413,7 @@ const VideoStudioPage: React.FC = () => {
     deleteClip(selectedClip);
   };
 
-  // ── Export: download each track as a separate named file ──────────────────
-  const handleExport = async () => {
-    if (clips.length === 0) return;
-    setIsExporting(true);
-    const safeName = videoName.trim().replace(/[^a-zA-Z0-9_\-]/g, '_') || 'project';
-    try {
-      // Download video clips
-      setExportMsg('Downloading video clips…');
-      for (let i = 0; i < clips.length; i++) {
-        const clip = clips[i];
-        const label = clips.length > 1 ? `${safeName}_clip${i + 1}` : `${safeName}`;
-        try {
-          const resp = await fetch(clip.src);
-          const blob = await resp.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url; a.download = `${label}.mp4`;
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 5000);
-        } catch {
-          const a = document.createElement('a');
-          a.href = clip.src; a.download = `${label}.mp4`; a.click();
-        }
-        await new Promise(r => setTimeout(r, 600));
-      }
-      // Download audio track
-      if (audioTrack) {
-        setExportMsg('Downloading music track…');
-        await new Promise(r => setTimeout(r, 300));
-        const a = document.createElement('a');
-        a.href = audioTrack.src;
-        a.download = `${safeName}_music.webm`;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        await new Promise(r => setTimeout(r, 600));
-      }
-      // Download voiceover segments
-      for (let i = 0; i < voiceSegs.length; i++) {
-        setExportMsg(`Downloading voiceover ${i + 1}…`);
-        await new Promise(r => setTimeout(r, 300));
-        const a = document.createElement('a');
-        a.href = voiceSegs[i].src;
-        a.download = `${safeName}_voice${i + 1}.webm`;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        await new Promise(r => setTimeout(r, 600));
-      }
-      setExportMsg('All tracks downloaded!');
-      await new Promise(r => setTimeout(r, 1500));
-    } catch (err) {
-      console.error(err);
-      setExportMsg('Export error');
-    } finally {
-      setIsExporting(false);
-      setExportMsg('');
-    }
-  };
-
-  // ── Canvas-based real-time renderer ──────────────────────────────────────
+  // ── Canvas-based  // ── Canvas-based real-time renderer ──────────────────────────────────────
   // Renders all timeline tracks (video + audio + voice + text) into a single
   // .webm file using HTMLCanvasElement + MediaRecorder + Web Audio API.
   // No server required. Runs in real-time — a 60s timeline takes ~60s to render.
@@ -1156,16 +1097,9 @@ const VideoStudioPage: React.FC = () => {
                 : <><Save size={13} /> Save</>}
             </button>
             {/* Render & Export */}
-            <button onClick={handleExport} disabled={clips.length === 0 || isExporting || isRendering}
-              className="flex items-center gap-1.5 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors shrink-0"
-              title="Download each track as a separate file">
-              {isExporting
-                ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {exportMsg}</>
-                : <><Download size={13} /> Tracks</>}
-            </button>
             <button
               onClick={isRendering ? () => { renderCancelRef.current = true; } : handleRender}
-              disabled={clips.length === 0 || isExporting}
+              disabled={clips.length === 0}
               title="Render all tracks into one merged video file"
               className={classNames(
                 'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors shrink-0',
@@ -1175,7 +1109,7 @@ const VideoStudioPage: React.FC = () => {
               )}>
               {isRendering
                 ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Cancel</>
-                : <><Film size={13} /> Render .webm</>}
+                : <><Film size={13} /> Process Video</>;}
             </button>
           </div>
         </div>
@@ -1524,13 +1458,7 @@ const VideoStudioPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Export note */}
-            {!isExporting && clips.length > 0 && (
-              <p className="text-xs text-slate-600 text-center max-w-sm">
-                💡 Export downloads your clips individually. For merged video export, add{' '}
-                <code className="bg-slate-800 px-1 rounded">vercel.json</code> COOP/COEP headers to enable ffmpeg.wasm.
-              </p>
-            )}
+
           </div>
         </div>
 
@@ -1796,7 +1724,26 @@ const VideoStudioPage: React.FC = () => {
                             ? 'bg-yellow-600/80 border-2 border-yellow-300'
                             : 'bg-yellow-800/60 border border-yellow-600/40'
                         )}
-                        style={{ left: o.timelineStart * PX_PER_SEC, width: Math.max(o.duration * PX_PER_SEC, 40) }}>
+                        style={{ left: o.timelineStart * PX_PER_SEC, width: Math.max(o.duration * PX_PER_SEC, 40), cursor: 'grab' }}
+                        onMouseDown={e => {
+                          // Drag to move — but not if clicking the resize handle or delete btn
+                          if ((e.target as HTMLElement).closest('.overlay-resize-handle, button')) return;
+                          e.stopPropagation();
+                          e.preventDefault();
+                          const startX = e.clientX;
+                          const startTs = o.timelineStart;
+                          const onMove = (ev: MouseEvent) => {
+                            const deltaSec = (ev.clientX - startX) / PX_PER_SEC;
+                            const newTs = Math.max(0, startTs + deltaSec);
+                            setOverlays(prev => prev.map(x => x.id === o.id ? { ...x, timelineStart: newTs } : x));
+                          };
+                          const onUp = () => {
+                            window.removeEventListener('mousemove', onMove);
+                            window.removeEventListener('mouseup', onUp);
+                          };
+                          window.addEventListener('mousemove', onMove);
+                          window.addEventListener('mouseup', onUp);
+                        }}>
                         <Type size={10} className="text-yellow-400 shrink-0" />
                         <span className="text-xs text-yellow-300 truncate flex-1">{o.text}</span>
                         <button
@@ -1804,10 +1751,10 @@ const VideoStudioPage: React.FC = () => {
                           className="shrink-0 text-yellow-500 hover:text-red-300 transition-colors">
                           <X size={10} />
                         </button>
-                        {/* Drag handle — right edge to resize duration */}
+                        {/* Right-edge resize handle */}
                         <div
-                          className="absolute top-0 right-0 bottom-0 w-3 cursor-ew-resize flex items-center justify-center hover:bg-yellow-400/30 rounded-r-md"
-                          title="Drag to change duration"
+                          className="overlay-resize-handle absolute top-0 right-0 bottom-0 w-3 cursor-ew-resize flex items-center justify-center hover:bg-yellow-400/30 rounded-r-md"
+                          title="Drag to resize duration"
                           onMouseDown={e => {
                             e.stopPropagation();
                             e.preventDefault();
@@ -1815,8 +1762,8 @@ const VideoStudioPage: React.FC = () => {
                             const startDur = o.duration;
                             const onMove = (ev: MouseEvent) => {
                               const deltaSec = (ev.clientX - startX) / PX_PER_SEC;
-                              const newDur = Math.max(0.5, startDur + deltaSec);
-                              setOverlays(prev => prev.map(x => x.id === o.id ? { ...x, duration: newDur } : x));
+                              setOverlays(prev => prev.map(x => x.id === o.id
+                                ? { ...x, duration: Math.max(0.5, startDur + deltaSec) } : x));
                             };
                             const onUp = () => {
                               window.removeEventListener('mousemove', onMove);
