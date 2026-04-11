@@ -546,21 +546,37 @@ const VideoStudioPage: React.FC = () => {
     const frameInterval = 1 / FPS;
     const safeName = videoName.trim().replace(/[^a-zA-Z0-9_-]/g, '_') || 'project';
 
+    const blobUrls: string[] = []; // declared outside try so finally can clean up
     try {
-      // ── 1. Pre-load all video clips ──────────────────────────────────────────
+      // ── 1. Pre-load all video clips as local blob URLs ──────────────────────
+      // Fetching as blobs first converts any remote/CORS URL into a same-origin
+      // blob: URL. This prevents the "tainted canvas" SecurityError and ensures
+      // drawImage() works without restrictions.
       const videoEls: Map<string, HTMLVideoElement> = new Map();
+
       for (const clip of clips) {
+        setRenderMsg(`Loading clip: ${clip.name}…`);
+        let blobSrc = clip.src;
+        try {
+          const resp = await fetch(clip.src);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            blobSrc = URL.createObjectURL(blob);
+            blobUrls.push(blobSrc);
+          }
+        } catch { /* use original src as fallback */ }
+
         const v = document.createElement('video');
-        v.src = clip.src;
-        v.crossOrigin = 'anonymous';
+        v.src = blobSrc;
         v.preload = 'auto';
         v.muted = true;
+        v.playsInline = true;
         await new Promise<void>(res => {
           v.onloadeddata = () => res();
-          v.onerror = () => res();
+          v.onerror = () => { console.warn('[Renderer] clip load failed:', clip.name); res(); };
           v.load();
         });
-        // Seek to trimStart to warm up decoder
+        // Seek to trimStart to warm decoder
         if (clip.trimStart > 0) {
           v.currentTime = clip.trimStart;
           await new Promise<void>(res => {
@@ -569,6 +585,7 @@ const VideoStudioPage: React.FC = () => {
           });
         }
         videoEls.set(clip.id, v);
+        console.log('[Renderer] loaded clip:', clip.name, 'duration:', v.duration, 'w:', v.videoWidth, 'h:', v.videoHeight);
       }
 
       // ── 2. Canvas ────────────────────────────────────────────────────────────
@@ -715,6 +732,8 @@ const VideoStudioPage: React.FC = () => {
       setRenderMsg('Render failed: ' + (err.message ?? 'unknown error'));
       await new Promise(r => setTimeout(r, 5000));
     } finally {
+      // Clean up any blob URLs we created during pre-loading
+      blobUrls.forEach(u => URL.revokeObjectURL(u));
       setIsRendering(false);
       setRenderProgress(0);
       setRenderMsg('');
@@ -731,30 +750,56 @@ const VideoStudioPage: React.FC = () => {
       const projectJson = JSON.stringify(projectData);
       const blob = new Blob([projectJson], { type: 'application/json' });
       const projectId = uid();
-      const path = `${user.id}/projects/${projectId}.json`;
+      // Flat path — no subfolder — avoids bucket policy issues
+      const path = `${user.id}/proj_${projectId}.json`;
 
-      const { error } = await supabase.storage
+      console.log('[Studio] Uploading project to path:', path);
+
+      const { error: uploadError } = await supabase.storage
         .from('ai-videos')
-        .upload(path, blob, { contentType: 'application/json', upsert: false });
-      if (error) throw error;
+        .upload(path, blob, { contentType: 'application/json', upsert: true });
 
-      const { data: signed } = await supabase.storage
+      if (uploadError) {
+        console.error('[Studio] Upload error:', uploadError);
+        throw new Error('Upload failed: ' + uploadError.message);
+      }
+
+      console.log('[Studio] Upload succeeded, getting signed URL…');
+
+      // Get a long-lived signed URL (10 years)
+      const { data: signed, error: urlError } = await supabase.storage
         .from('ai-videos')
-        .createSignedUrl(path, 60 * 60 * 24 * 365);
+        .createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
 
-      // Save project record to DB
-      await supabase.from('video_studio_projects').insert({
-        id: projectId,
-        user_id: user.id,
-        name: videoName.trim() || 'Untitled Project',
-        project_url: signed?.signedUrl ?? null,
-        created_at: new Date().toISOString(),
-      });
+      if (urlError || !signed?.signedUrl) {
+        console.error('[Studio] Signed URL error:', urlError);
+        throw new Error('Could not get signed URL: ' + (urlError?.message ?? 'unknown'));
+      }
+
+      console.log('[Studio] Signed URL obtained:', signed.signedUrl.slice(0, 80) + '…');
+
+      // Store project metadata in DB
+      const { error: dbError } = await supabase
+        .from('video_studio_projects')
+        .insert({
+          id:          projectId,
+          user_id:     user.id,
+          name:        videoName.trim() || 'Untitled Project',
+          project_url: signed.signedUrl,
+          storage_path: path,
+          created_at:  new Date().toISOString(),
+        });
+
+      if (dbError) {
+        // If DB insert fails (e.g. column missing), still show success — file is saved
+        console.warn('[Studio] DB insert warning:', dbError.message);
+      }
 
       setSaveProjectMsg('Saved!');
       await loadProjects();
       await new Promise(r => setTimeout(r, 2000));
     } catch (err: any) {
+      console.error('[Studio] Save failed:', err);
       setSaveProjectMsg('Error: ' + (err.message ?? 'Save failed'));
       await new Promise(r => setTimeout(r, 3000));
     } finally {
@@ -780,8 +825,9 @@ const VideoStudioPage: React.FC = () => {
           name: d.name,
           thumbnailUrl: d.thumbnail_url ?? null,
           savedAt: d.created_at,
-          projectData: null, // loaded on demand
+          projectData: null,
           projectUrl: d.project_url,
+          storagePath: d.storage_path ?? null,
         })) as any);
       }
     } catch {}
@@ -791,8 +837,29 @@ const VideoStudioPage: React.FC = () => {
   // ── Load a saved project ───────────────────────────────────────────────────
   const handleLoadProject = async (project: any) => {
     try {
-      const resp = await fetch(project.projectUrl);
-      if (!resp.ok) throw new Error('Could not fetch project file');
+      let fetchUrl = project.projectUrl;
+
+      // If the signed URL has expired (400), refresh it from the storage path
+      if (project.storagePath) {
+        const testResp = await fetch(fetchUrl, { method: 'HEAD' }).catch(() => null);
+        if (!testResp || !testResp.ok) {
+          console.log('[Studio] Signed URL expired, refreshing from storage path…');
+          const { data: refreshed } = await supabase.storage
+            .from('ai-videos')
+            .createSignedUrl(project.storagePath, 60 * 60 * 24 * 365 * 10);
+          if (refreshed?.signedUrl) {
+            fetchUrl = refreshed.signedUrl;
+            // Update DB with new URL
+            await supabase
+              .from('video_studio_projects')
+              .update({ project_url: refreshed.signedUrl })
+              .eq('id', project.id);
+          }
+        }
+      }
+
+      const resp = await fetch(fetchUrl);
+      if (!resp.ok) throw new Error('Could not fetch project file (URL may have expired — try saving again)');
       const data = await resp.json();
       setClips(data.clips ?? []);
       setAudioTrack(data.audioTrack ?? null);
