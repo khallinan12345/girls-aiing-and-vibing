@@ -209,6 +209,7 @@ const VideoGenerationPage: React.FC = () => {
   const [isSaving,       setIsSaving]       = useState(false);
   const [savedUrl,       setSavedUrl]       = useState<string | null>(null);
   const [videoName,      setVideoName]      = useState<string>('');
+  const generatedVideoRef = useRef<HTMLVideoElement>(null);
   const [savedThumbnails, setSavedThumbnails] = useState<{id:string; thumbnailUrl:string; savedVideoUrl:string; prompt:string; savedAt:string}[]>([]);
   const [saveError,      setSaveError]      = useState<string | null>(null);
 
@@ -568,31 +569,54 @@ const VideoGenerationPage: React.FC = () => {
   };
 
   const handleDownloadLastFrame = () => {
-    const videoEl = document.querySelector<HTMLVideoElement>('.generated-video');
-    if (!videoEl) return;
-    const canvas = document.createElement('canvas');
-    canvas.width  = videoEl.videoWidth  || 640;
-    canvas.height = videoEl.videoHeight || 360;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-    const safeName = getSafeName();
-    canvas.toBlob(blob => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${safeName}_last_frame.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    }, 'image/png');
+    const videoEl = generatedVideoRef.current;
+    if (!videoEl) { alert('No video loaded yet.'); return; }
+
+    const doCapture = () => {
+      const w = videoEl.videoWidth  || 640;
+      const h = videoEl.videoHeight || 360;
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(videoEl, 0, 0, w, h);
+      const safeName = getSafeName();
+      canvas.toBlob(blob => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${safeName}_last_frame.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }, 'image/png');
+    };
+
+    // If duration is known, seek to just before the end so we get the last frame
+    if (videoEl.duration && isFinite(videoEl.duration)) {
+      const targetTime = Math.max(0, videoEl.duration - 0.1);
+      if (Math.abs(videoEl.currentTime - targetTime) > 0.5) {
+        // Need to seek — wait for seeked event then capture
+        const onSeeked = () => {
+          videoEl.removeEventListener('seeked', onSeeked);
+          doCapture();
+        };
+        videoEl.addEventListener('seeked', onSeeked);
+        videoEl.currentTime = targetTime;
+      } else {
+        doCapture();
+      }
+    } else {
+      // Duration unknown — capture current frame
+      doCapture();
+    }
   };
 
   // Capture a thumbnail from the generated video element
   const captureThumbnailBlob = (): Promise<Blob | null> => new Promise(resolve => {
-    const videoEl = document.querySelector<HTMLVideoElement>('.generated-video');
+    const videoEl = generatedVideoRef.current;
     if (!videoEl) return resolve(null);
     const canvas = document.createElement('canvas');
     canvas.width  = videoEl.videoWidth  || 640;
@@ -1364,7 +1388,7 @@ Return ONLY the improved text. No explanation, no preamble.`
                       />
                     </div>
                     <div className="rounded-xl overflow-hidden bg-black border border-green-500/20">
-                      <video src={savedUrl ?? videoUrl} controls autoPlay loop className="generated-video w-full max-h-80" />
+                      <video ref={generatedVideoRef} src={savedUrl ?? videoUrl} controls autoPlay loop className="generated-video w-full max-h-80" />
                     </div>
 
                     {/* Save Video to bucket */}
