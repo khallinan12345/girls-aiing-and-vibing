@@ -228,7 +228,7 @@ const VideoGenerationPage: React.FC = () => {
 
   // ── Weekly usage limit ────────────────────────────────────────────────────
   const [weeklyCount,    setWeeklyCount]    = useState<number>(0);
-  const WEEKLY_LIMIT = 10;
+  const WEEKLY_LIMIT = 15;
 
   // ── Critique state ────────────────────────────────────────────────────────
   const [showCritique,   setShowCritique]   = useState(false);
