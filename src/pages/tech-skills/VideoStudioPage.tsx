@@ -1264,8 +1264,6 @@ const VideoStudioPage: React.FC = () => {
           </div>
         </div>
 
-        </div>
-
         {/* ── Render progress overlay ─────────────────────────────────────── */}
         {isRendering && (
           <div className="shrink-0 bg-slate-900 border-t border-orange-500/40 px-5 py-3 flex items-center gap-4">
