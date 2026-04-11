@@ -560,6 +560,14 @@ const VideoStudioPage: React.FC = () => {
           v.onerror = () => res();
           v.load();
         });
+        // Seek to trimStart to warm up decoder
+        if (clip.trimStart > 0) {
+          v.currentTime = clip.trimStart;
+          await new Promise<void>(res => {
+            v.addEventListener('seeked', () => res(), { once: true });
+            setTimeout(res, 500);
+          });
+        }
         videoEls.set(clip.id, v);
       }
 
@@ -567,11 +575,6 @@ const VideoStudioPage: React.FC = () => {
       const canvas = document.createElement('canvas');
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext('2d')!;
-
-      // Draw a first frame before starting recorder so stream is not empty
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, W, H);
-      await drawFrame(ctx, W, H, 0, videoEls, frameInterval);
 
       // ── 3. Web Audio ─────────────────────────────────────────────────────────
       const audioCtx = new AudioContext();
@@ -606,12 +609,11 @@ const VideoStudioPage: React.FC = () => {
         } catch {}
       }
 
-      // ── 4. MediaRecorder ─────────────────────────────────────────────────────
-      // Use captureStream(0) — we push frames manually via requestVideoFrameCallback
-      // which ensures MediaRecorder sees every frame we draw.
-      const canvasStream = canvas.captureStream(0);
-      const videoTrack = canvasStream.getVideoTracks()[0] as any;
-
+      // ── 4. MediaRecorder setup ────────────────────────────────────────────────
+      // captureStream(FPS) auto-samples the canvas at the given rate — this is
+      // the most reliable approach in Chrome. We pace our loop with setTimeout
+      // to match the same rate so frames stay in sync.
+      const canvasStream = canvas.captureStream(FPS);
       const combined = new MediaStream([
         ...canvasStream.getVideoTracks(),
         ...dest.stream.getAudioTracks(),
@@ -619,46 +621,51 @@ const VideoStudioPage: React.FC = () => {
 
       const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
         ? 'video/webm;codecs=vp9,opus'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+        ? 'video/webm;codecs=vp8,opus'
         : 'video/webm';
 
       const recorder = new MediaRecorder(combined, {
         mimeType,
-        videoBitsPerSecond: 4_000_000,
+        videoBitsPerSecond: 5_000_000,
       });
       const chunks: Blob[] = [];
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.start(200);
+      recorder.ondataavailable = e => {
+        console.log('[Renderer] chunk:', e.data.size, 'bytes');
+        if (e.data.size > 0) chunks.push(e.data);
+      };
 
-      // ── 5. Frame loop — tick at real wall-clock speed ─────────────────────────
-      // We advance renderTime by frameInterval each tick and call
-      // requestVideoFrameCallback (or fallback setTimeout) to pace correctly.
-      // captureStream(0) + requestFrame() guarantees each drawn frame is captured.
+      // Draw the first frame BEFORE starting the recorder
+      // so the stream is warm and the first captured frame is not black
+      await drawFrame(ctx, W, H, 0, videoEls, frameInterval);
+      await new Promise(r => setTimeout(r, 200)); // let stream stabilise
+
+      recorder.start(500); // collect a chunk every 500ms
+      console.log('[Renderer] recorder started, state:', recorder.state, 'mimeType:', mimeType);
+
+      // ── 5. Frame loop ─────────────────────────────────────────────────────────
+      // Pace with setTimeout(MS_PER_FRAME) so we match captureStream(FPS) rate.
+      // The canvas auto-sampler in Chrome will pick up each frame we draw.
       setRenderMsg('Rendering…');
       let renderTime = 0;
-
-      const waitFrame = () => new Promise<void>(res => {
-        // requestAnimationFrame gives us a real paint callback
-        requestAnimationFrame(() => res());
-      });
+      let frameCount = 0;
 
       while (renderTime <= totalDuration && !renderCancelRef.current) {
-        await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
+        const t0 = performance.now();
 
-        // Tell the canvas stream to capture this frame now
-        if (videoTrack && typeof videoTrack.requestFrame === 'function') {
-          videoTrack.requestFrame();
-        }
+        await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
+        frameCount++;
 
         renderTime += frameInterval;
         setRenderProgress(Math.min(renderTime / totalDuration, 1));
-        // Update UI every ~10 frames to avoid hammering React
-        if (Math.round(renderTime * FPS) % 10 === 0) {
-          setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}…`);
+        if (frameCount % 15 === 0) {
+          setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}… (${chunks.length} chunks)`);
         }
 
-        // Wait for next animation frame — this paces the loop AND
-        // lets the browser flush the canvas to the MediaRecorder
-        await waitFrame();
+        // Pace: wait out the remainder of this frame's budget
+        const elapsed = performance.now() - t0;
+        const wait = Math.max(0, MS_PER_FRAME - elapsed);
+        await new Promise(r => setTimeout(r, wait));
       }
 
       if (renderCancelRef.current) {
@@ -669,18 +676,24 @@ const VideoStudioPage: React.FC = () => {
         return;
       }
 
-      // ── 6. Finalise and download ──────────────────────────────────────────────
-      setRenderMsg('Finalising…');
-      // Give MediaRecorder a moment to flush remaining data
-      await new Promise(r => setTimeout(r, 500));
+      // ── 6. Finalise ───────────────────────────────────────────────────────────
+      setRenderMsg(`Finalising… (${chunks.length} chunks collected)`);
+      // Wait for one more chunk cycle before stopping
+      await new Promise(r => setTimeout(r, 600));
       await new Promise<void>(res => {
         recorder.addEventListener('stop', () => res(), { once: true });
         recorder.stop();
       });
       audioCtx.close();
 
+      console.log('[Renderer] done. chunks:', chunks.length, 'total bytes:', chunks.reduce((s, c) => s + c.size, 0));
+
       if (chunks.length === 0) {
-        throw new Error('No video data was captured. Your browser may not support this feature. Try Chrome or Edge.');
+        throw new Error(
+          'MediaRecorder produced no data. ' +
+          'Make sure the video files are accessible (not expired URLs). ' +
+          'Tip: save generated videos to your account first, then render.'
+        );
       }
 
       const finalBlob = new Blob(chunks, { type: mimeType });
@@ -691,16 +704,16 @@ const VideoStudioPage: React.FC = () => {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
 
       const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
-      setRenderMsg(`Done! ${mb} MB — saved as ${safeName}.webm`);
+      setRenderMsg(`Done! ${mb} MB saved as ${safeName}.webm`);
       await new Promise(r => setTimeout(r, 4000));
 
     } catch (err: any) {
       console.error('[Renderer]', err);
       setRenderMsg('Render failed: ' + (err.message ?? 'unknown error'));
-      await new Promise(r => setTimeout(r, 4000));
+      await new Promise(r => setTimeout(r, 5000));
     } finally {
       setIsRendering(false);
       setRenderProgress(0);
