@@ -873,7 +873,7 @@ const VoiceCreationPage: React.FC = () => {
                     <p className="text-xs text-slate-400 mt-0.5 truncate">{activeJob.script.slice(0, 80)}</p>
                     {isGenerating && (
                       <p className="text-xs text-slate-500 mt-1">
-                        {lvl <= 1 ? 'MiniMax AI makes voices in about 3–5 seconds.' : 'MiniMax Speech-02-Turbo typically completes in 3–5 seconds.'}
+                        {lvl <= 1 ? 'MiniMax AI makes voices in about 3–5 seconds.' : 'MiniMax Speech-02-Turbo typically completes in 3–5 seconds. But, the first voice creation could take 1-2 minutes.'}
                       </p>
                     )}
                   </div>

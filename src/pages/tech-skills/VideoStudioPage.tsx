@@ -1266,8 +1266,29 @@ const VideoStudioPage: React.FC = () => {
               {/* ── Voice tab ── */}
               {activeTab === 'voice' && (
                 <>
+                  {/* Upload audio file as voiceover */}
+                  <label className="flex items-center gap-2 w-full bg-slate-800 hover:bg-slate-700 border border-dashed border-slate-600 rounded-lg px-3 py-2.5 text-xs text-slate-400 cursor-pointer transition-colors">
+                    <Upload size={13} /> Upload audio file
+                    <input type="file" accept="audio/*" className="hidden" onChange={async e => {
+                      const file = e.target.files?.[0]; if (!file) return;
+                      const src = URL.createObjectURL(file);
+                      const dur = await new Promise<number>(resolve => {
+                        const a = new Audio(src);
+                        a.onloadedmetadata = () => resolve(a.duration);
+                        a.onerror = () => resolve(0);
+                      });
+                      const tStart = voiceSegs.reduce((m, v) => Math.max(m, v.timelineStart + v.duration), 0);
+                      setVoiceSegs(prev => [...prev, {
+                        id: uid(), src, duration: dur,
+                        timelineStart: tStart,
+                        name: file.name.replace(/[.][^.]+$/, ''),
+                      }]);
+                      e.target.value = '';
+                    }} />
+                  </label>
+
                   <div className="bg-slate-800/70 border border-slate-700/50 rounded-lg p-3 space-y-3">
-                    <p className="text-xs text-slate-400">Record your voice at the current playhead position.</p>
+                    <p className="text-xs text-slate-400">Or record your voice at the current playhead position.</p>
                     {!isRecording ? (
                       <button onClick={startRecording}
                         className="w-full flex items-center justify-center gap-2 bg-red-700 hover:bg-red-600 text-white rounded-lg py-2.5 text-sm font-semibold transition-colors">
