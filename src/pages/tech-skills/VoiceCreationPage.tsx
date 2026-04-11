@@ -188,10 +188,20 @@ const VoiceCard: React.FC<{ job: VoiceJob; onReuse: (s: string) => void }> = ({ 
               <RotateCcw size={12} /> Reuse script
             </button>
             {displayUrl && (
-              <a href={displayUrl} download target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-xs bg-emerald-700 hover:bg-emerald-600 text-white rounded-full px-3 py-1.5 transition-colors">
+              <button onClick={async () => {
+                try {
+                  const resp = await fetch(displayUrl);
+                  const blob = await resp.blob();
+                  const ext = blob.type.includes('wav') ? 'wav' : 'mp3';
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = `voice.${ext}`;
+                  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                  setTimeout(() => URL.revokeObjectURL(url), 5000);
+                } catch { window.open(displayUrl, '_blank'); }
+              }} className="flex items-center gap-1.5 text-xs bg-emerald-700 hover:bg-emerald-600 text-white rounded-full px-3 py-1.5 transition-colors">
                 <Download size={12} /> Download
-              </a>
+              </button>
             )}
           </div>
         </div>
@@ -291,8 +301,8 @@ const VoiceCreationPage: React.FC = () => {
     improveBtnLabel: '✏️ Improve my English',
     critiqueBtnLabel: lvl <= 1 ? '💡 Help me write a better script' : '💡 Critique my Script',
     footerText: lvl <= 1
-      ? 'Your voice is made by MiniMax AI. It takes about 3–5 seconds. Your voices are saved in your history.'
-      : 'Powered by MiniMax Speech-02-Turbo via Replicate. ~3–5s generation time.',
+      ? 'Your voice is made by MiniMax AI. It takes about 2-5 seconds. But your first voice creation could take a few minutes. Your voices are saved in your history.'
+      : 'Powered by MiniMax Speech-02-Turbo via Replicate. ~2–5s generation time.',
   };
 
   // ── Browser TTS voice (page narration) ───────────────────────────────────
@@ -904,10 +914,22 @@ const VoiceCreationPage: React.FC = () => {
                       <Sparkles size={14} /> {lvl <= 1 ? 'Make another voice' : 'Generate another'}
                     </button>
                     {(audioUrl || savedUrl) && (
-                      <a href={savedUrl ?? audioUrl ?? ''} download target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
+                      <button onClick={async () => {
+                        const src = savedUrl ?? audioUrl ?? '';
+                        try {
+                          const resp = await fetch(src);
+                          const blob = await resp.blob();
+                          const ext = blob.type.includes('wav') ? 'wav' : 'mp3';
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `voice_${new Date().toISOString().slice(0,10)}.${ext}`;
+                          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                          setTimeout(() => URL.revokeObjectURL(url), 5000);
+                        } catch { window.open(src, '_blank'); }
+                      }} className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
                         <Download size={14} /> {lvl <= 1 ? 'Download' : 'Download audio'}
-                      </a>
+                      </button>
                     )}
                     {!dashSaved ? (
                       <button onClick={handleSaveToDashboard} disabled={isSavingDash}
