@@ -746,55 +746,24 @@ const VideoStudioPage: React.FC = () => {
     setIsSavingProject(true);
     setSaveProjectMsg('Saving…');
     try {
+      // Store project as JSONB directly in the DB — no storage bucket needed.
+      // This avoids MIME type restrictions and signed URL expiry entirely.
       const projectData = { clips, audioTrack, voiceSegs, overlays, videoName };
-      const projectJson = JSON.stringify(projectData);
-      const blob = new Blob([projectJson], { type: 'application/json' });
       const projectId = uid();
-      // Flat path — no subfolder — avoids bucket policy issues
-      const path = `${user.id}/proj_${projectId}.json`;
 
-      console.log('[Studio] Uploading project to path:', path);
-
-      const { error: uploadError } = await supabase.storage
-        .from('ai-videos')
-        .upload(path, blob, { contentType: 'application/json', upsert: true });
-
-      if (uploadError) {
-        console.error('[Studio] Upload error:', uploadError);
-        throw new Error('Upload failed: ' + uploadError.message);
-      }
-
-      console.log('[Studio] Upload succeeded, getting signed URL…');
-
-      // Get a long-lived signed URL (10 years)
-      const { data: signed, error: urlError } = await supabase.storage
-        .from('ai-videos')
-        .createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
-
-      if (urlError || !signed?.signedUrl) {
-        console.error('[Studio] Signed URL error:', urlError);
-        throw new Error('Could not get signed URL: ' + (urlError?.message ?? 'unknown'));
-      }
-
-      console.log('[Studio] Signed URL obtained:', signed.signedUrl.slice(0, 80) + '…');
-
-      // Store project metadata in DB
       const { error: dbError } = await supabase
         .from('video_studio_projects')
         .insert({
-          id:          projectId,
-          user_id:     user.id,
-          name:        videoName.trim() || 'Untitled Project',
-          project_url: signed.signedUrl,
-          storage_path: path,
-          created_at:  new Date().toISOString(),
+          id:           projectId,
+          user_id:      user.id,
+          name:         videoName.trim() || 'Untitled Project',
+          project_data: projectData,
+          created_at:   new Date().toISOString(),
         });
 
-      if (dbError) {
-        // If DB insert fails (e.g. column missing), still show success — file is saved
-        console.warn('[Studio] DB insert warning:', dbError.message);
-      }
+      if (dbError) throw new Error('DB save failed: ' + dbError.message);
 
+      console.log('[Studio] Project saved to DB:', projectId);
       setSaveProjectMsg('Saved!');
       await loadProjects();
       await new Promise(r => setTimeout(r, 2000));
@@ -813,54 +782,32 @@ const VideoStudioPage: React.FC = () => {
     if (!user?.id) return;
     setLoadingProjects(true);
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('video_studio_projects')
-        .select('*')
+        .select('id, name, thumbnail_url, created_at, project_data')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(20);
+      if (error) console.warn('[Studio] loadProjects error:', error.message);
       if (data) {
         setSavedProjects(data.map((d: any) => ({
-          id: d.id,
-          name: d.name,
+          id:           d.id,
+          name:         d.name,
           thumbnailUrl: d.thumbnail_url ?? null,
-          savedAt: d.created_at,
-          projectData: null,
-          projectUrl: d.project_url,
-          storagePath: d.storage_path ?? null,
+          savedAt:      d.created_at,
+          projectData:  d.project_data ?? null,
         })) as any);
       }
-    } catch {}
+    } catch (e) { console.error('[Studio] loadProjects exception:', e); }
     setLoadingProjects(false);
   };
 
   // ── Load a saved project ───────────────────────────────────────────────────
-  const handleLoadProject = async (project: any) => {
+  const handleLoadProject = (project: any) => {
     try {
-      let fetchUrl = project.projectUrl;
-
-      // If the signed URL has expired (400), refresh it from the storage path
-      if (project.storagePath) {
-        const testResp = await fetch(fetchUrl, { method: 'HEAD' }).catch(() => null);
-        if (!testResp || !testResp.ok) {
-          console.log('[Studio] Signed URL expired, refreshing from storage path…');
-          const { data: refreshed } = await supabase.storage
-            .from('ai-videos')
-            .createSignedUrl(project.storagePath, 60 * 60 * 24 * 365 * 10);
-          if (refreshed?.signedUrl) {
-            fetchUrl = refreshed.signedUrl;
-            // Update DB with new URL
-            await supabase
-              .from('video_studio_projects')
-              .update({ project_url: refreshed.signedUrl })
-              .eq('id', project.id);
-          }
-        }
-      }
-
-      const resp = await fetch(fetchUrl);
-      if (!resp.ok) throw new Error('Could not fetch project file (URL may have expired — try saving again)');
-      const data = await resp.json();
+      // project_data is already in memory from loadProjects — no fetch needed
+      const data = project.projectData;
+      if (!data) throw new Error('Project data not found — try saving the project again');
       setClips(data.clips ?? []);
       setAudioTrack(data.audioTrack ?? null);
       setVoiceSegs(data.voiceSegs ?? []);
