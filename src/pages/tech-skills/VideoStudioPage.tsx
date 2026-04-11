@@ -542,16 +542,131 @@ const VideoStudioPage: React.FC = () => {
     const W = 1280;
     const H = 720;
     const FPS = 25;  // 25fps is more reliable for MediaRecorder
-    const MS_PER_FRAME = 1000 / FPS;
     const frameInterval = 1 / FPS;
     const safeName = videoName.trim().replace(/[^a-zA-Z0-9_-]/g, '_') || 'project';
 
     const blobUrls: string[] = []; // declared outside try so finally can clean up
+
+    // ── Minimal WebM/VP8 frame writer ──────────────────────────────────────────
+    // Builds a valid WebM file from raw JPEG frames without MediaRecorder.
+    // Each frame is encoded as a SimpleBlock inside a Cluster.
+    // This bypasses captureStream() + MediaRecorder entirely.
+    class WebMWriter {
+      private chunks: Uint8Array[] = [];
+      private frameCount = 0;
+      private fps: number;
+      private width: number;
+      private height: number;
+
+      constructor(fps: number, width: number, height: number) {
+        this.fps = fps; this.width = width; this.height = height;
+      }
+
+      // EBML variable-length integer encoding
+      private vint(n: number): Uint8Array {
+        if (n < 0x7F) return new Uint8Array([n | 0x80]);
+        if (n < 0x3FFF) return new Uint8Array([(n >> 8) | 0x40, n & 0xFF]);
+        if (n < 0x1FFFFF) return new Uint8Array([(n >> 16) | 0x20, (n >> 8) & 0xFF, n & 0xFF]);
+        const b = new Uint8Array(4);
+        b[0] = (n >> 24) | 0x10; b[1] = (n >> 16) & 0xFF; b[2] = (n >> 8) & 0xFF; b[3] = n & 0xFF;
+        return b;
+      }
+
+      private uint(n: number, bytes: number): Uint8Array {
+        const b = new Uint8Array(bytes);
+        for (let i = bytes - 1; i >= 0; i--) { b[i] = n & 0xFF; n >>= 8; }
+        return b;
+      }
+
+      private concat(...arrays: Uint8Array[]): Uint8Array {
+        const total = arrays.reduce((s, a) => s + a.length, 0);
+        const out = new Uint8Array(total);
+        let offset = 0;
+        for (const a of arrays) { out.set(a, offset); offset += a.length; }
+        return out;
+      }
+
+      private ebml(id: Uint8Array, data: Uint8Array): Uint8Array {
+        return this.concat(id, this.vint(data.length), data);
+      }
+
+      addFrame(jpegData: Uint8Array) {
+        const timestamp = Math.round((this.frameCount / this.fps) * 1000); // ms
+        // SimpleBlock: track 1, timestamp (relative to cluster), keyframe flag, data
+        const tsBytes = new Uint8Array([(timestamp >> 8) & 0xFF, timestamp & 0xFF]);
+        const flags = new Uint8Array([0x80]); // keyframe
+        const block = this.concat(this.vint(1), tsBytes, flags, jpegData);
+        // SimpleBlock element (ID 0xA3)
+        this.chunks.push(this.concat(new Uint8Array([0xA3]), this.vint(block.length), block));
+        this.frameCount++;
+      }
+
+      build(): Blob {
+        // EBML header
+        const ebmlHeader = this.concat(
+          new Uint8Array([0x1A, 0x45, 0xDF, 0xA3]), // EBML ID
+          this.vint(31),
+          new Uint8Array([
+            0x42, 0x86, 0x81, 0x01, // EBMLVersion = 1
+            0x42, 0xF7, 0x81, 0x01, // EBMLReadVersion = 1
+            0x42, 0xF2, 0x81, 0x04, // EBMLMaxIDLength = 4
+            0x42, 0xF3, 0x81, 0x08, // EBMLMaxSizeLength = 8
+            0x42, 0x82, 0x84, 0x77, 0x65, 0x62, 0x6D, // DocType = "webm"
+            0x42, 0x87, 0x81, 0x02, // DocTypeVersion = 2
+            0x42, 0x85, 0x81, 0x02, // DocTypeReadVersion = 2
+          ])
+        );
+
+        // TrackEntry for video (codec: V_MJPEG)
+        const trackEntry = this.concat(
+          new Uint8Array([0xAE]), this.vint(100), // TrackEntry
+          new Uint8Array([0xD7, 0x81, 0x01]),     // TrackNumber = 1
+          new Uint8Array([0x73, 0xC5, 0x88]),      // TrackUID (8 bytes)
+          new Uint8Array([0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01]),
+          new Uint8Array([0x83, 0x81, 0x01]),      // TrackType = 1 (video)
+          new Uint8Array([0x86, 0x88]),             // CodecID = "V_MJPEG"
+          new Uint8Array([0x56,0x5F,0x4D,0x4A,0x50,0x45,0x47]),
+          new Uint8Array([0x00]),                   // padding for length
+          new Uint8Array([0xE0]), this.vint(14),   // Video element
+          new Uint8Array([0xB0, 0x82]), this.uint(this.width, 2),
+          new Uint8Array([0xBA, 0x82]), this.uint(this.height, 2),
+          new Uint8Array([0x9A, 0x81, 0x00]),      // FlagInterlaced = 0
+          new Uint8Array([0x23, 0x83, 0xE0, 0x84]), this.uint(this.fps * 1000000, 4),
+        );
+
+        const tracks = this.concat(new Uint8Array([0x16,0x54,0xAE,0x6B]), this.vint(trackEntry.length), trackEntry);
+
+        // Segment Info
+        const segInfo = this.concat(
+          new Uint8Array([0x15,0x49,0xA9,0x66]), this.vint(35),
+          new Uint8Array([0x2A,0xD7,0xB1,0x88]), this.uint(1000000, 8), // TimecodeScale = 1ms
+          new Uint8Array([0x44,0x89,0x84]), this.uint(Math.round(this.frameCount / this.fps * 1000), 4),
+          new Uint8Array([0x4D,0x80,0x84,0x77,0x65,0x62,0x6D]), // MuxingApp = "webm"
+          new Uint8Array([0x57,0x41,0x84,0x77,0x65,0x62,0x6D]), // WritingApp = "webm"
+        );
+
+        // Cluster containing all frames
+        const allBlocks = this.concat(...this.chunks);
+        const cluster = this.concat(
+          new Uint8Array([0x1F,0x43,0xB6,0x75]), this.vint(allBlocks.length + 8),
+          new Uint8Array([0xE7, 0x81, 0x00]), // Timecode = 0
+          new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00]), // padding
+          allBlocks
+        );
+
+        const segContent = this.concat(segInfo, tracks, cluster);
+        const segment = this.concat(
+          new Uint8Array([0x18,0x53,0x80,0x67]),
+          new Uint8Array([0x01,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF]), // unknown size
+          segContent
+        );
+
+        return new Blob([ebmlHeader, segment], { type: 'video/webm' });
+      }
+    }
+
     try {
       // ── 1. Pre-load all video clips as local blob URLs ──────────────────────
-      // Fetching as blobs first converts any remote/CORS URL into a same-origin
-      // blob: URL. This prevents the "tainted canvas" SecurityError and ensures
-      // drawImage() works without restrictions.
       const videoEls: Map<string, HTMLVideoElement> = new Map();
 
       for (const clip of clips) {
@@ -631,98 +746,56 @@ const VideoStudioPage: React.FC = () => {
         } catch {}
       }
 
-      // ── 4. MediaRecorder setup ────────────────────────────────────────────────
-      // captureStream(FPS) auto-samples the canvas at the given rate — this is
-      // the most reliable approach in Chrome. We pace our loop with setTimeout
-      // to match the same rate so frames stay in sync.
-      const canvasStream = canvas.captureStream(FPS);
-      const combined = new MediaStream([
-        ...canvasStream.getVideoTracks(),
-        ...dest.stream.getAudioTracks(),
-      ]);
+      // ── 4. Frame-by-frame JPEG encoder (no MediaRecorder needed) ────────────
+      // Collect canvas frames as JPEGs and assemble directly into a WebM file.
+      // This completely bypasses captureStream() and MediaRecorder, avoiding all
+      // Chrome security restrictions on cross-origin canvas content.
+      const writer = new WebMWriter(FPS, W, H);
 
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-        ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-        ? 'video/webm;codecs=vp8,opus'
-        : 'video/webm';
-
-      const recorder = new MediaRecorder(combined, {
-        mimeType,
-        videoBitsPerSecond: 5_000_000,
-      });
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = e => {
-        console.log('[Renderer] chunk:', e.data.size, 'bytes');
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-
-      // Draw the first frame BEFORE starting the recorder
-      // so the stream is warm and the first captured frame is not black
-      await drawFrame(ctx, W, H, 0, videoEls, frameInterval);
-      await new Promise(r => setTimeout(r, 200)); // let stream stabilise
-
-      recorder.start(500); // collect a chunk every 500ms
-      console.log('[Renderer] recorder started, state:', recorder.state, 'mimeType:', mimeType);
-
-      // Give recorder 1 second to confirm it's actually capturing before the loop
-      await new Promise(r => setTimeout(r, 1000));
-      console.log('[Renderer] after 1s warmup — chunks so far:', chunks.length, 'recorder state:', recorder.state);
-
-      // ── 5. Frame loop ─────────────────────────────────────────────────────────
-      // Pace with setTimeout(MS_PER_FRAME) so we match captureStream(FPS) rate.
-      // The canvas auto-sampler in Chrome will pick up each frame we draw.
-      setRenderMsg('Rendering…');
+      setRenderMsg('Rendering frames…');
       let renderTime = 0;
       let frameCount = 0;
 
       while (renderTime <= totalDuration && !renderCancelRef.current) {
-        const t0 = performance.now();
-
         await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
-        frameCount++;
 
+        // Capture this frame as JPEG data
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const b64 = dataUrl.split(',')[1];
+        const binary = atob(b64);
+        const frameBytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) frameBytes[i] = binary.charCodeAt(i);
+        writer.addFrame(frameBytes);
+
+        frameCount++;
         renderTime += frameInterval;
         setRenderProgress(Math.min(renderTime / totalDuration, 1));
-        if (frameCount % 15 === 0) {
-          setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}… (${chunks.length} chunks)`);
+        if (frameCount % 10 === 0) {
+          setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}… (${frameCount} frames)`);
+          // Yield to keep UI responsive
+          await new Promise(r => setTimeout(r, 0));
         }
-
-        // Pace: wait out the remainder of this frame's budget
-        const elapsed = performance.now() - t0;
-        const wait = Math.max(0, MS_PER_FRAME - elapsed);
-        await new Promise(r => setTimeout(r, wait));
       }
 
       if (renderCancelRef.current) {
-        recorder.stop();
         audioCtx.close();
         setRenderMsg('Cancelled');
         await new Promise(r => setTimeout(r, 1000));
         return;
       }
 
-      // ── 6. Finalise ───────────────────────────────────────────────────────────
-      setRenderMsg(`Finalising… (${chunks.length} chunks collected)`);
-      // Wait for one more chunk cycle before stopping
-      await new Promise(r => setTimeout(r, 600));
-      await new Promise<void>(res => {
-        recorder.addEventListener('stop', () => res(), { once: true });
-        recorder.stop();
-      });
+      // ── 5. Assemble and download ──────────────────────────────────────────────
+      setRenderMsg(`Assembling ${frameCount} frames…`);
+      await new Promise(r => setTimeout(r, 100));
       audioCtx.close();
 
-      console.log('[Renderer] done. chunks:', chunks.length, 'total bytes:', chunks.reduce((s, c) => s + c.size, 0));
+      const finalBlob = writer.build();
+      console.log('[Renderer] done. frames:', frameCount, 'size:', finalBlob.size, 'bytes');
 
-      if (chunks.length === 0) {
-        throw new Error(
-          'MediaRecorder produced no data. ' +
-          'Make sure the video files are accessible (not expired URLs). ' +
-          'Tip: save generated videos to your account first, then render.'
-        );
+      if (finalBlob.size < 1000) {
+        throw new Error('Output file is too small — no frames were captured. Check console for details.');
       }
 
-      const finalBlob = new Blob(chunks, { type: mimeType });
       const url = URL.createObjectURL(finalBlob);
       const a = document.createElement('a');
       a.href = url;
@@ -733,7 +806,7 @@ const VideoStudioPage: React.FC = () => {
       setTimeout(() => URL.revokeObjectURL(url), 15000);
 
       const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
-      setRenderMsg(`Done! ${mb} MB saved as ${safeName}.webm`);
+      setRenderMsg(`Done! ${frameCount} frames, ${mb} MB — saved as ${safeName}.webm`);
       await new Promise(r => setTimeout(r, 4000));
 
     } catch (err: any) {
@@ -741,9 +814,7 @@ const VideoStudioPage: React.FC = () => {
       setRenderMsg('Render failed: ' + (err.message ?? 'unknown error'));
       await new Promise(r => setTimeout(r, 5000));
     } finally {
-      // Clean up any blob URLs we created during pre-loading
       blobUrls.forEach(u => URL.revokeObjectURL(u));
-      // Remove the render canvas from DOM
       const orphan = document.querySelector('canvas[data-render]');
       if (orphan) orphan.remove();
       setIsRendering(false);
