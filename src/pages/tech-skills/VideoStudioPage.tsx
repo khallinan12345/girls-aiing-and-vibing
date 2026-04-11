@@ -588,10 +588,15 @@ const VideoStudioPage: React.FC = () => {
         console.log('[Renderer] loaded clip:', clip.name, 'duration:', v.duration, 'w:', v.videoWidth, 'h:', v.videoHeight);
       }
 
-      // ── 2. Canvas ────────────────────────────────────────────────────────────
+      // ── 2. Canvas — must be mounted in the DOM for Chrome captureStream ────────
+      // Chrome silently produces empty streams from detached canvases that have
+      // had cross-origin drawImage calls. Appending to document.body bypasses this.
       const canvas = document.createElement('canvas');
       canvas.width = W; canvas.height = H;
-      const ctx = canvas.getContext('2d')!;
+      canvas.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
+      canvas.setAttribute('data-render', '1');
+      document.body.appendChild(canvas);
+      const ctx = canvas.getContext('2d', { willReadFrequently: false })!;
 
       // ── 3. Web Audio ─────────────────────────────────────────────────────────
       const audioCtx = new AudioContext();
@@ -659,6 +664,10 @@ const VideoStudioPage: React.FC = () => {
 
       recorder.start(500); // collect a chunk every 500ms
       console.log('[Renderer] recorder started, state:', recorder.state, 'mimeType:', mimeType);
+
+      // Give recorder 1 second to confirm it's actually capturing before the loop
+      await new Promise(r => setTimeout(r, 1000));
+      console.log('[Renderer] after 1s warmup — chunks so far:', chunks.length, 'recorder state:', recorder.state);
 
       // ── 5. Frame loop ─────────────────────────────────────────────────────────
       // Pace with setTimeout(MS_PER_FRAME) so we match captureStream(FPS) rate.
@@ -734,6 +743,9 @@ const VideoStudioPage: React.FC = () => {
     } finally {
       // Clean up any blob URLs we created during pre-loading
       blobUrls.forEach(u => URL.revokeObjectURL(u));
+      // Remove the render canvas from DOM
+      const orphan = document.querySelector('canvas[data-render]');
+      if (orphan) orphan.remove();
       setIsRendering(false);
       setRenderProgress(0);
       setRenderMsg('');
