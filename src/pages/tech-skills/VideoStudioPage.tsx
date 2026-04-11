@@ -148,10 +148,10 @@ const VideoStudioPage: React.FC = () => {
   const [isRendering,    setIsRendering]    = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);   // 0–1
   const [renderMsg,      setRenderMsg]      = useState('');
-  const [renderedUrl,    setRenderedUrl]    = useState<string | null>(null); // preview URL
+  const [renderedUrl,    setRenderedUrl]    = useState<string | null>(null);
   const [renderedName,   setRenderedName]   = useState<string>('');
   const renderCancelRef  = useRef(false);
-  const renderCanvasRef  = useRef<HTMLCanvasElement>(null);
+  const renderCanvasRef  = useRef<HTMLCanvasElement>(null); // VISIBLE canvas for rendering
 
   // ── Drag state ─────────────────────────────────────────────────────────────
   const [draggingClip, setDraggingClip] = useState<string | null>(null);
@@ -708,15 +708,13 @@ const VideoStudioPage: React.FC = () => {
         console.log('[Renderer] loaded clip:', clip.name, 'duration:', v.duration, 'w:', v.videoWidth, 'h:', v.videoHeight);
       }
 
-      // ── 2. Canvas — must be mounted in the DOM for Chrome captureStream ────────
-      // Chrome silently produces empty streams from detached canvases that have
-      // had cross-origin drawImage calls. Appending to document.body bypasses this.
-      const canvas = document.createElement('canvas');
+      // ── 2. Use the visible renderCanvasRef canvas ────────────────────────────
+      // This canvas is rendered to screen (the preview panel).
+      // A visible, user-interactable canvas is fully capturable by Chrome.
+      if (!renderCanvasRef.current) throw new Error('Render canvas not ready');
+      const canvas = renderCanvasRef.current;
       canvas.width = W; canvas.height = H;
-      canvas.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
-      canvas.setAttribute('data-render', '1');
-      document.body.appendChild(canvas);
-      const ctx = canvas.getContext('2d', { willReadFrequently: false })!;
+      const ctx = canvas.getContext('2d')!;
 
       // ── 3. Web Audio ─────────────────────────────────────────────────────────
       const audioCtx = new AudioContext();
@@ -751,60 +749,71 @@ const VideoStudioPage: React.FC = () => {
         } catch {}
       }
 
-      // ── 4. Frame-by-frame JPEG encoder (no MediaRecorder needed) ────────────
-      // Collect canvas frames as JPEGs and assemble directly into a WebM file.
-      // This completely bypasses captureStream() and MediaRecorder, avoiding all
-      // Chrome security restrictions on cross-origin canvas content.
-      const writer = new WebMWriter(FPS, W, H);
+      // ── 4. MediaRecorder on the VISIBLE canvas ───────────────────────────────
+      // The renderCanvasRef canvas is mounted in the DOM and visible to the user.
+      // Chrome allows captureStream() on visible canvases. Drawing blob-URL video
+      // to a visible canvas does NOT taint it for capture purposes.
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+        ? 'video/webm;codecs=vp9,opus'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+        ? 'video/webm;codecs=vp8,opus'
+        : 'video/webm';
 
-      setRenderMsg('Rendering frames…');
+      const canvasStream = canvas.captureStream(FPS);
+      const combined = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...dest.stream.getAudioTracks(),
+      ]);
+
+      const recorder = new MediaRecorder(combined, { mimeType, videoBitsPerSecond: 5_000_000 });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+      // Draw first frame then start recorder
+      await drawFrame(ctx, W, H, 0, videoEls, frameInterval);
+      await new Promise(r => setTimeout(r, 300));
+      recorder.start(500);
+      console.log('[Renderer] recorder state:', recorder.state, 'mime:', mimeType);
+
+      setRenderMsg('Rendering…');
       let renderTime = 0;
       let frameCount = 0;
 
       while (renderTime <= totalDuration && !renderCancelRef.current) {
+        const t0 = performance.now();
         await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
-
-        // Capture this frame as JPEG data
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        const b64 = dataUrl.split(',')[1];
-        const binary = atob(b64);
-        const frameBytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) frameBytes[i] = binary.charCodeAt(i);
-        writer.addFrame(frameBytes);
-
         frameCount++;
         renderTime += frameInterval;
         setRenderProgress(Math.min(renderTime / totalDuration, 1));
         if (frameCount % 10 === 0) {
-          setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}… (${frameCount} frames)`);
-          // Yield to keep UI responsive
-          await new Promise(r => setTimeout(r, 0));
+          setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}… (${chunks.length} chunks)`);
         }
+        const elapsed = performance.now() - t0;
+        await new Promise(r => setTimeout(r, Math.max(0, (1000 / FPS) - elapsed)));
       }
 
       if (renderCancelRef.current) {
-        audioCtx.close();
+        recorder.stop(); audioCtx.close();
         setRenderMsg('Cancelled');
         await new Promise(r => setTimeout(r, 1000));
         return;
       }
 
-      // ── 5. Assemble and download ──────────────────────────────────────────────
-      setRenderMsg(`Assembling ${frameCount} frames…`);
-      await new Promise(r => setTimeout(r, 100));
+      // ── 5. Finalise ───────────────────────────────────────────────────────────
+      setRenderMsg('Finalising…');
+      await new Promise(r => setTimeout(r, 600));
+      await new Promise<void>(res => {
+        recorder.addEventListener('stop', () => res(), { once: true });
+        recorder.stop();
+      });
       audioCtx.close();
 
-      const finalBlob = writer.build();
-      console.log('[Renderer] done. frames:', frameCount, 'size:', finalBlob.size, 'bytes');
+      console.log('[Renderer] chunks:', chunks.length, 'total:', chunks.reduce((s,c)=>s+c.size,0));
+      if (chunks.length === 0) throw new Error('Render captured 0 bytes — try refreshing and rendering again.');
 
-      if (finalBlob.size < 1000) {
-        throw new Error('Output file is too small — no frames were captured. Check console for details.');
-      }
-
+      const finalBlob = new Blob(chunks, { type: mimeType });
       const url = URL.createObjectURL(finalBlob);
       const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
-
-      // Show inline preview — avoids file:// security restriction in Chrome
       setRenderedUrl(url);
       setRenderedName(`${safeName}.webm`);
       setRenderMsg(`Done! ${frameCount} frames, ${mb} MB`);
@@ -816,8 +825,6 @@ const VideoStudioPage: React.FC = () => {
       await new Promise(r => setTimeout(r, 5000));
     } finally {
       blobUrls.forEach(u => URL.revokeObjectURL(u));
-      const orphan = document.querySelector('canvas[data-render]');
-      if (orphan) orphan.remove();
       setIsRendering(false);
       setRenderProgress(0);
       setRenderMsg('');
@@ -1423,41 +1430,64 @@ const VideoStudioPage: React.FC = () => {
           </div>
         )}
 
-        {/* ── Render preview ───────────────────────────────────────────────── */}
-        {renderedUrl && (
+        {/* ── Render canvas + preview ──────────────────────────────────────── */}
+        {(isRendering || renderedUrl) && (
           <div className="shrink-0 bg-slate-950 border-t border-orange-500/30 px-5 py-4">
             <div className="flex items-start gap-4 max-w-3xl mx-auto">
-              {/* Inline video player — plays from blob URL, no file:// issue */}
-              <div className="flex-1 rounded-xl overflow-hidden bg-black border border-slate-700 shadow-xl"
-                style={{ aspectRatio: '16/9', maxWidth: 480 }}>
-                <video
-                  src={renderedUrl}
-                  controls
-                  autoPlay
-                  className="w-full h-full"
-                  style={{ display: 'block' }}
-                />
+
+              {/* Canvas shown during render / video shown after */}
+              <div className="rounded-xl overflow-hidden bg-black border border-slate-700 shadow-xl shrink-0"
+                style={{ width: 480, aspectRatio: '16/9' }}>
+                {isRendering && (
+                  <canvas
+                    ref={renderCanvasRef}
+                    width={1280} height={720}
+                    style={{ width: '100%', height: '100%', display: 'block' }}
+                  />
+                )}
+                {!isRendering && renderedUrl && (
+                  <video
+                    key={renderedUrl}
+                    src={renderedUrl}
+                    controls
+                    autoPlay
+                    playsInline
+                    style={{ width: '100%', height: '100%', display: 'block' }}
+                  />
+                )}
               </div>
+
               {/* Actions */}
               <div className="flex flex-col gap-3 pt-1">
-                <p className="text-sm font-semibold text-green-400 flex items-center gap-1.5">
-                  <Check size={15} /> Render complete
-                </p>
-                <p className="text-xs text-slate-400">{renderedName}</p>
-                <a
-                  href={renderedUrl}
-                  download={renderedName}
-                  className="flex items-center gap-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg px-4 py-2 text-sm font-semibold transition-colors">
-                  <Download size={14} /> Download
-                </a>
-                <button
-                  onClick={() => { URL.revokeObjectURL(renderedUrl); setRenderedUrl(null); }}
-                  className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg px-4 py-2 text-sm transition-colors">
-                  <X size={14} /> Dismiss
-                </button>
-                <p className="text-[10px] text-slate-500 max-w-[160px] leading-relaxed">
-                  If download doesn't play in Chrome, open in Firefox or VLC — Motion JPEG WebM is not supported by Chrome's native player.
-                </p>
+                {isRendering ? (
+                  <p className="text-sm font-semibold text-orange-400 flex items-center gap-1.5">
+                    <div className="w-3 h-3 border-2 border-orange-400/30 border-t-orange-400 rounded-full animate-spin" />
+                    {renderMsg}
+                  </p>
+                ) : (
+                  <p className="text-sm font-semibold text-green-400 flex items-center gap-1.5">
+                    <Check size={15} /> Render complete
+                  </p>
+                )}
+                {renderedName && <p className="text-xs text-slate-400">{renderedName}</p>}
+                {renderedUrl && (
+                  <>
+                    <a
+                      href={renderedUrl}
+                      download={renderedName}
+                      className="flex items-center gap-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg px-4 py-2 text-sm font-semibold transition-colors">
+                      <Download size={14} /> Download .webm
+                    </a>
+                    <button
+                      onClick={() => { if (renderedUrl) URL.revokeObjectURL(renderedUrl); setRenderedUrl(null); }}
+                      className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg px-4 py-2 text-sm transition-colors">
+                      <X size={14} /> Dismiss
+                    </button>
+                    <p className="text-[10px] text-slate-500 max-w-[180px] leading-relaxed">
+                      Video plays above. Download saves as .webm — open in Firefox or VLC if Chrome doesn't play the file.
+                    </p>
+                  </>
+                )}
               </div>
             </div>
           </div>
