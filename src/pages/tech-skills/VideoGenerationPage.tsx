@@ -103,7 +103,10 @@ const ProgressRing: React.FC<{ size?: number }> = ({ size = 52 }) => {
 
 const VideoCard: React.FC<{ job: VideoJob; onReuse: (p: string) => void }> = ({ job, onReuse }) => {
   const [expanded, setExpanded] = useState(false);
+  const [videoError, setVideoError] = useState(false);
   const cfg = STATUS_CONFIG[job.status];
+  // Prefer permanently saved URL over expiring Replicate URL
+  const playUrl = (job as any).saved_video_url || job.video_url;
   return (
     <div className={classNames('rounded-xl border backdrop-blur-sm overflow-hidden', cfg.border, 'bg-slate-900/60')}>
       <button onClick={() => setExpanded(e => !e)}
@@ -115,25 +118,31 @@ const VideoCard: React.FC<{ job: VideoJob; onReuse: (p: string) => void }> = ({ 
       </button>
       {expanded && (
         <div className="px-4 pb-4 space-y-3 border-t border-white/10 pt-3">
-          {job.status === 'succeeded' && job.video_url && (
+          {job.status === 'succeeded' && playUrl && !videoError && (
             <div className="space-y-2">
-              {/* Thumbnail — hover to play */}
               <div className="relative rounded-lg overflow-hidden bg-black" style={{ aspectRatio: '16/9' }}>
                 <video
-                  src={job.video_url}
+                  src={playUrl}
+                  crossOrigin="anonymous"
                   className="w-full h-full object-cover cursor-pointer"
                   muted playsInline preload="metadata"
-                  onMouseEnter={e => (e.currentTarget as HTMLVideoElement).play()}
+                  onError={() => setVideoError(true)}
+                  onMouseEnter={e => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
                   onMouseLeave={e => { const v = e.currentTarget as HTMLVideoElement; v.pause(); v.currentTime = 0; }}
                   onClick={e => {
                     const v = e.currentTarget as HTMLVideoElement;
-                    if (v.paused) { v.muted = false; v.play(); } else v.pause();
+                    if (v.paused) { v.muted = false; v.play().catch(() => {}); } else v.pause();
                   }}
                 />
                 <div className="absolute bottom-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded pointer-events-none">
                   hover to preview · click to play with sound
                 </div>
               </div>
+            </div>
+          )}
+          {job.status === 'succeeded' && playUrl && videoError && (
+            <div className="rounded-lg bg-slate-800 border border-slate-600 px-4 py-3 text-xs text-slate-400 text-center">
+              Video URL has expired — re-save to restore permanent access.
             </div>
           )}
           {job.status === 'failed' && (
@@ -144,11 +153,11 @@ const VideoCard: React.FC<{ job: VideoJob; onReuse: (p: string) => void }> = ({ 
               className="flex items-center gap-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-full px-3 py-1.5 transition-colors">
               <RotateCcw size={12} /> Reuse prompt
             </button>
-            {job.video_url && (
+            {playUrl && !videoError && (
               <button onClick={async () => {
                 const safeName = (job.prompt ?? 'video').slice(0, 40).replace(/[^a-zA-Z0-9_\-]/g, '_');
                 try {
-                  const resp = await fetch(job.video_url!);
+                  const resp = await fetch(playUrl);
                   const blob = await resp.blob();
                   const blobUrl = URL.createObjectURL(blob);
                   const a = document.createElement('a');
@@ -157,7 +166,7 @@ const VideoCard: React.FC<{ job: VideoJob; onReuse: (p: string) => void }> = ({ 
                   setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
                 } catch {
                   const a = document.createElement('a');
-                  a.href = job.video_url!; a.download = `${safeName}.mp4`; a.click();
+                  a.href = playUrl; a.download = `${safeName}.mp4`; a.click();
                 }
               }}
                 className="flex items-center gap-1.5 text-xs bg-cyan-700 hover:bg-cyan-600 text-white rounded-full px-3 py-1.5 transition-colors">
@@ -568,64 +577,93 @@ const VideoGenerationPage: React.FC = () => {
     }
   };
 
-  const handleDownloadLastFrame = () => {
-    const videoEl = generatedVideoRef.current;
-    if (!videoEl) { alert('No video loaded yet.'); return; }
+  const handleDownloadLastFrame = async () => {
+    const srcUrl = savedUrl ?? videoUrl;
+    if (!srcUrl) { alert('No video available yet.'); return; }
+    const safeName = getSafeName();
 
-    const doCapture = () => {
-      const w = videoEl.videoWidth  || 640;
-      const h = videoEl.videoHeight || 360;
+    try {
+      // Fetch the video as a local blob — avoids tainted canvas CORS restriction
+      const resp = await fetch(srcUrl);
+      if (!resp.ok) throw new Error('Could not fetch video');
+      const blob = await resp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      // Create a temporary video element pointed at our local blob URL
+      const tempVideo = document.createElement('video');
+      tempVideo.src = blobUrl;
+      tempVideo.muted = true;
+      tempVideo.playsInline = true;
+
+      await new Promise<void>((resolve, reject) => {
+        tempVideo.onloadedmetadata = () => {
+          // Seek to last frame
+          const target = Math.max(0, tempVideo.duration - 0.1);
+          tempVideo.currentTime = target;
+        };
+        tempVideo.onseeked = () => resolve();
+        tempVideo.onerror  = () => reject(new Error('Video load error'));
+        tempVideo.load();
+      });
+
+      // Draw to canvas
       const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
+      canvas.width  = tempVideo.videoWidth  || 640;
+      canvas.height = tempVideo.videoHeight || 360;
       const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(videoEl, 0, 0, w, h);
-      const safeName = getSafeName();
-      canvas.toBlob(blob => {
-        if (!blob) return;
-        const url = URL.createObjectURL(blob);
+      if (!ctx) throw new Error('Canvas context unavailable');
+      ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(blobUrl);
+
+      // Download
+      canvas.toBlob(imgBlob => {
+        if (!imgBlob) return;
+        const imgUrl = URL.createObjectURL(imgBlob);
         const a = document.createElement('a');
-        a.href = url;
+        a.href = imgUrl;
         a.download = `${safeName}_last_frame.png`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        setTimeout(() => URL.revokeObjectURL(imgUrl), 5000);
       }, 'image/png');
-    };
 
-    // If duration is known, seek to just before the end so we get the last frame
-    if (videoEl.duration && isFinite(videoEl.duration)) {
-      const targetTime = Math.max(0, videoEl.duration - 0.1);
-      if (Math.abs(videoEl.currentTime - targetTime) > 0.5) {
-        // Need to seek — wait for seeked event then capture
-        const onSeeked = () => {
-          videoEl.removeEventListener('seeked', onSeeked);
-          doCapture();
-        };
-        videoEl.addEventListener('seeked', onSeeked);
-        videoEl.currentTime = targetTime;
-      } else {
-        doCapture();
-      }
-    } else {
-      // Duration unknown — capture current frame
-      doCapture();
+    } catch (err) {
+      console.error('[LastFrame]', err);
+      alert('Could not capture last frame. Try saving the video to your account first, then try again.');
     }
   };
 
   // Capture a thumbnail from the generated video element
-  const captureThumbnailBlob = (): Promise<Blob | null> => new Promise(resolve => {
-    const videoEl = generatedVideoRef.current;
-    if (!videoEl) return resolve(null);
-    const canvas = document.createElement('canvas');
-    canvas.width  = videoEl.videoWidth  || 640;
-    canvas.height = videoEl.videoHeight || 360;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return resolve(null);
-    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.85);
-  });
+  const captureThumbnailBlob = async (): Promise<Blob | null> => {
+    const srcUrl = videoUrl; // always the fresh Replicate URL at save time
+    if (!srcUrl) return null;
+    try {
+      const resp = await fetch(srcUrl);
+      if (!resp.ok) return null;
+      const blob = await resp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const tempVideo = document.createElement('video');
+      tempVideo.src = blobUrl;
+      tempVideo.muted = true;
+      await new Promise<void>((resolve, reject) => {
+        tempVideo.onloadedmetadata = () => { tempVideo.currentTime = 0.5; };
+        tempVideo.onseeked = () => resolve();
+        tempVideo.onerror  = () => reject();
+        tempVideo.load();
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width  = tempVideo.videoWidth  || 640;
+      canvas.height = tempVideo.videoHeight || 360;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { URL.revokeObjectURL(blobUrl); return null; }
+      ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(blobUrl);
+      return new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
+    } catch {
+      return null;
+    }
+  };
 
   const handleSaveVideo = async () => {
     if (!videoUrl || !user?.id || !activeJob || isSaving) return;
@@ -655,7 +693,7 @@ const VideoGenerationPage: React.FC = () => {
         if (!thumbErr) {
           const { data: thumbSigned } = await supabase.storage
             .from('ai-videos')
-            .createSignedUrl(thumbPath, 60 * 60 * 24 * 365 * 10);
+            .createSignedUrl(thumbPath, 60 * 60 * 24 * 365);
           thumbnailUrl = thumbSigned?.signedUrl ?? null;
         }
       }
@@ -663,7 +701,7 @@ const VideoGenerationPage: React.FC = () => {
       // Get the permanent signed URL (valid for 10 years)
       const { data: signed } = await supabase.storage
         .from('ai-videos')
-        .createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
+        .createSignedUrl(path, 60 * 60 * 24 * 365);
 
       const permanentUrl = signed?.signedUrl ?? null;
 
@@ -1388,7 +1426,7 @@ Return ONLY the improved text. No explanation, no preamble.`
                       />
                     </div>
                     <div className="rounded-xl overflow-hidden bg-black border border-green-500/20">
-                      <video ref={generatedVideoRef} src={savedUrl ?? videoUrl} controls autoPlay loop className="generated-video w-full max-h-80" />
+                      <video ref={generatedVideoRef} src={savedUrl ?? videoUrl} controls autoPlay loop crossOrigin="anonymous" className="generated-video w-full max-h-80" />
                     </div>
 
                     {/* Save Video to bucket */}
