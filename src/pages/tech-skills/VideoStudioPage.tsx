@@ -749,74 +749,141 @@ const VideoStudioPage: React.FC = () => {
         } catch {}
       }
 
-      // ── 4. MediaRecorder on the VISIBLE canvas ───────────────────────────────
-      // The renderCanvasRef canvas is mounted in the DOM and visible to the user.
-      // Chrome allows captureStream() on visible canvases. Drawing blob-URL video
-      // to a visible canvas does NOT taint it for capture purposes.
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-        ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-        ? 'video/webm;codecs=vp8,opus'
-        : 'video/webm';
+      // ── 4. VideoEncoder API — encodes frames directly to VP8 ────────────────
+      // Chrome 94+ native API. Encodes ImageBitmap frames from the canvas to VP8
+      // without captureStream or MediaRecorder — no CORS restrictions apply.
+      // Falls back to MJPEG WebM if VideoEncoder not available.
 
-      const canvasStream = canvas.captureStream(FPS);
-      const combined = new MediaStream([
-        ...canvasStream.getVideoTracks(),
-        ...dest.stream.getAudioTracks(),
-      ]);
-
-      const recorder = new MediaRecorder(combined, { mimeType, videoBitsPerSecond: 5_000_000 });
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-
-      // Draw first frame then start recorder
-      await drawFrame(ctx, W, H, 0, videoEls, frameInterval);
-      await new Promise(r => setTimeout(r, 300));
-      recorder.start(500);
-      console.log('[Renderer] recorder state:', recorder.state, 'mime:', mimeType);
-
-      setRenderMsg('Rendering…');
-      let renderTime = 0;
+      const encodedChunks: EncodedVideoChunk[] = [];
       let frameCount = 0;
+      let renderTime = 0;
 
-      while (renderTime <= totalDuration && !renderCancelRef.current) {
-        const t0 = performance.now();
-        await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
-        frameCount++;
-        renderTime += frameInterval;
-        setRenderProgress(Math.min(renderTime / totalDuration, 1));
-        if (frameCount % 10 === 0) {
-          setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}… (${chunks.length} chunks)`);
+      // @ts-ignore
+      if (typeof VideoEncoder !== 'undefined') {
+        // ── VP8 via VideoEncoder ────────────────────────────────────────────────
+        console.log('[Renderer] Using VideoEncoder API');
+        const totalFrames = Math.ceil(totalDuration * FPS);
+
+        // @ts-ignore
+        const encoder = new VideoEncoder({
+          output: (chunk: EncodedVideoChunk) => encodedChunks.push(chunk),
+          error: (e: Error) => console.error('[VideoEncoder]', e),
+        });
+
+        // @ts-ignore
+        encoder.configure({
+          codec: 'vp8',
+          width: W,
+          height: H,
+          bitrate: 5_000_000,
+          framerate: FPS,
+        });
+
+        setRenderMsg('Encoding frames…');
+
+        while (renderTime <= totalDuration && !renderCancelRef.current) {
+          await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
+
+          // @ts-ignore
+          const bitmap = await createImageBitmap(canvas);
+          const timestamp = Math.round(renderTime * 1_000_000); // microseconds
+          // @ts-ignore
+          const frame = new VideoFrame(bitmap, { timestamp, duration: Math.round(frameInterval * 1_000_000) });
+          const isKey = frameCount % (FPS * 2) === 0; // keyframe every 2s
+          encoder.encode(frame, { keyFrame: isKey });
+          frame.close();
+          bitmap.close();
+
+          frameCount++;
+          renderTime += frameInterval;
+          setRenderProgress(Math.min(renderTime / totalDuration, 1));
+          if (frameCount % 10 === 0) {
+            setRenderMsg(`Encoding ${fmt(renderTime)} / ${fmt(totalDuration)}… (${frameCount} frames)`);
+            await new Promise(r => setTimeout(r, 0)); // yield UI
+          }
         }
-        const elapsed = performance.now() - t0;
-        await new Promise(r => setTimeout(r, Math.max(0, (1000 / FPS) - elapsed)));
+
+        setRenderMsg('Flushing encoder…');
+        await encoder.flush();
+        encoder.close();
+        audioCtx.close();
+
+        if (renderCancelRef.current) {
+          setRenderMsg('Cancelled');
+          await new Promise(r => setTimeout(r, 1000));
+          return;
+        }
+
+        // ── Build IVF container (simple VP8 container Chrome can play) ──────────
+        // IVF is the simplest VP8 container format — Chrome plays it natively.
+        const IVF_FILE_HEADER = 32;
+        const IVF_FRAME_HEADER = 12;
+        const totalSize = IVF_FILE_HEADER + encodedChunks.reduce((s, c) => s + IVF_FRAME_HEADER + c.byteLength, 0);
+        const buf = new ArrayBuffer(totalSize);
+        const view = new DataView(buf);
+        let offset = 0;
+
+        // File header
+        [0x44,0x4B,0x49,0x46].forEach(b => { view.setUint8(offset++, b); }); // "DKIF"
+        view.setUint16(offset, 0, true); offset += 2;       // version
+        view.setUint16(offset, 32, true); offset += 2;      // header length
+        [0x56,0x50,0x38,0x30].forEach(b => { view.setUint8(offset++, b); }); // "VP80"
+        view.setUint16(offset, W, true); offset += 2;
+        view.setUint16(offset, H, true); offset += 2;
+        view.setUint32(offset, FPS, true); offset += 4;     // timebase den
+        view.setUint32(offset, 1, true); offset += 4;       // timebase num
+        view.setUint32(offset, encodedChunks.length, true); offset += 4;
+        view.setUint32(offset, 0, true); offset += 4;       // unused
+
+        // Frame data
+        encodedChunks.forEach((chunk, i) => {
+          view.setUint32(offset, chunk.byteLength, true); offset += 4;
+          view.setUint32(offset, i, true); offset += 4;             // pts low
+          view.setUint32(offset, 0, true); offset += 4;             // pts high
+          const frameData = new Uint8Array(chunk.byteLength);
+          chunk.copyTo(frameData);
+          new Uint8Array(buf).set(frameData, offset);
+          offset += chunk.byteLength;
+        });
+
+        const finalBlob = new Blob([buf], { type: 'video/webm' });
+        const url = URL.createObjectURL(finalBlob);
+        const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
+        setRenderedUrl(url);
+        setRenderedName(`${safeName}.webm`);
+        setRenderMsg(`Done! ${frameCount} frames, ${mb} MB`);
+
+      } else {
+        // ── Fallback: MJPEG WebM (plays in Firefox/VLC, not Chrome) ────────────
+        console.log('[Renderer] VideoEncoder not available, using MJPEG fallback');
+        const writer = new WebMWriter(FPS, W, H);
+
+        while (renderTime <= totalDuration && !renderCancelRef.current) {
+          await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const b64 = dataUrl.split(',')[1];
+          const binary = atob(b64);
+          const frameBytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) frameBytes[i] = binary.charCodeAt(i);
+          writer.addFrame(frameBytes);
+          frameCount++;
+          renderTime += frameInterval;
+          setRenderProgress(Math.min(renderTime / totalDuration, 1));
+          if (frameCount % 10 === 0) {
+            setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}…`);
+            await new Promise(r => setTimeout(r, 0));
+          }
+        }
+
+        audioCtx.close();
+        const finalBlob = writer.build();
+        const url = URL.createObjectURL(finalBlob);
+        const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
+        setRenderedUrl(url);
+        setRenderedName(`${safeName}.webm`);
+        setRenderMsg(`Done! ${frameCount} frames, ${mb} MB (open in Firefox or VLC)`);
       }
 
-      if (renderCancelRef.current) {
-        recorder.stop(); audioCtx.close();
-        setRenderMsg('Cancelled');
-        await new Promise(r => setTimeout(r, 1000));
-        return;
-      }
-
-      // ── 5. Finalise ───────────────────────────────────────────────────────────
-      setRenderMsg('Finalising…');
-      await new Promise(r => setTimeout(r, 600));
-      await new Promise<void>(res => {
-        recorder.addEventListener('stop', () => res(), { once: true });
-        recorder.stop();
-      });
-      audioCtx.close();
-
-      console.log('[Renderer] chunks:', chunks.length, 'total:', chunks.reduce((s,c)=>s+c.size,0));
-      if (chunks.length === 0) throw new Error('Render captured 0 bytes — try refreshing and rendering again.');
-
-      const finalBlob = new Blob(chunks, { type: mimeType });
-      const url = URL.createObjectURL(finalBlob);
-      const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
-      setRenderedUrl(url);
-      setRenderedName(`${safeName}.webm`);
-      setRenderMsg(`Done! ${frameCount} frames, ${mb} MB`);
       await new Promise(r => setTimeout(r, 2000));
 
     } catch (err: any) {
