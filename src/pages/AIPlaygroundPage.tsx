@@ -148,8 +148,13 @@ const MODEL_OPTIONS = [
 ];
 
 const getModelDisplayName = (modelId: string): string => {
-  const match = MODEL_OPTIONS.find((m) => m.value === modelId);
-  return match ? match.label : modelId;
+  const trimmed = (modelId || '').trim();
+  const match = MODEL_OPTIONS.find((m) => m.value === trimmed);
+  if (match) return match.label;
+  // Friendly fallback for unrecognised IDs
+  if (trimmed.includes('sonnet')) return 'Claude Sonnet 4.6';
+  if (trimmed.includes('haiku'))  return 'Claude Haiku';
+  return trimmed || 'Claude';
 };
 
 const AIPlaygroundPage: React.FC = () => {
@@ -588,7 +593,12 @@ const AIPlaygroundPage: React.FC = () => {
               <textarea ref={textareaRef} value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={handleKeyDown}
                 placeholder="Message Claude..." rows={1} disabled={sending || !modelLoaded}
                 className="flex-1 resize-none outline-none text-base text-gray-800 placeholder-gray-400 bg-transparent min-h-[24px] max-h-[200px] leading-6" />
-              <span className="flex-shrink-0 text-xs text-gray-400 mb-0.5 pr-1">{getModelDisplayName(playgroundModel)}</span>
+              <span className="flex-shrink-0 text-xs mb-0.5 pr-1" style={{
+                color: playgroundModel.includes('sonnet') ? '#7c3aed' : '#9ca3af',
+                fontWeight: playgroundModel.includes('sonnet') ? 600 : 400,
+              }}>
+                {modelLoaded ? getModelDisplayName(playgroundModel) : '…'}
+              </span>
               {/* Voice input button */}
               <button
                 onClick={toggleVoiceInput}
