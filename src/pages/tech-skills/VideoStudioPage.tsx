@@ -749,141 +749,206 @@ const VideoStudioPage: React.FC = () => {
         } catch {}
       }
 
-      // ── 4. VideoEncoder API — encodes frames directly to VP8 ────────────────
-      // Chrome 94+ native API. Encodes ImageBitmap frames from the canvas to VP8
-      // without captureStream or MediaRecorder — no CORS restrictions apply.
-      // Falls back to MJPEG WebM if VideoEncoder not available.
+      // ── 4. VideoEncoder → VP8 frames → WebM container ────────────────────────
+      // VideoEncoder (Chrome 94+) encodes canvas ImageBitmap frames to VP8.
+      // We collect the raw encoded chunks then pack them into a WebM container.
+      // No captureStream, no MediaRecorder, no external packages, no CORS issues.
 
-      const encodedChunks: EncodedVideoChunk[] = [];
       let frameCount = 0;
       let renderTime = 0;
 
       // @ts-ignore
-      if (typeof VideoEncoder !== 'undefined') {
-        // ── VP8 via VideoEncoder ────────────────────────────────────────────────
-        console.log('[Renderer] Using VideoEncoder API');
-        const totalFrames = Math.ceil(totalDuration * FPS);
-
-        // @ts-ignore
-        const encoder = new VideoEncoder({
-          output: (chunk: EncodedVideoChunk) => encodedChunks.push(chunk),
-          error: (e: Error) => console.error('[VideoEncoder]', e),
-        });
-
-        // @ts-ignore
-        encoder.configure({
-          codec: 'vp8',
-          width: W,
-          height: H,
-          bitrate: 5_000_000,
-          framerate: FPS,
-        });
-
-        setRenderMsg('Encoding frames…');
-
-        while (renderTime <= totalDuration && !renderCancelRef.current) {
-          await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
-
-          // @ts-ignore
-          const bitmap = await createImageBitmap(canvas);
-          const timestamp = Math.round(renderTime * 1_000_000); // microseconds
-          // @ts-ignore
-          const frame = new VideoFrame(bitmap, { timestamp, duration: Math.round(frameInterval * 1_000_000) });
-          const isKey = frameCount % (FPS * 2) === 0; // keyframe every 2s
-          encoder.encode(frame, { keyFrame: isKey });
-          frame.close();
-          bitmap.close();
-
-          frameCount++;
-          renderTime += frameInterval;
-          setRenderProgress(Math.min(renderTime / totalDuration, 1));
-          if (frameCount % 10 === 0) {
-            setRenderMsg(`Encoding ${fmt(renderTime)} / ${fmt(totalDuration)}… (${frameCount} frames)`);
-            await new Promise(r => setTimeout(r, 0)); // yield UI
-          }
-        }
-
-        setRenderMsg('Flushing encoder…');
-        await encoder.flush();
-        encoder.close();
-        audioCtx.close();
-
-        if (renderCancelRef.current) {
-          setRenderMsg('Cancelled');
-          await new Promise(r => setTimeout(r, 1000));
-          return;
-        }
-
-        // ── Build IVF container (simple VP8 container Chrome can play) ──────────
-        // IVF is the simplest VP8 container format — Chrome plays it natively.
-        const IVF_FILE_HEADER = 32;
-        const IVF_FRAME_HEADER = 12;
-        const totalSize = IVF_FILE_HEADER + encodedChunks.reduce((s, c) => s + IVF_FRAME_HEADER + c.byteLength, 0);
-        const buf = new ArrayBuffer(totalSize);
-        const view = new DataView(buf);
-        let offset = 0;
-
-        // File header
-        [0x44,0x4B,0x49,0x46].forEach(b => { view.setUint8(offset++, b); }); // "DKIF"
-        view.setUint16(offset, 0, true); offset += 2;       // version
-        view.setUint16(offset, 32, true); offset += 2;      // header length
-        [0x56,0x50,0x38,0x30].forEach(b => { view.setUint8(offset++, b); }); // "VP80"
-        view.setUint16(offset, W, true); offset += 2;
-        view.setUint16(offset, H, true); offset += 2;
-        view.setUint32(offset, FPS, true); offset += 4;     // timebase den
-        view.setUint32(offset, 1, true); offset += 4;       // timebase num
-        view.setUint32(offset, encodedChunks.length, true); offset += 4;
-        view.setUint32(offset, 0, true); offset += 4;       // unused
-
-        // Frame data
-        encodedChunks.forEach((chunk, i) => {
-          view.setUint32(offset, chunk.byteLength, true); offset += 4;
-          view.setUint32(offset, i, true); offset += 4;             // pts low
-          view.setUint32(offset, 0, true); offset += 4;             // pts high
-          const frameData = new Uint8Array(chunk.byteLength);
-          chunk.copyTo(frameData);
-          new Uint8Array(buf).set(frameData, offset);
-          offset += chunk.byteLength;
-        });
-
-        const finalBlob = new Blob([buf], { type: 'video/webm' });
-        const url = URL.createObjectURL(finalBlob);
-        const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
-        setRenderedUrl(url);
-        setRenderedName(`${safeName}.webm`);
-        setRenderMsg(`Done! ${frameCount} frames, ${mb} MB`);
-
-      } else {
-        // ── Fallback: MJPEG WebM (plays in Firefox/VLC, not Chrome) ────────────
-        console.log('[Renderer] VideoEncoder not available, using MJPEG fallback');
-        const writer = new WebMWriter(FPS, W, H);
-
-        while (renderTime <= totalDuration && !renderCancelRef.current) {
-          await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-          const b64 = dataUrl.split(',')[1];
-          const binary = atob(b64);
-          const frameBytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) frameBytes[i] = binary.charCodeAt(i);
-          writer.addFrame(frameBytes);
-          frameCount++;
-          renderTime += frameInterval;
-          setRenderProgress(Math.min(renderTime / totalDuration, 1));
-          if (frameCount % 10 === 0) {
-            setRenderMsg(`Rendering ${fmt(renderTime)} / ${fmt(totalDuration)}…`);
-            await new Promise(r => setTimeout(r, 0));
-          }
-        }
-
-        audioCtx.close();
-        const finalBlob = writer.build();
-        const url = URL.createObjectURL(finalBlob);
-        const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
-        setRenderedUrl(url);
-        setRenderedName(`${safeName}.webm`);
-        setRenderMsg(`Done! ${frameCount} frames, ${mb} MB (open in Firefox or VLC)`);
+      if (typeof VideoEncoder === 'undefined') {
+        throw new Error('VideoEncoder API not available. Please use Chrome 94 or newer.');
       }
 
+      // Collect encoded VP8 chunks
+      const vp8Chunks: Array<{ data: Uint8Array; isKey: boolean; timestamp: number }> = [];
+
+      // @ts-ignore
+      const encoder = new VideoEncoder({
+        output: (chunk: any) => {
+          const data = new Uint8Array(chunk.byteLength);
+          chunk.copyTo(data);
+          vp8Chunks.push({ data, isKey: chunk.type === 'key', timestamp: chunk.timestamp });
+        },
+        error: (e: Error) => console.error('[VideoEncoder]', e),
+      });
+
+      // @ts-ignore
+      encoder.configure({
+        codec: 'vp8',
+        width: W, height: H,
+        bitrate: 5_000_000,
+        framerate: FPS,
+      });
+
+      setRenderMsg('Encoding frames…');
+
+      while (renderTime <= totalDuration && !renderCancelRef.current) {
+        await drawFrame(ctx, W, H, renderTime, videoEls, frameInterval);
+
+        // @ts-ignore
+        const bitmap = await createImageBitmap(canvas);
+        const tsUs = Math.round(renderTime * 1_000_000);
+        const durUs = Math.round(frameInterval * 1_000_000);
+        // @ts-ignore
+        const vframe = new VideoFrame(bitmap, { timestamp: tsUs, duration: durUs });
+        const isKey = frameCount % (FPS * 2) === 0;
+        encoder.encode(vframe, { keyFrame: isKey });
+        vframe.close();
+        bitmap.close();
+
+        frameCount++;
+        renderTime += frameInterval;
+        setRenderProgress(Math.min(renderTime / totalDuration, 0.9));
+        if (frameCount % 10 === 0) {
+          setRenderMsg(`Encoding ${fmt(renderTime)} / ${fmt(totalDuration)}… (${frameCount} frames)`);
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+
+      if (renderCancelRef.current) {
+        encoder.close(); audioCtx.close();
+        setRenderMsg('Cancelled');
+        await new Promise(r => setTimeout(r, 1000));
+        return;
+      }
+
+      setRenderMsg('Flushing encoder…');
+      await encoder.flush();
+      encoder.close();
+      audioCtx.close();
+
+      setRenderProgress(0.95);
+      setRenderMsg(`Muxing ${vp8Chunks.length} frames into WebM…`);
+      await new Promise(r => setTimeout(r, 50));
+
+      // ── Build a valid WebM container around the VP8 frames ───────────────────
+      // WebM is EBML-based. We write: EBML header → Segment → Info → Tracks → Cluster(s)
+      // Each frame goes into a SimpleBlock inside a Cluster.
+      // timecodeScale = 1ms = 1,000,000 ns
+
+      const TIMESCALE_MS = 1; // we use ms as our timecode unit
+
+      // EBML encoding helpers
+      const num2bytes = (n: number, byteLen: number) => {
+        const b = new Uint8Array(byteLen);
+        for (let i = byteLen - 1; i >= 0; i--) { b[i] = n & 0xFF; n >>>= 8; }
+        return b;
+      };
+      const vint = (n: number): Uint8Array => {
+        if (n < 0x7F)     return new Uint8Array([n | 0x80]);
+        if (n < 0x3FFF)   return new Uint8Array([(n >> 8) | 0x40, n & 0xFF]);
+        if (n < 0x1FFFFF) return new Uint8Array([(n >> 16) | 0x20, (n >> 8) & 0xFF, n & 0xFF]);
+        return new Uint8Array([(n >> 24) | 0x10, (n >> 16) & 0xFF, (n >> 8) & 0xFF, n & 0xFF]);
+      };
+      const cat = (...arrs: Uint8Array[]) => {
+        const out = new Uint8Array(arrs.reduce((s, a) => s + a.length, 0));
+        let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+        return out;
+      };
+      const el = (id: number[], data: Uint8Array) =>
+        cat(new Uint8Array(id), vint(data.length), data);
+
+      // EBML Header
+      const ebmlHeader = cat(
+        new Uint8Array([0x1A,0x45,0xDF,0xA3]), // EBML
+        vint(31),
+        new Uint8Array([
+          0x42,0x86,0x81,0x01,                 // EBMLVersion=1
+          0x42,0xF7,0x81,0x01,                 // EBMLReadVersion=1
+          0x42,0xF2,0x81,0x04,                 // MaxIDLength=4
+          0x42,0xF3,0x81,0x08,                 // MaxSizeLength=8
+          0x42,0x82,0x84,0x77,0x65,0x62,0x6D, // DocType="webm"
+          0x42,0x87,0x81,0x02,                 // DocTypeVersion=2
+          0x42,0x85,0x81,0x02,                 // DocTypeReadVersion=2
+        ])
+      );
+
+      // Segment Info
+      const durationMs = Math.round(totalDuration * 1000);
+      const segInfo = el([0x15,0x49,0xA9,0x66], cat(
+        el([0x2A,0xD7,0xB1], num2bytes(1_000_000, 8)), // TimecodeScale=1ms in ns
+        el([0x44,0x89], new Uint8Array([0x44,0xA8,                // Duration as float64
+          ...Array.from(new Uint8Array(new Float64Array([durationMs]).buffer)).reverse()
+        ])),
+        el([0x4D,0x80], new TextEncoder().encode('Girls AIing')), // MuxingApp
+        el([0x57,0x41], new TextEncoder().encode('Girls AIing')), // WritingApp
+      ));
+
+      // Track: VP8 video
+      const codecId = new TextEncoder().encode('V_VP8');
+      const trackEntry = el([0xAE], cat(
+        el([0xD7], new Uint8Array([0x01])),              // TrackNumber=1
+        el([0x73,0xC5], num2bytes(1, 8)),                // TrackUID=1
+        el([0x83], new Uint8Array([0x01])),              // TrackType=1 (video)
+        el([0x86], codecId),                             // CodecID="V_VP8"
+        el([0xE0], cat(                                  // Video element
+          el([0xB0], num2bytes(W, 2)),                   // PixelWidth
+          el([0xBA], num2bytes(H, 2)),                   // PixelHeight
+        )),
+      ));
+      const tracks = el([0x16,0x54,0xAE,0x6B], trackEntry);
+
+      // Clusters: group frames into ~1s clusters
+      const clusterDuration = 1000; // ms
+      const clusters: Uint8Array[] = [];
+      let clusterFrames: Uint8Array[] = [];
+      let clusterTimestamp = 0;
+
+      vp8Chunks.forEach((chunk, i) => {
+        const frameTimestampMs = Math.round(chunk.timestamp / 1000); // us → ms
+        if (clusterFrames.length === 0) clusterTimestamp = frameTimestampMs;
+
+        // SimpleBlock: vint(tracknum) + int16(relative_timestamp) + flags + data
+        const relTs = frameTimestampMs - clusterTimestamp;
+        const flags = chunk.isKey ? 0x80 : 0x00;
+        const simpleBlock = cat(
+          new Uint8Array([0xA3]),                        // SimpleBlock ID
+          vint(1 + 2 + 1 + chunk.data.length),          // size
+          vint(1),                                       // track number
+          new Uint8Array([(relTs >> 8) & 0xFF, relTs & 0xFF]), // relative timestamp (int16)
+          new Uint8Array([flags]),                       // flags
+          chunk.data,                                    // frame data
+        );
+        clusterFrames.push(simpleBlock);
+
+        const nextTs = i + 1 < vp8Chunks.length
+          ? Math.round(vp8Chunks[i+1].timestamp / 1000)
+          : frameTimestampMs + 40;
+
+        if (nextTs - clusterTimestamp >= clusterDuration || i === vp8Chunks.length - 1) {
+          const clusterData = cat(
+            el([0xE7], num2bytes(clusterTimestamp, 8)), // Timecode
+            ...clusterFrames,
+          );
+          clusters.push(cat(
+            new Uint8Array([0x1F,0x43,0xB6,0x75]),     // Cluster ID
+            new Uint8Array([0x01,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF]), // unknown size
+            clusterData,
+          ));
+          clusterFrames = [];
+        }
+      });
+
+      const segmentContent = cat(segInfo, tracks, ...clusters);
+      const segment = cat(
+        new Uint8Array([0x18,0x53,0x80,0x67]),          // Segment ID
+        new Uint8Array([0x01,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF]), // unknown size
+        segmentContent,
+      );
+
+      const finalBlob = new Blob([ebmlHeader, segment], { type: 'video/webm' });
+      console.log('[Renderer] WebM built. frames:', frameCount, 'size:', finalBlob.size, 'bytes');
+
+      if (finalBlob.size < 10000) throw new Error('Output too small — encoding may have failed.');
+
+      const url = URL.createObjectURL(finalBlob);
+      const mb = (finalBlob.size / 1024 / 1024).toFixed(1);
+      setRenderedUrl(url);
+      setRenderedName(`${safeName}.webm`);
+      setRenderMsg(`Done! ${frameCount} frames, ${mb} MB`);
       await new Promise(r => setTimeout(r, 2000));
 
     } catch (err: any) {
