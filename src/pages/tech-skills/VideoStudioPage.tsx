@@ -14,7 +14,8 @@ import {
   Plus, Trash2, Download, Upload, GripHorizontal,
   ChevronLeft, ChevronRight, Volume2, VolumeX,
   Square, Circle, AlignLeft, Scissors, Save,
-  Layers, X, Check, AlertTriangle,
+  Layers, X, Check, AlertTriangle, FileText,
+  ChevronDown, ChevronUp, FolderOpen, Clock,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -63,6 +64,20 @@ interface LibraryVideo {
   name: string;
   url: string;
   thumbnail?: string;
+}
+
+interface ProjectSnapshot {
+  id: string;
+  name: string;
+  thumbnailUrl: string | null;
+  savedAt: string;
+  projectData: {
+    clips: VideoClip[];
+    audioTrack: AudioClip | null;
+    voiceSegs: VoiceSegment[];
+    overlays: TextOverlay[];
+    videoName: string;
+  };
 }
 
 const COLORS = ['#ffffff','#facc15','#34d399','#60a5fa','#f87171','#c084fc','#fb923c'];
@@ -133,6 +148,19 @@ const VideoStudioPage: React.FC = () => {
   const [draggingClip, setDraggingClip] = useState<string | null>(null);
   const timelineRef    = useRef<HTMLDivElement>(null);
 
+  // ── Timeline collapse ──────────────────────────────────────────────────────
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+
+  // ── Project name + save ────────────────────────────────────────────────────
+  const [videoName,      setVideoName]      = useState('My Project');
+  const [isSavingProject, setIsSavingProject] = useState(false);
+  const [saveProjectMsg,  setSaveProjectMsg]  = useState('');
+  const [savedProjects,   setSavedProjects]   = useState<ProjectSnapshot[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+
+  // ── View mode (edit | history) ─────────────────────────────────────────────
+  const [studioView, setStudioView] = useState<'edit' | 'history'>('edit');
+
   // ── Total duration ─────────────────────────────────────────────────────────
   const totalDuration = useMemo(() => {
     const clipEnd = clips.reduce((m, c) =>
@@ -154,6 +182,9 @@ const VideoStudioPage: React.FC = () => {
     overlays.filter(o =>
       playhead >= o.timelineStart && playhead < o.timelineStart + o.duration
     ), [overlays, playhead]);
+
+  // ── Load projects on mount ────────────────────────────────────────────────
+  useEffect(() => { if (user?.id) loadProjects(); }, [user?.id]);
 
   // ── Load library from Supabase ─────────────────────────────────────────────
   useEffect(() => {
@@ -349,34 +380,172 @@ const VideoStudioPage: React.FC = () => {
     setDraggingClip(null);
   };
 
-  // ── Export (download first clip as fallback, with ffmpeg note) ────────────
+  // ── Split clip at playhead ─────────────────────────────────────────────────
+  const splitClipAtPlayhead = () => {
+    const clip = clips.find(c => {
+      const end = c.timelineStart + (c.trimEnd - c.trimStart);
+      return playhead > c.timelineStart + 0.1 && playhead < end - 0.1;
+    });
+    if (!clip) return;
+    const splitPoint = playhead - clip.timelineStart + clip.trimStart;
+    const leftClip: VideoClip = {
+      ...clip, id: uid(),
+      trimEnd: splitPoint,
+    };
+    const rightClip: VideoClip = {
+      ...clip, id: uid(),
+      trimStart: splitPoint,
+      timelineStart: playhead,
+    };
+    setClips(prev => prev.map(c => c.id === clip.id ? leftClip : c).concat([rightClip]));
+    setSelectedClip(rightClip.id);
+  };
+
+  // ── Delete selected clip section ───────────────────────────────────────────
+  const deleteSelected = () => {
+    if (!selectedClip) return;
+    deleteClip(selectedClip);
+  };
+
+  // ── Export: download each track as a separate named file ──────────────────
   const handleExport = async () => {
     if (clips.length === 0) return;
     setIsExporting(true);
-    setExportMsg('Preparing export…');
-
-    // Try to use ffmpeg.wasm if available (requires COOP/COEP headers)
+    const safeName = videoName.trim().replace(/[^a-zA-Z0-9_\-]/g, '_') || 'project';
     try {
-      // @ts-ignore
-      if (typeof window !== 'undefined' && window.crossOriginIsolated) {
-        setExportMsg('ffmpeg.wasm is available — full export coming soon!');
-        await new Promise(r => setTimeout(r, 2000));
-      } else {
-        // Fallback: download first clip
-        setExportMsg('Downloading your clips individually…');
-        for (const clip of clips) {
+      // Download video clips
+      setExportMsg('Downloading video clips…');
+      for (let i = 0; i < clips.length; i++) {
+        const clip = clips[i];
+        const label = clips.length > 1 ? `${safeName}_clip${i + 1}` : `${safeName}`;
+        try {
+          const resp = await fetch(clip.src);
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
-          a.href = clip.src;
-          a.download = `${clip.name.replace(/\s+/g, '_')}.mp4`;
-          a.click();
-          await new Promise(r => setTimeout(r, 500));
+          a.href = url; a.download = `${label}.mp4`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } catch {
+          const a = document.createElement('a');
+          a.href = clip.src; a.download = `${label}.mp4`; a.click();
         }
+        await new Promise(r => setTimeout(r, 600));
       }
+      // Download audio track
+      if (audioTrack) {
+        setExportMsg('Downloading music track…');
+        await new Promise(r => setTimeout(r, 300));
+        const a = document.createElement('a');
+        a.href = audioTrack.src;
+        a.download = `${safeName}_music.webm`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        await new Promise(r => setTimeout(r, 600));
+      }
+      // Download voiceover segments
+      for (let i = 0; i < voiceSegs.length; i++) {
+        setExportMsg(`Downloading voiceover ${i + 1}…`);
+        await new Promise(r => setTimeout(r, 300));
+        const a = document.createElement('a');
+        a.href = voiceSegs[i].src;
+        a.download = `${safeName}_voice${i + 1}.webm`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        await new Promise(r => setTimeout(r, 600));
+      }
+      setExportMsg('All tracks downloaded!');
+      await new Promise(r => setTimeout(r, 1500));
     } catch (err) {
       console.error(err);
+      setExportMsg('Export error');
     } finally {
       setIsExporting(false);
       setExportMsg('');
+    }
+  };
+
+  // ── Save project to Supabase storage ──────────────────────────────────────
+  const handleSaveProject = async () => {
+    if (!user?.id) return;
+    setIsSavingProject(true);
+    setSaveProjectMsg('Saving…');
+    try {
+      const projectData = { clips, audioTrack, voiceSegs, overlays, videoName };
+      const projectJson = JSON.stringify(projectData);
+      const blob = new Blob([projectJson], { type: 'application/json' });
+      const projectId = uid();
+      const path = `${user.id}/projects/${projectId}.json`;
+
+      const { error } = await supabase.storage
+        .from('ai-videos')
+        .upload(path, blob, { contentType: 'application/json', upsert: false });
+      if (error) throw error;
+
+      const { data: signed } = await supabase.storage
+        .from('ai-videos')
+        .createSignedUrl(path, 60 * 60 * 24 * 365);
+
+      // Save project record to DB
+      await supabase.from('video_studio_projects').insert({
+        id: projectId,
+        user_id: user.id,
+        name: videoName.trim() || 'Untitled Project',
+        project_url: signed?.signedUrl ?? null,
+        created_at: new Date().toISOString(),
+      });
+
+      setSaveProjectMsg('Saved!');
+      await loadProjects();
+      await new Promise(r => setTimeout(r, 2000));
+    } catch (err: any) {
+      setSaveProjectMsg('Error: ' + (err.message ?? 'Save failed'));
+      await new Promise(r => setTimeout(r, 3000));
+    } finally {
+      setIsSavingProject(false);
+      setSaveProjectMsg('');
+    }
+  };
+
+  // ── Load saved projects ────────────────────────────────────────────────────
+  const loadProjects = async () => {
+    if (!user?.id) return;
+    setLoadingProjects(true);
+    try {
+      const { data } = await supabase
+        .from('video_studio_projects')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (data) {
+        setSavedProjects(data.map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          thumbnailUrl: d.thumbnail_url ?? null,
+          savedAt: d.created_at,
+          projectData: null, // loaded on demand
+          projectUrl: d.project_url,
+        })) as any);
+      }
+    } catch {}
+    setLoadingProjects(false);
+  };
+
+  // ── Load a saved project ───────────────────────────────────────────────────
+  const handleLoadProject = async (project: any) => {
+    try {
+      const resp = await fetch(project.projectUrl);
+      if (!resp.ok) throw new Error('Could not fetch project file');
+      const data = await resp.json();
+      setClips(data.clips ?? []);
+      setAudioTrack(data.audioTrack ?? null);
+      setVoiceSegs(data.voiceSegs ?? []);
+      setOverlays(data.overlays ?? []);
+      setVideoName(data.videoName ?? project.name);
+      setPlayhead(0);
+      stopPlayback();
+      setStudioView('edit');
+    } catch (err: any) {
+      alert('Could not load project: ' + err.message);
     }
   };
 
@@ -453,32 +622,105 @@ const VideoStudioPage: React.FC = () => {
       <div className="studio-root fixed top-16 left-64 right-0 bottom-0 flex flex-col bg-slate-950 overflow-hidden">
 
         {/* ── Top bar ─────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-5 py-3 bg-slate-900 border-b border-slate-700/60 shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 bg-slate-900 border-b border-slate-700/60 shrink-0 flex-wrap gap-2">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-gradient-to-br from-orange-500 to-pink-600">
               <Layers className="w-5 h-5 text-white" />
             </div>
             <div>
               <h1 className="text-white font-bold text-lg leading-tight">AI Video Studio</h1>
-              <p className="text-slate-400 text-xs">Arrange clips · Add music · Record voice · Export</p>
+              <p className="text-slate-400 text-xs">Arrange · Split · Record · Export</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="mono text-xs text-slate-400 bg-slate-800 px-3 py-1.5 rounded-lg">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* View toggle */}
+            <div className="flex bg-slate-800 rounded-lg p-0.5 border border-slate-700">
+              {(['edit', 'history'] as const).map(v => (
+                <button key={v} onClick={() => { setStudioView(v); if (v === 'history') loadProjects(); }}
+                  className={classNames('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors', studioView === v ? 'bg-orange-600 text-white' : 'text-slate-400 hover:text-slate-200')}>
+                  {v === 'edit' ? <><Film size={12} /> Edit</> : <><Clock size={12} /> Projects</>}
+                </button>
+              ))}
+            </div>
+            {/* Project name */}
+            <input
+              type="text" value={videoName} onChange={e => setVideoName(e.target.value)}
+              className="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded-lg px-3 py-1.5 w-36 focus:outline-none focus:border-orange-400 placeholder-slate-500"
+              placeholder="Project name…"
+            />
+            {/* Timecode */}
+            <span className="mono text-xs text-slate-400 bg-slate-800 px-3 py-1.5 rounded-lg shrink-0">
               {fmt(playhead)} / {fmt(totalDuration)}
             </span>
+            {/* Save project */}
+            <button onClick={handleSaveProject} disabled={clips.length === 0 || isSavingProject}
+              className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors shrink-0">
+              {isSavingProject
+                ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {saveProjectMsg}</>
+                : <><Save size={13} /> Save</>}
+            </button>
+            {/* Export */}
             <button onClick={handleExport} disabled={clips.length === 0 || isExporting}
-              className="flex items-center gap-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2 text-sm font-semibold transition-colors">
+              className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors shrink-0">
               {isExporting
-                ? <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {exportMsg || 'Exporting…'}</>
-                : <><Download size={15} /> Export</>}
+                ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {exportMsg}</>
+                : <><Download size={13} /> Export</>}
             </button>
           </div>
         </div>
 
-        {/* ── Main area ───────────────────────────────────────────────────── */}
-        <div className="flex flex-1 min-h-0">
+        {/* ── History / Projects view ─────────────────────────────────────── */}
+        {studioView === 'history' && (
+          <div className="flex-1 overflow-y-auto p-6 bg-slate-950">
+            <h2 className="text-white font-bold text-base mb-4 flex items-center gap-2">
+              <FolderOpen size={18} className="text-orange-400" /> Saved Projects
+            </h2>
+            {loadingProjects ? (
+              <div className="flex justify-center py-16">
+                <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : savedProjects.length === 0 ? (
+              <div className="text-center py-16 text-slate-500">
+                <Save size={40} className="mx-auto mb-3 opacity-30" />
+                <p>No saved projects yet.</p>
+                <p className="text-xs mt-1">Build something in the editor and hit Save.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                {savedProjects.map((p: any) => (
+                  <div key={p.id}
+                    onClick={() => handleLoadProject(p)}
+                    className="group bg-slate-900 border border-slate-700/60 rounded-xl overflow-hidden cursor-pointer hover:border-orange-500/60 transition-colors">
+                    <div className="relative bg-slate-800" style={{ aspectRatio: '16/9' }}>
+                      {p.thumbnailUrl ? (
+                        <img src={p.thumbnailUrl} alt={p.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Layers size={28} className="text-slate-600" />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg">
+                          Load Project
+                        </div>
+                      </div>
+                    </div>
+                    <div className="px-3 py-2">
+                      <p className="text-sm text-slate-200 font-semibold truncate">{p.name}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {new Date(p.savedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Main edit area ───────────────────────────────────────────────── */}
+        {studioView === 'edit' && <div className="flex flex-1 min-h-0">
 
           {/* ── Left panel: media library ──────────────────────────────────── */}
           <div className="w-64 shrink-0 bg-slate-900/80 border-r border-slate-700/50 flex flex-col">
@@ -781,22 +1023,49 @@ const VideoStudioPage: React.FC = () => {
           </div>
         </div>
 
+        </div>}
+
         {/* ── Timeline ────────────────────────────────────────────────────── */}
-        <div className="shrink-0 bg-slate-900 border-t border-slate-700/50" style={{ height: 220 }}>
+        {studioView === 'edit' && (
+        <div className="shrink-0 bg-slate-900 border-t border-slate-700/50 transition-all duration-200"
+          style={{ height: timelineCollapsed ? 40 : 220 }}>
 
           {/* Timeline header */}
           <div className="flex items-center gap-3 px-4 py-2 border-b border-slate-700/30">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Timeline</span>
+            {/* Split + Delete buttons */}
+            {!timelineCollapsed && (
+              <div className="flex items-center gap-1.5">
+                <button onClick={splitClipAtPlayhead}
+                  disabled={!clips.some(c => playhead > c.timelineStart + 0.1 && playhead < c.timelineStart + (c.trimEnd - c.trimStart) - 0.1)}
+                  title="Split clip at playhead (position playhead over a clip first)"
+                  className="flex items-center gap-1 px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-yellow-300 hover:bg-slate-700 disabled:opacity-30 text-[10px] transition-colors border border-slate-700">
+                  <Scissors size={11} /> Split
+                </button>
+                <button onClick={deleteSelected}
+                  disabled={!selectedClip}
+                  title="Delete selected clip"
+                  className="flex items-center gap-1 px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-red-400 hover:bg-slate-700 disabled:opacity-30 text-[10px] transition-colors border border-slate-700">
+                  <Trash2 size={11} /> Delete
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-1 ml-auto">
               <button onClick={() => setPlayhead(p => Math.max(0, p - 5))}
                 className="p-1 rounded text-slate-500 hover:text-slate-300 transition-colors"><ChevronLeft size={14} /></button>
               <button onClick={() => setPlayhead(p => Math.min(totalDuration, p + 5))}
                 className="p-1 rounded text-slate-500 hover:text-slate-300 transition-colors"><ChevronRight size={14} /></button>
+              {/* Collapse/expand toggle */}
+              <button onClick={() => setTimelineCollapsed(c => !c)}
+                title={timelineCollapsed ? 'Expand timeline' : 'Collapse timeline'}
+                className="p-1 rounded text-slate-500 hover:text-orange-400 transition-colors ml-1">
+                {timelineCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
             </div>
           </div>
 
           {/* Scrollable timeline area */}
-          <div className="overflow-x-auto overflow-y-hidden" style={{ height: 176 }}>
+          {!timelineCollapsed && <div className="overflow-x-auto overflow-y-hidden" style={{ height: 176 }}>
             <div style={{ width: Math.max(timelineWidth + 80, 600), minWidth: '100%', position: 'relative', height: '100%' }}>
 
               {/* Time ruler */}
@@ -932,8 +1201,9 @@ const VideoStudioPage: React.FC = () => {
 
               </div>
             </div>
-          </div>
+          </div>}
         </div>
+        )}
       </div>
     </AppLayout>
   );
