@@ -1109,7 +1109,7 @@ const VideoStudioPage: React.FC = () => {
               )}>
               {isRendering
                 ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Cancel</>
-                : <><Film size={13} /> Process Video</>;}
+                : <><Film size={13} /> Process Video</>}
             </button>
           </div>
         </div>
