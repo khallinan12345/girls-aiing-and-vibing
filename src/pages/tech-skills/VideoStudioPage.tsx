@@ -960,7 +960,8 @@ const VideoStudioPage: React.FC = () => {
         )}
 
         {/* ── Main edit area ───────────────────────────────────────────────── */}
-        {studioView === 'edit' && <div className="flex flex-1 min-h-0">
+        {studioView === 'edit' && (
+        <><div className="flex flex-1 min-h-0">
 
           {/* ── Left panel: media library ──────────────────────────────────── */}
           <div className="w-64 shrink-0 bg-slate-900/80 border-r border-slate-700/50 flex flex-col">
@@ -1263,7 +1264,7 @@ const VideoStudioPage: React.FC = () => {
           </div>
         </div>
 
-        </div>}
+        </div>
 
         {/* ── Render progress overlay ─────────────────────────────────────── */}
         {isRendering && (
@@ -1294,7 +1295,6 @@ const VideoStudioPage: React.FC = () => {
         )}
 
         {/* ── Timeline ────────────────────────────────────────────────────── */}
-        {studioView === 'edit' && (
         <div className="shrink-0 bg-slate-900 border-t border-slate-700/50 transition-all duration-200"
           style={{ height: timelineCollapsed ? 40 : 220 }}>
 
@@ -1471,7 +1471,7 @@ const VideoStudioPage: React.FC = () => {
             </div>
           </div>}
         </div>
-        )}
+        </>)}
       </div>
     </AppLayout>
   );
