@@ -116,27 +116,48 @@ export const ImpersonationBanner: React.FC = () => {
 
   return (
     <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
-      background: '#dc2626', color: '#fff',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      gap: '16px', padding: '8px 16px', fontSize: '13px', fontWeight: 600,
-      boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+      position: 'fixed',
+      top: '12px',
+      right: '16px',
+      zIndex: 9999,
+      background: '#dc2626',
+      color: '#fff',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      padding: '6px 10px 6px 14px',
+      fontSize: '12px',
+      fontWeight: 600,
+      borderRadius: '999px',
+      boxShadow: '0 2px 12px rgba(0,0,0,0.35)',
+      maxWidth: '320px',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
     }}>
-      <span>👁 Viewing as: {impersonatedProfile.name || impersonatedProfile.email || impersonatedProfile.id}</span>
-      <span style={{ opacity: 0.7 }}>·</span>
-      <span style={{ opacity: 0.8, fontWeight: 400 }}>
-        {impersonatedProfile.role} · {impersonatedProfile.city || impersonatedProfile.country || '—'}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        👁 {impersonatedProfile.name || impersonatedProfile.email || impersonatedProfile.id}
       </span>
       <button
         onClick={stopImpersonation}
+        title="Exit impersonation"
         style={{
-          marginLeft: '8px', background: 'rgba(255,255,255,0.2)',
-          border: '1px solid rgba(255,255,255,0.4)', borderRadius: '6px',
-          color: '#fff', padding: '4px 12px', cursor: 'pointer',
-          fontSize: '12px', fontWeight: 700,
+          flexShrink: 0,
+          background: 'rgba(255,255,255,0.25)',
+          border: 'none',
+          borderRadius: '999px',
+          color: '#fff',
+          width: '22px',
+          height: '22px',
+          cursor: 'pointer',
+          fontSize: '11px',
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          lineHeight: 1,
         }}
       >
-        ✕ Exit
+        ✕
       </button>
     </div>
   );
