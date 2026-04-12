@@ -232,6 +232,11 @@ const DashboardPage: React.FC = () => {
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('sessions_alltime');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  // For platform_administrator: list of all orgs to pick from
+  const [orgOptions, setOrgOptions] = useState<{ id: string; name: string; join_code: string }[]>([]);
+  const [selectedOrgJoinCode, setSelectedOrgJoinCode] = useState<string>('');
+  // For leader: their org's join_code (derived from their students)
+  const [leaderJoinCode, setLeaderJoinCode] = useState<string>('');
   
   // Use refs to prevent multiple simultaneous fetches
   const fetchingRef = useRef(false);
@@ -636,42 +641,58 @@ const DashboardPage: React.FC = () => {
   };
 
   // ── Leaderboard fetch ────────────────────────────────────────────────────
-  const fetchLeaderboard = useCallback(async (metric: LeaderboardMetric) => {
-    if (!userProfile?.join_code_used) return;
+  //
+  // Scoping rules:
+  //   platform_administrator → picks any org from orgOptions dropdown;
+  //                            leaderboard scoped to that org's join_code
+  //   leader                 → scoped to their org's join_code (auto-derived)
+  //   student                → scoped to their own join_code_used
+  //
+  const resolvedJoinCode =
+    userProfile?.role === 'platform_administrator' ? selectedOrgJoinCode :
+    userProfile?.role === 'leader'                 ? leaderJoinCode :
+    (userProfile?.join_code_used ?? '');
+
+  const fetchLeaderboardForCode = useCallback(async (
+    metric: LeaderboardMetric,
+    joinCode: string
+  ) => {
+    if (!joinCode) return;
     setLeaderboardLoading(true);
     try {
-      const joinCode = userProfile.join_code_used;
+      // Step 1 – get all students with this join_code
+      const { data: cohortProfiles, error: cpErr } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .eq('join_code_used', joinCode)
+        .eq('role', 'student');
+
+      if (cpErr || !cohortProfiles || cohortProfiles.length === 0) {
+        setLeaderboard([]);
+        return;
+      }
+
+      const cohortIds = cohortProfiles.map(p => p.id);
+      const nameMap: Record<string, string> = {};
+      cohortProfiles.forEach(p => { nameMap[p.id] = p.name; });
+
+      let counts: Record<string, number> = {};
 
       if (metric === 'sessions_alltime' || metric === 'sessions_thismonth') {
-        // Mirror AdminStudentDashboard exactly:
-        //   count dashboard rows where progress is 'started' or 'completed'.
-        //   For monthly view, filter on created_at (NOT updated_at — updated_at is
-        //   bumped on every chat message; created_at records when the activity was
-        //   first engaged and never changes).
-        const { data: cohortProfiles, error: cpErr } = await supabase
-          .from('profiles')
-          .select('id, name')
-          .eq('join_code_used', joinCode)
-          .eq('role', 'student');
-
-        if (cpErr || !cohortProfiles) { setLeaderboardLoading(false); return; }
-
-        const cohortIds = cohortProfiles.map(p => p.id);
-        const nameMap: Record<string, string> = {};
-        cohortProfiles.forEach(p => { nameMap[p.id] = p.name; });
-
+        // Count dashboard rows where progress = 'started' | 'completed'
+        // (mirrors AdminStudentDashboard isEngagedSession logic exactly)
         const { data: rows, error: rowErr } = await supabase
           .from('dashboard')
           .select('user_id, progress, created_at')
           .in('user_id', cohortIds)
           .in('progress', ['started', 'completed']);
 
-        if (rowErr || !rows) { setLeaderboardLoading(false); return; }
+        if (rowErr || !rows) { setLeaderboard([]); return; }
 
-        // For monthly: filter client-side on created_at >= UTC start of current month
+        // For monthly: filter on created_at — NOT updated_at, which is bumped
+        // on every chat message and would inflate current-month counts.
         const now = new Date();
         const monthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-
         const filtered = metric === 'sessions_thismonth'
           ? rows.filter(r => {
               const ts = Date.parse(r.created_at || '');
@@ -679,71 +700,95 @@ const DashboardPage: React.FC = () => {
             })
           : rows;
 
-        // Count engaged rows per user
-        const counts: Record<string, number> = {};
         filtered.forEach(r => {
           counts[r.user_id] = (counts[r.user_id] || 0) + 1;
         });
 
-        const entries: LeaderboardEntry[] = Object.entries(counts)
-          .map(([uid, count]) => ({ user_id: uid, name: nameMap[uid] || 'Unknown', value: count, rank: 0 }))
-          .sort((a, b) => b.value - a.value)
-          .slice(0, 10)
-          .map((e, i) => ({ ...e, rank: i + 1 }));
-
-        setLeaderboard(entries);
-
       } else {
-        // Certification metrics — scan dashboard rows with category_activity = 'Certification'
-        const { data: cohortProfiles, error: cpErr } = await supabase
-          .from('profiles')
-          .select('id, name')
-          .eq('join_code_used', joinCode)
-          .eq('role', 'student');
-
-        if (cpErr || !cohortProfiles) { setLeaderboardLoading(false); return; }
-
-        const cohortIds = cohortProfiles.map(p => p.id);
-        const nameMap: Record<string, string> = {};
-        cohortProfiles.forEach(p => { nameMap[p.id] = p.name; });
-
+        // Certification rows only
         const { data: certRows, error: certErr } = await supabase
           .from('dashboard')
           .select('user_id, progress')
           .in('user_id', cohortIds)
           .eq('category_activity', 'Certification');
 
-        if (certErr || !certRows) { setLeaderboardLoading(false); return; }
+        if (certErr || !certRows) { setLeaderboard([]); return; }
 
-        const counts: Record<string, number> = {};
         certRows.forEach(r => {
           if (metric === 'certs_achieved' && r.progress !== 'completed') return;
-          // certs_attempted: any progress that isn't 'not started'
           if (metric === 'certs_attempted' && r.progress === 'not started') return;
           counts[r.user_id] = (counts[r.user_id] || 0) + 1;
         });
-
-        const entries: LeaderboardEntry[] = Object.entries(counts)
-          .map(([uid, count]) => ({ user_id: uid, name: nameMap[uid] || 'Unknown', value: count, rank: 0 }))
-          .sort((a, b) => b.value - a.value)
-          .slice(0, 10)
-          .map((e, i) => ({ ...e, rank: i + 1 }));
-
-        setLeaderboard(entries);
       }
+
+      const entries: LeaderboardEntry[] = Object.entries(counts)
+        .map(([uid, count]) => ({
+          user_id: uid,
+          name: nameMap[uid] || 'Unknown',
+          value: count,
+          rank: 0,
+        }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 10)
+        .map((e, i) => ({ ...e, rank: i + 1 }));
+
+      setLeaderboard(entries);
     } catch (e) {
       console.error('[Leaderboard] fetch error:', e);
+      setLeaderboard([]);
     } finally {
       setLeaderboardLoading(false);
     }
-  }, [userProfile?.join_code_used]);
+  }, []);
 
-  // Refetch leaderboard whenever metric or join_code changes
+  // Load all orgs for platform_administrator once profile is known
   useEffect(() => {
-    if (userProfile?.join_code_used) {
-      fetchLeaderboard(leaderboardMetric);
+    if (userProfile?.role !== 'platform_administrator') return;
+    supabase
+      .from('organizations')
+      .select('id, name, join_code')
+      .order('name', { ascending: true })
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setOrgOptions(data);
+          setSelectedOrgJoinCode(data[0].join_code); // auto-select first
+        }
+      });
+  }, [userProfile?.role]);
+
+  // For leader: derive join_code from their students' join_code_used
+  useEffect(() => {
+    if (userProfile?.role !== 'leader' || !user?.id) return;
+    supabase
+      .from('profile_organizations')
+      .select('organizations(join_code)')
+      .eq('profile_id', user.id)
+      .limit(1)
+      .then(({ data }) => {
+        const code = (data?.[0] as any)?.organizations?.join_code ?? '';
+        if (code) {
+          setLeaderJoinCode(code);
+        } else {
+          // Fallback: infer from a student in their org
+          supabase
+            .from('profiles')
+            .select('join_code_used')
+            .eq('role', 'student')
+            .not('join_code_used', 'is', null)
+            .limit(1)
+            .then(({ data: pd }) => {
+              setLeaderJoinCode(pd?.[0]?.join_code_used ?? '');
+            });
+        }
+      });
+  }, [userProfile?.role, user?.id]);
+
+  // Refetch whenever metric or resolved join code changes
+  useEffect(() => {
+    if (resolvedJoinCode) {
+      fetchLeaderboardForCode(leaderboardMetric, resolvedJoinCode);
     }
-  }, [leaderboardMetric, fetchLeaderboard, userProfile?.join_code_used]);
+  }, [leaderboardMetric, resolvedJoinCode, fetchLeaderboardForCode]);
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1097,25 +1142,60 @@ const DashboardPage: React.FC = () => {
           <div className="space-y-8">
 
             {/* ── Cohort Leaderboard ──────────────────────────────────────── */}
-            {userProfile?.join_code_used && (
+            {/* Visible to: platform_administrator (any org), leader (their org), student (own cohort) */}
+            {(userProfile?.role === 'platform_administrator'
+              || userProfile?.role === 'leader'
+              || userProfile?.join_code_used) && (
               <div className="bg-white rounded-lg shadow overflow-hidden">
                 <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-yellow-50 flex items-center justify-between flex-wrap gap-3">
                   <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                     <Trophy className="h-6 w-6 text-amber-500" />
                     Cohort Leaderboard
-                    <span className="text-sm font-normal text-gray-500 ml-1">
-                      ({userProfile.join_code_used})
-                    </span>
+                    {/* Sub-label: show org name for admin/leader, join code for student */}
+                    {userProfile?.role === 'platform_administrator' && selectedOrgJoinCode && (
+                      <span className="text-sm font-normal text-gray-500 ml-1">
+                        ({orgOptions.find(o => o.join_code === selectedOrgJoinCode)?.name ?? selectedOrgJoinCode})
+                      </span>
+                    )}
+                    {userProfile?.role === 'leader' && leaderJoinCode && (
+                      <span className="text-sm font-normal text-gray-500 ml-1">
+                        ({leaderJoinCode})
+                      </span>
+                    )}
+                    {userProfile?.role === 'student' && userProfile?.join_code_used && (
+                      <span className="text-sm font-normal text-gray-500 ml-1">
+                        ({userProfile.join_code_used})
+                      </span>
+                    )}
                   </h2>
-                  <select
-                    value={leaderboardMetric}
-                    onChange={e => setLeaderboardMetric(e.target.value as LeaderboardMetric)}
-                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                  >
-                    {LEADERBOARD_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Org picker — platform_administrator only */}
+                    {userProfile?.role === 'platform_administrator' && orgOptions.length > 0 && (
+                      <select
+                        value={selectedOrgJoinCode}
+                        onChange={e => setSelectedOrgJoinCode(e.target.value)}
+                        className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      >
+                        {orgOptions.map(org => (
+                          <option key={org.id} value={org.join_code}>
+                            {org.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {/* Metric picker — all roles */}
+                    <select
+                      value={leaderboardMetric}
+                      onChange={e => setLeaderboardMetric(e.target.value as LeaderboardMetric)}
+                      className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    >
+                      {LEADERBOARD_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 {leaderboardLoading ? (
