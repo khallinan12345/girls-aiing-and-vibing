@@ -246,6 +246,15 @@ const VideoGenerationPage: React.FC = () => {
   const [endImage,          setEndImage]          = useState<File | null>(null);
   const [endImagePreview,   setEndImagePreview]   = useState<string | null>(null);
 
+  // ── Recent frame images (from image_generations + captured last frames) ─────
+  interface FrameImageOption {
+    id: string;
+    url: string;       // display + drag source URL
+    label: string;     // short description
+    source: 'generated' | 'last_frame';
+  }
+  const [recentFrameImages, setRecentFrameImages] = useState<FrameImageOption[]>([]);
+
   const FRAMES: Record<number, number> = { 5: 121, 8: 193, 10: 241 };
 
   // ── Fetch communication_level, continent, and weekly usage on mount ───────
@@ -281,6 +290,34 @@ const VideoGenerationPage: React.FC = () => {
       .neq('status', 'failed')
       .gte('created_at', since)
       .then(({ count }) => setWeeklyCount(count ?? 0));
+  }, [user?.id]);
+
+  // ── Fetch recent generated images for frame picker ───────────────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('image_generations')
+      .select('id, image_url, saved_image_url, prompt')
+      .eq('user_id', user.id)
+      .not('image_url', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(12)
+      .then(({ data }) => {
+        if (!data) return;
+        const opts = data
+          .map((row: any) => {
+            const url = row.saved_image_url ?? row.image_url;
+            if (!url) return null;
+            return {
+              id: row.id,
+              url,
+              label: (row.prompt ?? 'Generated image').slice(0, 40),
+              source: 'generated' as const,
+            };
+          })
+          .filter(Boolean) as any[];
+        setRecentFrameImages(opts);
+      });
   }, [user?.id]);
 
   // ── Communication-level UI text ───────────────────────────────────────────
@@ -447,6 +484,32 @@ const VideoGenerationPage: React.FC = () => {
     if (endImagePreview) URL.revokeObjectURL(endImagePreview);
     setEndImagePreview(null);
   };
+
+  // Apply a URL (from recent images) directly as start or end frame
+  const applyUrlAsStartImage = useCallback(async (url: string, label: string) => {
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const file = new File([blob], `${label.replace(/[^a-z0-9]/gi, '_')}.png`, { type: blob.type || 'image/png' });
+      setStartImage(file);
+      setStartImagePreview(URL.createObjectURL(blob));
+    } catch (err) {
+      console.error('[FramePicker] could not load image as File:', err);
+    }
+  }, []);
+
+  const applyUrlAsEndImage = useCallback(async (url: string, label: string) => {
+    if (!startImage) return; // end requires start
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const file = new File([blob], `${label.replace(/[^a-z0-9]/gi, '_')}.png`, { type: blob.type || 'image/png' });
+      setEndImage(file);
+      setEndImagePreview(URL.createObjectURL(blob));
+    } catch (err) {
+      console.error('[FramePicker] could not load image as File:', err);
+    }
+  }, [startImage]);
 
   const clearEndImage = () => {
     setEndImage(null);
@@ -615,17 +678,26 @@ const VideoGenerationPage: React.FC = () => {
       ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(blobUrl);
 
-      // Download
+      // Download + add to frame picker
       canvas.toBlob(imgBlob => {
         if (!imgBlob) return;
         const imgUrl = URL.createObjectURL(imgBlob);
+        // Add to recent frame images so it can be used as start/end frame
+        const frameId = `last_frame_${Date.now()}`;
+        setRecentFrameImages(prev => [{
+          id: frameId,
+          url: imgUrl,
+          label: `Last frame: ${safeName.slice(0, 30)}`,
+          source: 'last_frame',
+        }, ...prev.filter(f => f.source !== 'last_frame' || f.id !== frameId)].slice(0, 16));
+        // Trigger download
         const a = document.createElement('a');
         a.href = imgUrl;
         a.download = `${safeName}_last_frame.png`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(imgUrl), 5000);
+        // Don't revoke immediately — keep blob URL alive for frame picker
       }, 'image/png');
 
     } catch (err) {
@@ -1195,10 +1267,18 @@ Return ONLY the improved text. No explanation, no preamble.`
                       isGenerating
                         ? 'border-slate-700 opacity-40 cursor-not-allowed'
                         : 'border-slate-600 hover:border-cyan-500/60 hover:bg-cyan-950/20'
-                    )}>
+                    )}
+                    onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                    onDrop={e => {
+                      e.preventDefault();
+                      const url = e.dataTransfer.getData('text/plain');
+                      const label = e.dataTransfer.getData('text/label') || 'frame';
+                      if (url) applyUrlAsStartImage(url, label);
+                    }}
+                    >
                       <ImagePlus size={20} className="text-slate-500" />
-                      <span className="text-xs text-slate-500">
-                        {lvl <= 1 ? 'Upload start image' : 'Upload start frame'}
+                      <span className="text-xs text-slate-500 text-center px-2">
+                        {lvl <= 1 ? 'Upload or drag image here' : 'Upload or drag start frame'}
                       </span>
                       <input type="file" accept="image/*" className="hidden"
                         onChange={handleStartImageChange} disabled={isGenerating} />
@@ -1237,12 +1317,21 @@ Return ONLY the improved text. No explanation, no preamble.`
                       !startImage || isGenerating
                         ? 'border-slate-700 opacity-40 cursor-not-allowed'
                         : 'border-slate-600 hover:border-violet-500/60 hover:bg-violet-950/20 cursor-pointer'
-                    )}>
+                    )}
+                    onDragOver={e => { if (!startImage || isGenerating) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                    onDrop={e => {
+                      e.preventDefault();
+                      if (!startImage || isGenerating) return;
+                      const url = e.dataTransfer.getData('text/plain');
+                      const label = e.dataTransfer.getData('text/label') || 'frame';
+                      if (url) applyUrlAsEndImage(url, label);
+                    }}
+                    >
                       <ImagePlus size={20} className="text-slate-500" />
                       <span className="text-xs text-slate-500 text-center px-2">
                         {!startImage
                           ? (lvl <= 1 ? 'Add start image first' : 'Requires start frame')
-                          : (lvl <= 1 ? 'Upload end image' : 'Upload end frame')}
+                          : (lvl <= 1 ? 'Upload or drag end image' : 'Upload or drag end frame')}
                       </span>
                       <input type="file" accept="image/*" className="hidden"
                         onChange={handleEndImageChange} disabled={!startImage || isGenerating} />
@@ -1262,6 +1351,66 @@ Return ONLY the improved text. No explanation, no preamble.`
                         ? 'LTX-Video will align the first and last frames to your uploaded images. The prompt guides the motion between them.'
                         : 'LTX-Video will use your image as the first frame. The text prompt guides the visual development.')}
                 </p>
+              )}
+
+              {/* ── Recent images from AI Image Generation ─────────────── */}
+              {recentFrameImages.length > 0 && (
+                <div className="border-t border-slate-700/40 pt-4">
+                  <p className="text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
+                    <ImagePlus size={12} />
+                    {lvl <= 1 ? 'Your recent images — click or drag to use as start/end frame:' : 'Recent generated images — click or drag onto a frame slot:'}
+                  </p>
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                    {recentFrameImages.map(img => (
+                      <div
+                        key={img.id}
+                        draggable
+                        onDragStart={e => {
+                          e.dataTransfer.setData('text/plain', img.url);
+                          e.dataTransfer.setData('text/label', img.label);
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        className="group relative rounded-lg overflow-hidden border border-slate-700/50 bg-slate-800 cursor-grab active:cursor-grabbing aspect-square"
+                        title={img.label}
+                      >
+                        <img
+                          src={img.url}
+                          alt={img.label}
+                          className="w-full h-full object-cover"
+                          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                        />
+                        {/* Source badge */}
+                        {img.source === 'last_frame' && (
+                          <div className="absolute top-1 left-1 bg-violet-600/80 text-white text-[9px] px-1 rounded leading-tight">
+                            last frame
+                          </div>
+                        )}
+                        {/* Action overlay */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/60 transition-colors flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
+                          <button
+                            onClick={() => applyUrlAsStartImage(img.url, img.label)}
+                            disabled={isGenerating}
+                            className="text-[10px] font-semibold bg-cyan-600 hover:bg-cyan-500 text-white px-2 py-0.5 rounded w-14 text-center disabled:opacity-40 transition-colors"
+                            title="Use as start frame"
+                          >
+                            ▶ Start
+                          </button>
+                          <button
+                            onClick={() => applyUrlAsEndImage(img.url, img.label)}
+                            disabled={isGenerating || !startImage}
+                            className="text-[10px] font-semibold bg-violet-600 hover:bg-violet-500 text-white px-2 py-0.5 rounded w-14 text-center disabled:opacity-40 transition-colors"
+                            title={!startImage ? 'Set a start frame first' : 'Use as end frame'}
+                          >
+                            ⏹ End
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-600 mt-1.5">
+                    {lvl <= 1 ? 'Drag an image to the start or end box above.' : 'Drag thumbnails onto the start/end frame slots above, or hover and click ▶ Start / ⏹ End.'}
+                  </p>
+                </div>
               )}
             </div>
             {showCritique && (
