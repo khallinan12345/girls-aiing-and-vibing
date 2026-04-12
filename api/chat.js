@@ -221,6 +221,60 @@ async function callGroq(model, messages, system, max_tokens, temperature) {
   return { ...data, _route: { provider: 'groq', model } };
 }
 
+// ── Groq with 429 fallback ─────────────────────────────────────────────────────
+// Attempts Groq first. On 429 (rate limit): waits retry-after header duration
+// (capped at 8 s), retries once, then falls back to Haiku if still rate-limited.
+// This keeps the English / Learning / Consultant pages resilient during peak usage
+// without surfacing errors to learners.
+
+async function callGroqWithFallback(model, messages, system, max_tokens, temperature) {
+  const attempt = async () => {
+    const groqMessages = [
+      ...(system ? [{ role: 'system', content: system }] : []),
+      ...messages,
+    ];
+    const upstream = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({ model, messages: groqMessages, max_tokens, temperature }),
+    });
+    return upstream;
+  };
+
+  let upstream = await attempt();
+
+  // First attempt: handle 429 with a single retry after the retry-after delay
+  if (upstream.status === 429) {
+    const retryAfterMs = Math.min(
+      parseFloat(upstream.headers.get('retry-after') || '2') * 1000,
+      8000,  // never wait more than 8 s on a serverless function
+    );
+    console.warn(`[chat.js] Groq 429 — retrying after ${retryAfterMs}ms`);
+    await new Promise(r => setTimeout(r, retryAfterMs));
+    upstream = await attempt();
+  }
+
+  // Second 429 (or still rate-limited) → fall back to Haiku silently
+  if (upstream.status === 429) {
+    console.warn('[chat.js] Groq still 429 after retry — falling back to Haiku');
+    return { ...(await callAnthropic(ANTHROPIC_HAIKU, messages, system, max_tokens, temperature)), _fallback: true };
+  }
+
+  const data = await upstream.json();
+
+  if (!upstream.ok) {
+    const err = new Error(data.error?.message || 'Groq API error');
+    err.status = upstream.status;
+    err.groq_error = data;
+    throw err;
+  }
+
+  return { ...data, _route: { provider: 'groq', model } };
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
@@ -284,13 +338,17 @@ export default async function handler(req, res) {
         });
         return res.status(200).json(result);
       }
-      const result = await callGroq(model, messages, system, max_tokens, temperature);
-      // Log cost (Groq = $0 but track volume)
+      const result = await callGroqWithFallback(model, messages, system, max_tokens, temperature);
+      // Log cost — if we fell back to Haiku, charge correctly; otherwise Groq = $0
+      const wasFallback = result._fallback === true;
       logCost({
-        page, provider: 'groq', model,
-        inputTokens:  result.usage?.prompt_tokens     ?? 0,
-        outputTokens: result.usage?.completion_tokens ?? 0,
-        cacheHitTokens: 0, cacheWriteTokens: 0,
+        page,
+        provider:    wasFallback ? 'anthropic'    : 'groq',
+        model:       wasFallback ? ANTHROPIC_HAIKU : model,
+        inputTokens:       result.usage?.prompt_tokens               ?? 0,
+        outputTokens:      result.usage?.completion_tokens           ?? 0,
+        cacheHitTokens:    result.usage?.cache_read_input_tokens     ?? 0,
+        cacheWriteTokens:  result.usage?.cache_creation_input_tokens ?? 0,
         userId, city,
       });
       return res.status(200).json(result);
