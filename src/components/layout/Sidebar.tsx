@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import {
-  Home, Award, Brain, BarChart, Info, BookOpen, GraduationCap,
+  Home, Award, Brain, BarChart, BookOpen, GraduationCap,
   Code, Database, Layers, ImagePlus, Video, Mic, PenLine, Zap,
   Briefcase, Code2, Film, ImagePlus as ImagePlusIcon, Mic as MicIcon,
   Cpu, Wand2, ChevronDown, ChevronUp, ShieldCheck, Users, Sprout, Fish, Heart,
@@ -41,8 +41,7 @@ const Sidebar: React.FC = () => {
 
   const mainNavigation: NavItem[] = [
     { name: 'Home',      path: '/home',      icon: <Home size={20} />     },
-    { name: 'Dashboard', path: '/dashboard', icon: <BarChart size={20} /> },
-    { name: 'About',     path: '/about',     icon: <Info size={20} />      },
+    { name: 'Dashboard', path: '/dashboard', icon: <Database size={20} /> },
   ];
 
   const sections: SectionConfig[] = [
@@ -174,7 +173,7 @@ const Sidebar: React.FC = () => {
   return (
     <div className="fixed inset-y-0 left-0 z-10 w-56 bg-white shadow-lg hidden sm:flex">
       <div className="h-full w-full flex flex-col overflow-y-auto py-4">
-        <nav className="px-3 space-y-1">
+        <nav className="px-3 space-y-1 pt-4">
 
           {/* Main — always visible */}
           {mainNavigation.map(item => renderNavItem(item, 'bg-blue-50', 'text-blue-600'))}
