@@ -157,7 +157,9 @@ const Navbar: React.FC = () => {
                       </button>
 
                       {openDropdown === link.name && (
-                        <div className="absolute top-full left-0 pt-1 z-[200]">
+                        <div className="absolute top-full left-0 z-[200] w-full">
+                          {/* Transparent bridge — keeps hover zone continuous across the gap */}
+                          <div className="h-1 w-full" />
                           <div className="bg-white rounded-md shadow-lg ring-1 ring-black/5 py-1 min-w-[210px]">
                             {link.dropdown.map((item) => (
                               <Link
