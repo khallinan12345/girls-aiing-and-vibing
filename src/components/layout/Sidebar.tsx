@@ -2,18 +2,13 @@ import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import {
-  Home, Award, Brain, BarChart, BookOpen, GraduationCap,
+  Award, Brain, BarChart, BookOpen, GraduationCap,
   Code, Database, Layers, ImagePlus, Video, Mic, PenLine, Zap,
   Briefcase, Code2, Film, ImagePlus as ImagePlusIcon, Mic as MicIcon,
   Cpu, Wand2, ChevronDown, ChevronUp, ShieldCheck, Users, Sprout, Fish, Heart,
 } from 'lucide-react';
 import classNames from 'classnames';
 
-const ADMIN_IDS = new Set([
-  '0e738663-a70e-4fd3-9ba6-718c02e116c2',
-  '5d5e0486-e768-4c5d-ba63-d1e4570a352d',
-  '8b3f70dc-e5d0-4eb0-af7d-ec6181968213',
-]);
 
 interface NavItem {
   name: string;
@@ -37,10 +32,9 @@ interface SectionConfig {
 const Sidebar: React.FC = () => {
   const location = useLocation();
   const { user } = useAuth();
-  const isAdmin = !!user && ADMIN_IDS.has(user.id);
+  const isLeaderOrAdmin = user?.role === 'leader' || user?.role === 'platform_administrator';
 
   const mainNavigation: NavItem[] = [
-    { name: 'Home',      path: '/home',      icon: <Home size={20} />     },
     { name: 'Dashboard', path: '/dashboard', icon: <Database size={20} /> },
   ];
 
@@ -176,7 +170,7 @@ const Sidebar: React.FC = () => {
         <nav className="px-3 space-y-1 pt-4">
 
           {/* Main — always visible */}
-          {mainNavigation.map(item => renderNavItem(item, 'bg-blue-50', 'text-blue-600'))}
+          {mainNavigation.map(item => renderNavItem(item, 'bg-slate-100', 'text-slate-700'))}
 
           <div className="h-px bg-gray-100 my-3" />
 
@@ -218,9 +212,9 @@ const Sidebar: React.FC = () => {
           </div>
 
           {/* Admin — only visible to admin users */}
-          {isAdmin && (
+          {isLeaderOrAdmin && (
             <>
-              <div className="h-px bg-gray-100" />
+              <div className="h-px bg-gray-100 my-3" />
               <Link
                 to="/admin/student-dashboard"
                 className={classNames(
@@ -230,8 +224,13 @@ const Sidebar: React.FC = () => {
                     : 'text-amber-600 hover:bg-amber-50 hover:text-amber-700'
                 )}
               >
-                <ShieldCheck size={20} className="flex-shrink-0" />
-                Admin Dashboard
+                <span className={classNames(
+                  'flex-shrink-0',
+                  isActive('/admin/student-dashboard') ? 'text-amber-700' : 'text-amber-400'
+                )}>
+                  <ShieldCheck size={20} />
+                </span>
+                Admin
               </Link>
             </>
           )}
