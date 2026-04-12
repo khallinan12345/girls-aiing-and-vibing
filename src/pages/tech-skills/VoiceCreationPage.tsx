@@ -15,7 +15,7 @@
 //   • In-browser audio player with waveform colour
 //   • Save audio to Supabase Storage (ai-voices bucket)
 //   • Save session to dashboard
-
+//   *Note: The first voice creation could take 1-2 minutes.
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '../../components/layout/AppLayout';
 import { useAuth } from '../../hooks/useAuth';
@@ -222,6 +222,7 @@ const VoiceCreationPage: React.FC = () => {
   const [emotion,     setEmotion]     = useState<Emotion>('neutral');
   const [speed,       setSpeed]       = useState(1.0);
   const [isGenerating, setIsGenerating] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [activeJob,   setActiveJob]   = useState<VoiceJob | null>(null);
   const [audioUrl,    setAudioUrl]    = useState<string | null>(null);
   const [history,     setHistory]     = useState<VoiceJob[]>([]);
@@ -396,24 +397,54 @@ const VoiceCreationPage: React.FC = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Not authenticated');
 
+      // Submit — returns immediately with jobId
       const { ok, data } = await callEdgeFunction('generate-voice', 'POST', session.access_token, {
         script: script.trim(), voice_id: selectedVoiceId, emotion, speed,
       });
 
-      if (!ok || data.error) throw new Error(data.error ?? 'Failed to generate voice');
+      if (!ok || data.error) throw new Error(data.error ?? 'Failed to submit voice job');
 
-      setAudioUrl(data.audioUrl);
-      setActiveJob({ ...tempJob, id: data.jobId, status: 'succeeded', audio_url: data.audioUrl });
-      setWeeklyCount(c => c + 1);
-      speakText(lvl <= 1 ? '🎉 Your voice is ready! Press play to listen.' : 'Your voice has been generated. Press play to listen.');
-      loadHistory();
+      const { jobId } = data;
+      setActiveJob({ ...tempJob, id: jobId, status: 'generating' });
+
+      // Poll voice-status every 3s until done
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(async () => {
+        try {
+          const pollRes = await fetch(
+            `${FUNCTIONS_URL}/voice-status?jobId=${jobId}`,
+            { headers: { 'Authorization': `Bearer ${session.access_token}` } }
+          );
+          const pollData = await pollRes.json();
+
+          if (pollData.status === 'succeeded') {
+            clearInterval(pollRef.current!);
+            pollRef.current = null;
+            setAudioUrl(pollData.audioUrl);
+            setActiveJob(prev => prev ? { ...prev, status: 'succeeded', audio_url: pollData.audioUrl } : null);
+            setWeeklyCount(c => c + 1);
+            setIsGenerating(false);
+            speakText(lvl <= 1 ? '🎉 Your voice is ready! Press play to listen.' : 'Your voice has been generated.');
+            loadHistory();
+          } else if (pollData.status === 'failed') {
+            clearInterval(pollRef.current!);
+            pollRef.current = null;
+            setError(pollData.error ?? 'Voice generation failed');
+            setActiveJob(prev => prev ? { ...prev, status: 'failed' } : null);
+            setIsGenerating(false);
+          }
+        } catch { /* ignore transient poll errors */ }
+      }, 3000);
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
       setActiveJob({ ...tempJob, status: 'failed' });
-    } finally {
       setIsGenerating(false);
     }
   };
+
+  // Clean up poll on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   const handleReset = () => {
     setActiveJob(null); setAudioUrl(null); setError(null);
@@ -993,5 +1024,6 @@ const VoiceCreationPage: React.FC = () => {
     </AppLayout>
   );
 };
+
 
 export default VoiceCreationPage;
