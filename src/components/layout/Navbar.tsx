@@ -122,7 +122,7 @@ const Navbar: React.FC = () => {
 
           {/* Desktop nav — items-stretch so border-b-2 indicators sit flush at bar bottom */}
           <div className="hidden md:flex items-stretch h-full flex-1 min-w-0">
-            <div className="flex items-stretch gap-0.5 overflow-x-auto scrollbar-none">
+            <div className="flex items-stretch gap-0.5">
               {navigationLinks.map((link) => {
                 if (link.dropdown) {
                   const isAnyActive = link.dropdown.some((item) =>
