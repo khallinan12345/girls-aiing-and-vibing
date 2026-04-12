@@ -643,8 +643,11 @@ const DashboardPage: React.FC = () => {
       const joinCode = userProfile.join_code_used;
 
       if (metric === 'sessions_alltime' || metric === 'sessions_thismonth') {
-        // Pull dashboard rows that have chat_history for all cohort users
-        // We need user IDs in the same cohort first
+        // Mirror AdminStudentDashboard exactly:
+        //   count dashboard rows where progress is 'started' or 'completed'.
+        //   For monthly view, filter on created_at (NOT updated_at — updated_at is
+        //   bumped on every chat message; created_at records when the activity was
+        //   first engaged and never changes).
         const { data: cohortProfiles, error: cpErr } = await supabase
           .from('profiles')
           .select('id, name')
@@ -657,25 +660,28 @@ const DashboardPage: React.FC = () => {
         const nameMap: Record<string, string> = {};
         cohortProfiles.forEach(p => { nameMap[p.id] = p.name; });
 
-        let query = supabase
+        const { data: rows, error: rowErr } = await supabase
           .from('dashboard')
-          .select('user_id')
+          .select('user_id, progress, created_at')
           .in('user_id', cohortIds)
-          .not('chat_history', 'is', null);
+          .in('progress', ['started', 'completed']);
 
-        if (metric === 'sessions_thismonth') {
-          const startOfMonth = new Date();
-          startOfMonth.setDate(1);
-          startOfMonth.setHours(0, 0, 0, 0);
-          query = query.gte('updated_at', startOfMonth.toISOString());
-        }
-
-        const { data: rows, error: rowErr } = await query;
         if (rowErr || !rows) { setLeaderboardLoading(false); return; }
 
-        // Count rows per user
+        // For monthly: filter client-side on created_at >= UTC start of current month
+        const now = new Date();
+        const monthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+
+        const filtered = metric === 'sessions_thismonth'
+          ? rows.filter(r => {
+              const ts = Date.parse(r.created_at || '');
+              return !isNaN(ts) && ts >= monthStartMs;
+            })
+          : rows;
+
+        // Count engaged rows per user
         const counts: Record<string, number> = {};
-        rows.forEach(r => {
+        filtered.forEach(r => {
           counts[r.user_id] = (counts[r.user_id] || 0) + 1;
         });
 
