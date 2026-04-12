@@ -110,16 +110,38 @@ const ImageCard: React.FC<{ job: ImageJob; onReuse: (p: string) => void }> = ({ 
               <RotateCcw size={12} /> Reuse prompt
             </button>
             {displayUrl && (
-              <a href={displayUrl} download target="_blank" rel="noopener noreferrer"
+              <button onClick={() => downloadImage(displayUrl, 'generated-image.png')}
                 className="flex items-center gap-1.5 text-xs bg-cyan-700 hover:bg-cyan-600 text-white rounded-full px-3 py-1.5 transition-colors">
                 <Download size={12} /> Download
-              </a>
+              </button>
             )}
           </div>
         </div>
       )}
     </div>
   );
+};
+
+// ─── Download helper ─────────────────────────────────────────────────────────
+// The <a download> attribute is ignored for cross-origin URLs when target="_blank"
+// is present. Fetch the image as a blob so the browser always saves it locally.
+const downloadImage = async (url: string, filename = 'generated-image.png') => {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.error('[Download] failed:', err);
+    // Fallback: open in new tab so user can save manually
+    window.open(url, '_blank');
+  }
 };
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -779,10 +801,10 @@ const ImageGenerationPage: React.FC = () => {
                       <Sparkles size={14} /> {lvl <= 1 ? 'Make another image' : 'Generate another'}
                     </button>
                     {(imageUrl || savedUrl) && (
-                      <a href={savedUrl ?? imageUrl ?? ''} download target="_blank" rel="noopener noreferrer"
+                      <button onClick={() => downloadImage(savedUrl ?? imageUrl ?? '', 'generated-image.png')}
                         className="flex items-center gap-2 bg-pink-700 hover:bg-pink-600 text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
                         <Download size={14} /> {lvl <= 1 ? 'Download' : 'Download image'}
-                      </a>
+                      </button>
                     )}
                     {!dashSaved ? (
                       <button onClick={handleSaveToDashboard} disabled={isSavingDash}
