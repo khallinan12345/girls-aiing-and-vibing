@@ -452,23 +452,46 @@ const VoiceCreationPage: React.FC = () => {
   };
 
   // ── Save audio to Storage ─────────────────────────────────────────────────
+  // The voice-status edge function already uploads the audio to the ai-voices
+  // bucket and returns a signed URL as audioUrl. We should NOT try to re-fetch
+  // that signed URL from the browser (Supabase Storage returns 400 for signed
+  // URL fetches without the correct auth context).
+  //
+  // Strategy:
+  //   1. If audioUrl is already a Supabase signed/storage URL → it's already
+  //      saved. Just record it in the DB and set savedUrl.
+  //   2. If audioUrl is a raw Replicate URL → fetch it (Replicate URLs are
+  //      public), upload to Storage, create signed URL, update DB.
   const handleSaveAudio = async () => {
     if (!audioUrl || !user?.id || !activeJob || isSaving) return;
     setIsSaving(true); setSaveError(null);
     try {
-      const res = await fetch(audioUrl);
-      if (!res.ok) throw new Error('Could not fetch audio from source');
-      const blob = await res.blob();
-      const ext  = blob.type.includes('wav') ? 'wav' : 'mp3';
-      const path = `${user.id}/${activeJob.id}.${ext}`;
+      const isAlreadyInStorage =
+        audioUrl.includes('supabase.co/storage') ||
+        audioUrl.includes('supabase.co/object') ||
+        audioUrl.includes('/sign/');
 
-      const { error: uploadError } = await supabase.storage
-        .from('ai-voices').upload(path, blob, { contentType: blob.type, upsert: true });
-      if (uploadError) throw uploadError;
+      let permanentUrl: string | null = null;
 
-      const { data: signed } = await supabase.storage
-        .from('ai-voices').createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
-      const permanentUrl = signed?.signedUrl ?? null;
+      if (isAlreadyInStorage) {
+        // Already uploaded by the edge function — use as-is
+        permanentUrl = audioUrl;
+      } else {
+        // Raw Replicate URL — fetch and upload ourselves
+        const res = await fetch(audioUrl);
+        if (!res.ok) throw new Error('Could not fetch audio from source');
+        const blob = await res.blob();
+        const ext  = blob.type.includes('wav') ? 'wav' : 'mp3';
+        const path = `${user.id}/${activeJob.id}.${ext}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('ai-voices').upload(path, blob, { contentType: blob.type, upsert: true });
+        if (uploadError) throw uploadError;
+
+        const { data: signed } = await supabase.storage
+          .from('ai-voices').createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
+        permanentUrl = signed?.signedUrl ?? null;
+      }
 
       if (activeJob.id !== 'temp') {
         await supabase.from('voice_generations')
