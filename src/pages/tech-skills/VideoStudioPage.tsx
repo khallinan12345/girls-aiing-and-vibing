@@ -37,12 +37,15 @@ interface AudioClip {
   duration: number;
   loop: boolean;
   volume: number;       // 0–1
+  timelineStart: number;
 }
 
 interface VoiceSegment {
   id: string;
   src: string;
   duration: number;
+  baseDuration?: number;
+  playbackRate?: number;
   timelineStart: number;
   name: string;
 }
@@ -109,6 +112,8 @@ const VideoStudioPage: React.FC = () => {
   // ── Media library ──────────────────────────────────────────────────────────
   const [library,      setLibrary]      = useState<LibraryVideo[]>([]);
   const [loadingLib,   setLoadingLib]   = useState(true);
+  const [audioLibrary, setAudioLibrary] = useState<{id:string;name:string;url:string}[]>([]);
+  const [loadingAudioLib, setLoadingAudioLib] = useState(true);
   const [activeTab,    setActiveTab]    = useState<'video'|'audio'|'voice'|'text'>('video');
 
   // ── Timeline state ─────────────────────────────────────────────────────────
@@ -191,6 +196,29 @@ const VideoStudioPage: React.FC = () => {
 
   // ── Load projects on mount ────────────────────────────────────────────────
   useEffect(() => { if (user?.id) loadProjects(); }, [user?.id]);
+
+  // ── Load saved audio from voice_generations ─────────────────────────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('voice_generations')
+      .select('id, script, audio_url, saved_audio_url')
+      .eq('user_id', user.id)
+      .eq('status', 'succeeded')
+      .not('audio_url', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(30)
+      .then(({ data }) => {
+        setAudioLibrary((data ?? [])
+          .filter(d => d.saved_audio_url || d.audio_url)
+          .map(d => ({
+            id: d.id,
+            name: (d.script ?? 'Voice clip').slice(0, 40),
+            url: d.saved_audio_url ?? d.audio_url ?? '',
+          })));
+        setLoadingAudioLib(false);
+      });
+  }, [user?.id]);
 
   // ── Load library from Supabase ─────────────────────────────────────────────
   useEffect(() => {
@@ -292,7 +320,7 @@ const VideoStudioPage: React.FC = () => {
       a.onloadedmetadata = () => resolve(a.duration);
       a.onerror = () => resolve(0);
     });
-    setAudioTrack({ id: uid(), name: file.name, src, duration: dur, loop: false, volume: 0.8 });
+    setAudioTrack({ id: uid(), name: file.name, src, duration: dur, loop: false, volume: 0.8, timelineStart: 0 });
   };
 
   // ── Voiceover recording ────────────────────────────────────────────────────
@@ -1231,6 +1259,34 @@ const VideoStudioPage: React.FC = () => {
                     <input type="file" accept="audio/*" className="hidden" onChange={handleAudioUpload} />
                   </label>
 
+                  <p className="text-xs text-slate-500 pt-1">Your saved voice clips</p>
+                  {loadingAudioLib ? (
+                    <div className="flex justify-center py-3">
+                      <div className="w-4 h-4 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : audioLibrary.length === 0 ? (
+                    <p className="text-xs text-slate-600 text-center py-2">No saved clips yet — generate some on the Voice Creation page!</p>
+                  ) : (
+                    <div className="space-y-1 max-h-36 overflow-y-auto">
+                      {audioLibrary.map(clip => (
+                        <div key={clip.id}
+                          className="flex items-center gap-2 px-2 py-1.5 bg-slate-800/70 border border-slate-700/40 rounded-lg cursor-pointer hover:bg-slate-700/70 transition-colors"
+                          onClick={async () => {
+                            const dur = await new Promise<number>(resolve => {
+                              const a = new Audio(clip.url);
+                              a.onloadedmetadata = () => resolve(a.duration);
+                              a.onerror = () => resolve(30);
+                            });
+                            setAudioTrack({ id: uid(), name: clip.name, src: clip.url, duration: dur, loop: false, volume: 0.8, timelineStart: 0 });
+                          }}>
+                          <Music size={11} className="text-green-400 shrink-0" />
+                          <span className="text-xs text-slate-300 truncate flex-1">{clip.name}</span>
+                          <Plus size={11} className="text-green-400 shrink-0" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {audioTrack ? (
                     <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 space-y-3">
                       <div className="flex items-center gap-2">
@@ -1702,10 +1758,36 @@ const VideoStudioPage: React.FC = () => {
                   <div className="flex-1 relative bg-slate-950/20 cursor-pointer" onClick={handleTimelineClick}>
                     <div className="playhead-line" style={{ left: playhead * PX_PER_SEC }} />
                     {audioTrack && (
-                      <div className="absolute top-1 bottom-1 left-0 rounded-md bg-green-800/60 border border-green-600/40 flex items-center px-2 gap-1"
-                        style={{ width: Math.min(audioTrack.duration * PX_PER_SEC, timelineWidth) }}>
+                      <div
+                        className="absolute top-1 bottom-1 rounded-md bg-green-800/60 border border-green-600/40 flex items-center px-2 gap-1 select-none"
+                        style={{ left: (audioTrack.timelineStart ?? 0) * PX_PER_SEC, width: Math.min(audioTrack.duration * PX_PER_SEC, timelineWidth), cursor: 'grab' }}
+                        onMouseDown={e => {
+                          if ((e.target as HTMLElement).closest('.audio-handle')) return;
+                          e.stopPropagation(); e.preventDefault();
+                          const startX = e.clientX; const startTs = audioTrack.timelineStart ?? 0;
+                          const onMove = (ev: MouseEvent) => {
+                            setAudioTrack(a => a ? { ...a, timelineStart: Math.max(0, startTs + (ev.clientX - startX) / PX_PER_SEC) } : a);
+                          };
+                          const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+                          window.addEventListener('mousemove', onMove);
+                          window.addEventListener('mouseup', onUp);
+                        }}>
                         <Music size={10} className="text-green-400 shrink-0" />
-                        <span className="text-xs text-green-300 truncate">{audioTrack.name}</span>
+                        <span className="text-xs text-green-300 truncate flex-1">{audioTrack.name}</span>
+                        <div
+                          className="audio-handle absolute top-0 right-0 bottom-0 w-3 cursor-ew-resize flex items-center justify-center hover:bg-green-400/30 rounded-r-md"
+                          onMouseDown={e => {
+                            e.stopPropagation(); e.preventDefault();
+                            const startX = e.clientX; const startDur = audioTrack.duration;
+                            const onMove = (ev: MouseEvent) => {
+                              setAudioTrack(a => a ? { ...a, duration: Math.max(0.5, startDur + (ev.clientX - startX) / PX_PER_SEC) } : a);
+                            };
+                            const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+                            window.addEventListener('mousemove', onMove);
+                            window.addEventListener('mouseup', onUp);
+                          }}>
+                          <GripHorizontal size={8} className="text-green-500 rotate-90" />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1720,10 +1802,50 @@ const VideoStudioPage: React.FC = () => {
                     <div className="playhead-line" style={{ left: playhead * PX_PER_SEC }} />
                     {voiceSegs.map(v => (
                       <div key={v.id}
-                        className="absolute top-1 bottom-1 rounded-md bg-purple-800/60 border border-purple-600/40 flex items-center px-2 gap-1"
-                        style={{ left: v.timelineStart * PX_PER_SEC, width: Math.max(v.duration * PX_PER_SEC, 30) }}>
+                        className="absolute top-1 bottom-1 rounded-md bg-purple-800/60 border border-purple-600/40 flex items-center px-2 gap-1 select-none"
+                        style={{ left: v.timelineStart * PX_PER_SEC, width: Math.max(v.duration * PX_PER_SEC, 40), cursor: 'grab' }}
+                        onMouseDown={e => {
+                          if ((e.target as HTMLElement).closest('.voice-handle, button')) return;
+                          e.stopPropagation(); e.preventDefault();
+                          const startX = e.clientX; const startTs = v.timelineStart;
+                          const onMove = (ev: MouseEvent) => {
+                            setVoiceSegs(prev => prev.map(x => x.id === v.id ? { ...x, timelineStart: Math.max(0, startTs + (ev.clientX - startX) / PX_PER_SEC) } : x));
+                          };
+                          const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+                          window.addEventListener('mousemove', onMove);
+                          window.addEventListener('mouseup', onUp);
+                        }}>
                         <Mic size={10} className="text-purple-400 shrink-0" />
-                        <span className="text-xs text-purple-300 truncate">{v.name}</span>
+                        <span className="text-[10px] text-purple-300 truncate flex-1">{v.name}</span>
+                        <button title="Click to change speed"
+                          onClick={e => {
+                            e.stopPropagation();
+                            const speeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
+                            const cur = v.playbackRate ?? 1;
+                            const next = speeds[(speeds.indexOf(cur) + 1) % speeds.length];
+                            const base = v.baseDuration ?? v.duration;
+                            setVoiceSegs(prev => prev.map(x => x.id === v.id ? { ...x, playbackRate: next, baseDuration: base, duration: base / next } : x));
+                          }}
+                          className="voice-handle shrink-0 text-[9px] font-bold text-purple-300 bg-purple-700/60 hover:bg-purple-600 px-1 rounded">
+                          {(v.playbackRate ?? 1).toFixed(2).replace(/[.]?0+$/, '')}×
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); setVoiceSegs(prev => prev.filter(x => x.id !== v.id)); }}
+                          className="voice-handle shrink-0 text-purple-500 hover:text-red-300">
+                          <X size={10} />
+                        </button>
+                        <div className="voice-handle absolute top-0 right-0 bottom-0 w-3 cursor-ew-resize flex items-center justify-center hover:bg-purple-400/30 rounded-r-md"
+                          onMouseDown={e => {
+                            e.stopPropagation(); e.preventDefault();
+                            const startX = e.clientX; const startDur = v.duration;
+                            const onMove = (ev: MouseEvent) => {
+                              setVoiceSegs(prev => prev.map(x => x.id === v.id ? { ...x, duration: Math.max(0.5, startDur + (ev.clientX - startX) / PX_PER_SEC) } : x));
+                            };
+                            const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+                            window.addEventListener('mousemove', onMove);
+                            window.addEventListener('mouseup', onUp);
+                          }}>
+                          <GripHorizontal size={8} className="text-purple-500 rotate-90" />
+                        </div>
                       </div>
                     ))}
                   </div>
