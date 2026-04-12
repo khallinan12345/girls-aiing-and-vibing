@@ -1322,6 +1322,39 @@ const VideoStudioPage: React.FC = () => {
               {/* ── Voice tab ── */}
               {activeTab === 'voice' && (
                 <>
+                  {/* Saved voice clips from Voice Creation page */}
+                  <p className="text-xs text-slate-500">Your saved voice clips</p>
+                  {loadingAudioLib ? (
+                    <div className="flex justify-center py-3">
+                      <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : audioLibrary.length === 0 ? (
+                    <p className="text-xs text-slate-600 text-center py-2">No saved clips yet — generate some on the Voice Creation page!</p>
+                  ) : (
+                    <div className="space-y-1 max-h-36 overflow-y-auto">
+                      {audioLibrary.map(clip => (
+                        <div key={clip.id}
+                          className="flex items-center gap-2 px-2 py-1.5 bg-slate-800/70 border border-purple-800/40 rounded-lg cursor-pointer hover:bg-purple-900/30 transition-colors"
+                          onClick={async () => {
+                            const dur = await new Promise<number>(resolve => {
+                              const a = new Audio(clip.url);
+                              a.onloadedmetadata = () => resolve(a.duration);
+                              a.onerror = () => resolve(5);
+                            });
+                            const tStart = voiceSegs.reduce((m, v) => Math.max(m, v.timelineStart + v.duration), playhead);
+                            setVoiceSegs(prev => [...prev, {
+                              id: uid(), src: clip.url, duration: dur,
+                              timelineStart: tStart, name: clip.name,
+                            }]);
+                          }}>
+                          <Mic size={11} className="text-purple-400 shrink-0" />
+                          <span className="text-xs text-slate-300 truncate flex-1">{clip.name}</span>
+                          <Plus size={11} className="text-purple-400 shrink-0" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Upload audio file as voiceover */}
                   <label className="flex items-center gap-2 w-full bg-slate-800 hover:bg-slate-700 border border-dashed border-slate-600 rounded-lg px-3 py-2.5 text-xs text-slate-400 cursor-pointer transition-colors">
                     <Upload size={13} /> Upload audio file
