@@ -187,6 +187,31 @@ interface DashboardData {
   };
 }
 
+// ── Leaderboard ────────────────────────────────────────────────────────────
+type LeaderboardMetric =
+  | 'sessions_alltime'
+  | 'sessions_thismonth'
+  | 'certs_achieved'
+  | 'certs_attempted';
+
+interface LeaderboardEntry {
+  rank: number;
+  user_id: string;
+  name: string;
+  value: number;
+}
+
+const LEADERBOARD_OPTIONS: { value: LeaderboardMetric; label: string }[] = [
+  { value: 'sessions_alltime',   label: '💬 Most Sessions — All Time' },
+  { value: 'sessions_thismonth', label: '📅 Most Sessions — This Month' },
+  { value: 'certs_achieved',     label: '🏆 Certifications Achieved' },
+  { value: 'certs_attempted',    label: '🎯 Certifications Attempted' },
+];
+
+const MEDAL: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
+
+// ───────────────────────────────────────────────────────────────────────────
+
 const DashboardPage: React.FC = () => {
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData>({
@@ -202,6 +227,11 @@ const DashboardPage: React.FC = () => {
   const [downloadingCert, setDownloadingCert] = useState<string | null>(null);
   const [selectedActivityForDetails, setSelectedActivityForDetails] = useState<DashboardActivity | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+
+  // Leaderboard
+  const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('sessions_alltime');
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   
   // Use refs to prevent multiple simultaneous fetches
   const fetchingRef = useRef(false);
@@ -605,6 +635,112 @@ const DashboardPage: React.FC = () => {
     );
   };
 
+  // ── Leaderboard fetch ────────────────────────────────────────────────────
+  const fetchLeaderboard = useCallback(async (metric: LeaderboardMetric) => {
+    if (!userProfile?.join_code_used) return;
+    setLeaderboardLoading(true);
+    try {
+      const joinCode = userProfile.join_code_used;
+
+      if (metric === 'sessions_alltime' || metric === 'sessions_thismonth') {
+        // Pull dashboard rows that have chat_history for all cohort users
+        // We need user IDs in the same cohort first
+        const { data: cohortProfiles, error: cpErr } = await supabase
+          .from('profiles')
+          .select('id, name')
+          .eq('join_code_used', joinCode)
+          .eq('role', 'student');
+
+        if (cpErr || !cohortProfiles) { setLeaderboardLoading(false); return; }
+
+        const cohortIds = cohortProfiles.map(p => p.id);
+        const nameMap: Record<string, string> = {};
+        cohortProfiles.forEach(p => { nameMap[p.id] = p.name; });
+
+        let query = supabase
+          .from('dashboard')
+          .select('user_id')
+          .in('user_id', cohortIds)
+          .not('chat_history', 'is', null);
+
+        if (metric === 'sessions_thismonth') {
+          const startOfMonth = new Date();
+          startOfMonth.setDate(1);
+          startOfMonth.setHours(0, 0, 0, 0);
+          query = query.gte('updated_at', startOfMonth.toISOString());
+        }
+
+        const { data: rows, error: rowErr } = await query;
+        if (rowErr || !rows) { setLeaderboardLoading(false); return; }
+
+        // Count rows per user
+        const counts: Record<string, number> = {};
+        rows.forEach(r => {
+          counts[r.user_id] = (counts[r.user_id] || 0) + 1;
+        });
+
+        const entries: LeaderboardEntry[] = Object.entries(counts)
+          .map(([uid, count]) => ({ user_id: uid, name: nameMap[uid] || 'Unknown', value: count, rank: 0 }))
+          .sort((a, b) => b.value - a.value)
+          .slice(0, 10)
+          .map((e, i) => ({ ...e, rank: i + 1 }));
+
+        setLeaderboard(entries);
+
+      } else {
+        // Certification metrics — scan dashboard rows with category_activity = 'Certification'
+        const { data: cohortProfiles, error: cpErr } = await supabase
+          .from('profiles')
+          .select('id, name')
+          .eq('join_code_used', joinCode)
+          .eq('role', 'student');
+
+        if (cpErr || !cohortProfiles) { setLeaderboardLoading(false); return; }
+
+        const cohortIds = cohortProfiles.map(p => p.id);
+        const nameMap: Record<string, string> = {};
+        cohortProfiles.forEach(p => { nameMap[p.id] = p.name; });
+
+        const { data: certRows, error: certErr } = await supabase
+          .from('dashboard')
+          .select('user_id, progress')
+          .in('user_id', cohortIds)
+          .eq('category_activity', 'Certification');
+
+        if (certErr || !certRows) { setLeaderboardLoading(false); return; }
+
+        const counts: Record<string, number> = {};
+        certRows.forEach(r => {
+          if (metric === 'certs_achieved' && r.progress !== 'completed') return;
+          // certs_attempted: any progress that isn't 'not started'
+          if (metric === 'certs_attempted' && r.progress === 'not started') return;
+          counts[r.user_id] = (counts[r.user_id] || 0) + 1;
+        });
+
+        const entries: LeaderboardEntry[] = Object.entries(counts)
+          .map(([uid, count]) => ({ user_id: uid, name: nameMap[uid] || 'Unknown', value: count, rank: 0 }))
+          .sort((a, b) => b.value - a.value)
+          .slice(0, 10)
+          .map((e, i) => ({ ...e, rank: i + 1 }));
+
+        setLeaderboard(entries);
+      }
+    } catch (e) {
+      console.error('[Leaderboard] fetch error:', e);
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  }, [userProfile?.join_code_used]);
+
+  // Refetch leaderboard whenever metric or join_code changes
+  useEffect(() => {
+    if (userProfile?.join_code_used) {
+      fetchLeaderboard(leaderboardMetric);
+    }
+  }, [leaderboardMetric, fetchLeaderboard, userProfile?.join_code_used]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   const fetchDashboardData = useCallback(async (force = false) => {
     if (!user) {
       console.log('[Dashboard] No user, skipping fetch');
@@ -953,6 +1089,117 @@ const DashboardPage: React.FC = () => {
         ) : (
           // Student Dashboard
           <div className="space-y-8">
+
+            {/* ── Cohort Leaderboard ──────────────────────────────────────── */}
+            {userProfile?.join_code_used && (
+              <div className="bg-white rounded-lg shadow overflow-hidden">
+                <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-yellow-50 flex items-center justify-between flex-wrap gap-3">
+                  <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                    <Trophy className="h-6 w-6 text-amber-500" />
+                    Cohort Leaderboard
+                    <span className="text-sm font-normal text-gray-500 ml-1">
+                      ({userProfile.join_code_used})
+                    </span>
+                  </h2>
+                  <select
+                    value={leaderboardMetric}
+                    onChange={e => setLeaderboardMetric(e.target.value as LeaderboardMetric)}
+                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  >
+                    {LEADERBOARD_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {leaderboardLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-amber-400" />
+                  </div>
+                ) : leaderboard.length === 0 ? (
+                  <div className="py-8 text-center text-gray-400 text-sm">
+                    No data yet for this metric.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100">
+                    {leaderboard.map(entry => {
+                      const isMe = entry.user_id === user?.id;
+                      const medal = MEDAL[entry.rank];
+                      const metricLabel =
+                        leaderboardMetric === 'sessions_alltime' || leaderboardMetric === 'sessions_thismonth'
+                          ? entry.value === 1 ? 'session' : 'sessions'
+                          : entry.value === 1 ? 'certification' : 'certifications';
+
+                      return (
+                        <div
+                          key={entry.user_id}
+                          className={classNames(
+                            'flex items-center px-6 py-3 gap-4 transition-colors',
+                            isMe ? 'bg-amber-50 border-l-4 border-amber-400' : 'hover:bg-gray-50'
+                          )}
+                        >
+                          {/* Rank */}
+                          <div className="w-10 text-center flex-shrink-0">
+                            {medal ? (
+                              <span className="text-2xl leading-none">{medal}</span>
+                            ) : (
+                              <span className="text-base font-bold text-gray-400">#{entry.rank}</span>
+                            )}
+                          </div>
+
+                          {/* Name */}
+                          <div className="flex-1 min-w-0">
+                            <span className={classNames(
+                              'text-sm font-semibold truncate block',
+                              isMe ? 'text-amber-800' : 'text-gray-800'
+                            )}>
+                              {entry.name}
+                              {isMe && (
+                                <span className="ml-2 text-xs font-normal text-amber-600">(you)</span>
+                              )}
+                            </span>
+                          </div>
+
+                          {/* Value */}
+                          <div className="flex-shrink-0 text-right">
+                            <span className={classNames(
+                              'text-base font-bold',
+                              entry.rank === 1 ? 'text-amber-600' :
+                              entry.rank === 2 ? 'text-gray-500' :
+                              entry.rank === 3 ? 'text-orange-700' :
+                              'text-gray-700'
+                            )}>
+                              {entry.value}
+                            </span>
+                            <span className="ml-1 text-xs text-gray-400">{metricLabel}</span>
+                          </div>
+
+                          {/* Bar */}
+                          <div className="hidden sm:block w-28 flex-shrink-0">
+                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className={classNames(
+                                  'h-2 rounded-full',
+                                  entry.rank === 1 ? 'bg-amber-400' :
+                                  entry.rank === 2 ? 'bg-gray-400' :
+                                  entry.rank === 3 ? 'bg-orange-500' :
+                                  'bg-blue-300'
+                                )}
+                                style={{
+                                  width: `${Math.round((entry.value / leaderboard[0].value) * 100)}%`
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+            {/* ─────────────────────────────────────────────────────────── */}
+
             {/* Combined Summary Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Certifications */}
