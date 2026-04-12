@@ -103,7 +103,7 @@ const Navbar: React.FC = () => {
     'text-gray-600 hover:text-purple-700 border-b-2 border-transparent hover:border-purple-300';
 
   return (
-    <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+    <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
       <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14 gap-4">
 
@@ -157,7 +157,7 @@ const Navbar: React.FC = () => {
                       </button>
 
                       {openDropdown === link.name && (
-                        <div className="absolute top-full left-0 pt-1 z-50">
+                        <div className="absolute top-full left-0 pt-1 z-[200]">
                           <div className="bg-white rounded-md shadow-lg ring-1 ring-black/5 py-1 min-w-[210px]">
                             {link.dropdown.map((item) => (
                               <Link
