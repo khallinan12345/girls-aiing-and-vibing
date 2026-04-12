@@ -229,7 +229,7 @@ const DashboardPage: React.FC = () => {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
   // Leaderboard
-  const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('sessions_alltime');
+  const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('sessions_thismonth');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   // For platform_administrator: list of all orgs to pick from
