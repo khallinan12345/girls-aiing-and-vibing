@@ -16,7 +16,7 @@ import { useVoice } from '../../hooks/useVoice';
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
   Bot, User, Send, Mic, Wand2, Save, CheckCircle,
-  Volume2, VolumeX, Code,
+  Volume2, VolumeX, Code, FolderOpen, Plus, X, ChevronDown, Edit3, Check,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -41,6 +41,18 @@ interface PersonalityBaseline {
     pacing_preference?: string;
     recommendations?: string[];
   } | null;
+}
+
+// ── Session type ──────────────────────────────────────────────────────────────
+
+interface VibeSession {
+  id: string;
+  user_id: string;
+  name: string;
+  chat_history: ChatMessage[];
+  vibe_prompt: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // ── Markdown renderer ─────────────────────────────────────────────────────────
@@ -127,6 +139,16 @@ const VibeCodingPage: React.FC = () => {
   const [aiFacilitatorInstructions, setAiFacilitatorInstructions] = useState('');
   const chatContainerRef                    = useRef<HTMLDivElement>(null);
 
+  // ── Session state ──────────────────────────────────────────────────────────
+  const [sessions, setSessions]             = useState<VibeSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [loadingSessions, setLoadingSessions]   = useState(false);
+  const [showSessionBar, setShowSessionBar]     = useState(false);
+  const [showNameModal, setShowNameModal]       = useState(false);
+  const [sessionNameInput, setSessionNameInput] = useState('');
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingNameValue, setEditingNameValue] = useState('');
+
   // ── Vibe Coding Prompt injection ───────────────────────────────────────────
   const [vibeCodingInjectedPrompt, setVibeCodingInjectedPrompt]         = useState<string | null>(null);
   const [generatingVibePromptFromChat, setGeneratingVibePromptFromChat] = useState(false);
@@ -158,6 +180,60 @@ const VibeCodingPage: React.FC = () => {
         }
       });
   }, [user?.id]);
+
+  // ── Fetch past sessions ───────────────────────────────────────────────────
+  const fetchSessions = async () => {
+    if (!user?.id) return;
+    setLoadingSessions(true);
+    try {
+      const { data } = await supabase
+        .from('vibe_coding_sessions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false });
+      setSessions(data ?? []);
+    } catch (err) { console.error('[VibeCoding] fetch sessions error:', err); }
+    finally { setLoadingSessions(false); }
+  };
+
+  useEffect(() => { fetchSessions(); }, [user?.id]);
+
+  const loadSession = (session: VibeSession) => {
+    setChatHistory(session.chat_history.map(m => ({
+      ...m,
+      timestamp: new Date(m.timestamp),
+    })));
+    setCurrentSessionId(session.id);
+    if (session.vibe_prompt) setVibeCodingInjectedPrompt(session.vibe_prompt);
+    setShowSessionBar(false);
+  };
+
+  const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await supabase.from('vibe_coding_sessions').delete().eq('id', id);
+      setSessions(prev => prev.filter(s => s.id !== id));
+      if (currentSessionId === id) {
+        setCurrentSessionId(null);
+        setChatHistory([]);
+      }
+    } catch (err) { console.error('[VibeCoding] delete session error:', err); }
+  };
+
+  const startRenameSession = (session: VibeSession, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSessionId(session.id);
+    setEditingNameValue(session.name);
+  };
+
+  const saveRenameSession = async (id: string) => {
+    if (!editingNameValue.trim()) return;
+    try {
+      await supabase.from('vibe_coding_sessions').update({ name: editingNameValue.trim() }).eq('id', id);
+      setSessions(prev => prev.map(s => s.id === id ? { ...s, name: editingNameValue.trim() } : s));
+    } catch (err) { console.error('[VibeCoding] rename error:', err); }
+    finally { setEditingSessionId(null); }
+  };
 
   // ── Welcome message + facilitator prompt ──────────────────────────────────
   useEffect(() => {
@@ -287,15 +363,48 @@ When they have a clear enough idea, encourage them to click "Create Vibe Coding 
   };
 
   // ── Save session ───────────────────────────────────────────────────────────
-  const handleSaveSession = async () => {
+  const handleSaveSession = () => {
     if (!user?.id || chatHistory.length <= 1) return;
+    // Pre-fill name if resuming an existing session
+    const existing = sessions.find(s => s.id === currentSessionId);
+    setSessionNameInput(existing?.name ?? '');
+    setShowNameModal(true);
+  };
+
+  const commitSaveSession = async () => {
+    const name = sessionNameInput.trim();
+    if (!name || !user?.id) return;
     setSavingSession(true);
+    setShowNameModal(false);
     try {
-      await supabase.from('dashboard')
-        .update({ chat_history: JSON.stringify(chatHistory), updated_at: new Date().toISOString() })
-        .eq('user_id', user.id)
-        .eq('sub_category', 'Vibe Coding');
-    } catch {} finally { setSavingSession(false); }
+      const payload = {
+        user_id: user.id,
+        name,
+        chat_history: chatHistory,
+        vibe_prompt: vibeCodingInjectedPrompt ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      if (currentSessionId) {
+        // Update existing
+        const { error } = await supabase.from('vibe_coding_sessions')
+          .update(payload)
+          .eq('id', currentSessionId);
+        if (!error) {
+          setSessions(prev => prev.map(s => s.id === currentSessionId
+            ? { ...s, ...payload } : s));
+        }
+      } else {
+        // Insert new
+        const { data, error } = await supabase.from('vibe_coding_sessions')
+          .insert({ ...payload, created_at: new Date().toISOString() })
+          .select().single();
+        if (!error && data) {
+          setCurrentSessionId(data.id);
+          setSessions(prev => [data, ...prev]);
+        }
+      }
+    } catch (err) { console.error('[VibeCoding] save session error:', err); }
+    finally { setSavingSession(false); }
   };
 
   // ── Create Vibe Coding Prompt from chat ────────────────────────────────────
@@ -424,6 +533,14 @@ Respond with ONLY valid JSON:
     return advice;
   };
 
+  // ── New session ────────────────────────────────────────────────────────────
+  const handleNewSession = () => {
+    setCurrentSessionId(null);
+    setChatHistory([]);
+    setVibeCodingInjectedPrompt(null);
+    setShowSessionBar(false);
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <AppLayout>
@@ -434,16 +551,118 @@ Respond with ONLY valid JSON:
       )}
 
       <div className="min-h-screen bg-gray-50">
+        {/* ── Name Modal ───────────────────────────────────────────────────── */}
+        {showNameModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+              <h3 className="text-lg font-bold text-gray-900 mb-1">Name your session</h3>
+              <p className="text-sm text-gray-500 mb-4">Give this vibe coding session a memorable name so you can find it later.</p>
+              <input
+                autoFocus
+                type="text"
+                value={sessionNameInput}
+                onChange={e => setSessionNameInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') commitSaveSession(); if (e.key === 'Escape') setShowNameModal(false); }}
+                placeholder="e.g. Weather App, Quiz Game, Portfolio Site"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 mb-4"
+              />
+              <div className="flex gap-2">
+                <button onClick={() => setShowNameModal(false)} className="flex-1 py-2 rounded-xl border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50">Cancel</button>
+                <button onClick={commitSaveSession} disabled={!sessionNameInput.trim()} className="flex-1 py-2 rounded-xl bg-purple-600 text-sm font-bold text-white hover:bg-purple-700 disabled:opacity-40">Save Session</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Page header */}
         <div className="bg-gradient-to-r from-purple-700 to-pink-600 px-6 py-5">
-          <div className="max-w-7xl mx-auto flex items-center gap-3">
-            <Code className="h-7 w-7 text-white flex-shrink-0" />
-            <div>
-              <h1 className="text-2xl font-bold text-white">Vibe Coding</h1>
-              <p className="text-sm text-purple-100">Design your prompt, critique it, and generate code with AI</p>
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Code className="h-7 w-7 text-white flex-shrink-0" />
+              <div>
+                <h1 className="text-2xl font-bold text-white">Vibe Coding</h1>
+                <p className="text-sm text-purple-100">Design your prompt, critique it, and generate code with AI</p>
+              </div>
+            </div>
+            {/* Session controls in header */}
+            <div className="flex items-center gap-2">
+              {currentSessionId && (
+                <span className="hidden sm:block text-xs text-purple-200 truncate max-w-[160px]">
+                  📁 {sessions.find(s => s.id === currentSessionId)?.name}
+                </span>
+              )}
+              <button
+                onClick={handleNewSession}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-semibold transition-colors"
+              >
+                <Plus size={14} /> New
+              </button>
+              <button
+                onClick={() => setShowSessionBar(v => !v)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-semibold transition-colors"
+              >
+                <FolderOpen size={14} />
+                Sessions
+                <ChevronDown size={13} className={showSessionBar ? 'rotate-180 transition-transform' : 'transition-transform'} />
+              </button>
             </div>
           </div>
         </div>
+
+        {/* ── Session Bar ──────────────────────────────────────────────────── */}
+        {showSessionBar && (
+          <div className="bg-white border-b border-gray-200 shadow-sm">
+            <div className="max-w-7xl mx-auto px-4 py-3">
+              <div className="flex items-center gap-2 mb-2">
+                <FolderOpen size={15} className="text-purple-600" />
+                <span className="text-sm font-semibold text-gray-700">Your Saved Sessions</span>
+                {loadingSessions && <span className="text-xs text-gray-400 ml-1">Loading…</span>}
+              </div>
+              {sessions.length === 0 && !loadingSessions ? (
+                <p className="text-sm text-gray-400 py-2">No saved sessions yet — start chatting and click Save.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {sessions.map(session => (
+                    <div
+                      key={session.id}
+                      onClick={() => loadSession(session)}
+                      className={`group flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-all text-sm ${
+                        currentSessionId === session.id
+                          ? 'bg-purple-50 border-purple-300 text-purple-800 font-semibold'
+                          : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-purple-50 hover:border-purple-200'
+                      }`}
+                    >
+                      {editingSessionId === session.id ? (
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <input
+                            autoFocus
+                            value={editingNameValue}
+                            onChange={e => setEditingNameValue(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') saveRenameSession(session.id); if (e.key === 'Escape') setEditingSessionId(null); }}
+                            className="text-xs border border-purple-300 rounded px-1.5 py-0.5 outline-none w-32"
+                          />
+                          <button onClick={() => saveRenameSession(session.id)} className="text-green-600 hover:text-green-700"><Check size={12} /></button>
+                          <button onClick={() => setEditingSessionId(null)} className="text-gray-400 hover:text-gray-600"><X size={12} /></button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="truncate max-w-[140px]">{session.name}</span>
+                          <span className="text-xs text-gray-400 hidden group-hover:inline">
+                            {new Date(session.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                          </span>
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-1" onClick={e => e.stopPropagation()}>
+                            <button onClick={e => startRenameSession(session, e)} className="p-0.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600" title="Rename"><Edit3 size={11} /></button>
+                            <button onClick={e => handleDeleteSession(session.id, e)} className="p-0.5 rounded hover:bg-red-100 text-gray-400 hover:text-red-500" title="Delete"><X size={11} /></button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
