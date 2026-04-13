@@ -161,7 +161,8 @@ const StudentLearnerTable: React.FC<{
   onSelectLearner: (id: string) => void;
   selectedId: string;
   isPlatformAdmin?: boolean;
-}> = ({ learners, sessionRows, loading, error, onSelectLearner, selectedId, isPlatformAdmin }) => {
+  canViewStudentDashboard?: boolean;
+}> = ({ learners, sessionRows, loading, error, onSelectLearner, selectedId, isPlatformAdmin, canViewStudentDashboard }) => {
   const [search, setSearch] = useState('');
   const { startImpersonation } = useImpersonation();
   const navigate = useNavigate();
@@ -314,6 +315,7 @@ const StudentLearnerTable: React.FC<{
                 <th onClick={() => toggleSort('certAchieved')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Cert Achieved<SortMark keyName="certAchieved" /></th>
                 <th onClick={() => toggleSort('completionRate')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Completion Rate<SortMark keyName="completionRate" /></th>
                 <th onClick={() => toggleSort('lastActive')} className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700">Last Active<SortMark keyName="lastActive" /></th>
+                {canViewStudentDashboard && <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Dashboard</th>}
                 {isPlatformAdmin && <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Act As</th>}
               </tr>
             </thead>
@@ -324,7 +326,12 @@ const StudentLearnerTable: React.FC<{
                     <a
                       href="#student-dashboard-detail"
                       onClick={(e) => { e.preventDefault(); onSelectLearner(s.id); }}
-                      className="font-semibold text-purple-700 hover:underline text-left"
+                      className={classNames(
+                        'font-semibold text-left',
+                        canViewStudentDashboard
+                          ? 'text-purple-700 hover:underline cursor-pointer'
+                          : 'text-gray-800'
+                      )}
                     >
                       {s.name}
                     </a>
@@ -360,6 +367,18 @@ const StudentLearnerTable: React.FC<{
                   <td className="px-4 py-3 text-gray-600">
                     {s.lastActiveAt ? new Date(s.lastActiveAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '—'}
                   </td>
+                  {canViewStudentDashboard && (
+                    <td className="px-4 py-3">
+                      <a
+                        href="#student-dashboard-detail"
+                        onClick={(e) => { e.preventDefault(); onSelectLearner(s.id); }}
+                        title={`View ${s.name}'s dashboard`}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors whitespace-nowrap"
+                      >
+                        <User size={12} /> View
+                      </a>
+                    </td>
+                  )}
                   {isPlatformAdmin && (
                     <td className="px-4 py-3">
                       <button
@@ -375,7 +394,7 @@ const StudentLearnerTable: React.FC<{
               ))}
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={isPlatformAdmin ? 9 : 8} className="px-4 py-10 text-center text-sm text-gray-400">
+                  <td colSpan={isPlatformAdmin ? (canViewStudentDashboard ? 10 : 9) : (canViewStudentDashboard ? 9 : 8)} className="px-4 py-10 text-center text-sm text-gray-400">
                     {search ? 'No learners match that search.' : 'No student sessions found yet.'}
                   </td>
                 </tr>
@@ -1630,6 +1649,7 @@ const AdminStudentDashboard: React.FC = () => {
           onSelectLearner={(id) => setSelectedId(id)}
           selectedId={selectedId}
           isPlatformAdmin={isPlatformAdmin}
+          canViewStudentDashboard={isPlatformAdmin || isLeader}
         />
 
         {/* Learner selector */}
