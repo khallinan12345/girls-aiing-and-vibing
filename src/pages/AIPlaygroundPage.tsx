@@ -176,6 +176,8 @@ const AIPlaygroundPage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
 
   // ── Voice state ────────────────────────────────────────────────────────────
   const [continent, setContinent] = useState<string | null>(null);
@@ -330,6 +332,22 @@ const AIPlaygroundPage: React.FC = () => {
     reader.onload = () => setAttachment({ name: file.name, content: reader.result as string, type: file.type });
     reader.readAsText(file); e.target.value = '';
   };
+  const readFileAsText = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => setAttachment({ name: file.name, content: reader.result as string, type: file.type });
+    reader.readAsText(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = (e: React.DragEvent) => { if (!dropZoneRef.current?.contains(e.relatedTarget as Node)) setIsDragging(false); };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault(); setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    readFileAsText(file);
+  };
+
+
 
   const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -475,7 +493,23 @@ const AIPlaygroundPage: React.FC = () => {
       <div className="flex flex-1 min-w-0 overflow-hidden">
 
         {/* Chat panel */}
-        <div className={`flex flex-col min-w-0 transition-all duration-300 ${artifact ? 'w-1/2' : 'flex-1'}`}>
+        <div
+          ref={dropZoneRef}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`relative flex flex-col min-w-0 transition-all duration-300 ${artifact ? 'w-1/2' : 'flex-1'}`}
+        >
+          {/* Drag-and-drop overlay */}
+          {isDragging && (
+            <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-purple-50/90 border-4 border-dashed border-purple-400 rounded-xl pointer-events-none">
+              <div className="w-16 h-16 rounded-2xl bg-purple-100 flex items-center justify-center mb-3">
+                <Paperclip size={28} className="text-purple-500" />
+              </div>
+              <p className="text-lg font-bold text-purple-700">Drop file to attach</p>
+              <p className="text-sm text-purple-500 mt-1">Text, code, CSV, JSON and more</p>
+            </div>
+          )}
 
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 flex-shrink-0">
