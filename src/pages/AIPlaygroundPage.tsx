@@ -256,8 +256,14 @@ const AIPlaygroundPage: React.FC = () => {
           temperature: 0.3,
         }),
       });
-      const data = await res.json();
-      return data.choices?.[0]?.message?.content?.trim() ?? 'New Chat';
+      const rawTitle = await res.text();
+      let data: any;
+      try { data = JSON.parse(rawTitle); } catch { return firstMessage.slice(0, 40) || 'New Chat'; }
+      return (
+        data?.content?.[0]?.text?.trim() ??
+        data?.choices?.[0]?.message?.content?.trim() ??
+        'New Chat'
+      );
     } catch { return firstMessage.slice(0, 40) || 'New Chat'; }
   };
 
@@ -273,16 +279,25 @@ const AIPlaygroundPage: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          page:           'AIPlaygroundPage',
+          page:            'AIPlaygroundPage',
           playgroundModel: playgroundModel,
-          messages:       apiMessages,
-          system:         'You are a helpful AI assistant. Be clear, thoughtful, and concise.',
-          max_tokens:     2000,
-          temperature:    0.7,
+          messages:        apiMessages,
+          system:          'You are a helpful AI assistant. Be clear, thoughtful, and concise.',
+          max_tokens:      8000,
+          temperature:     0.7,
         }),
       });
-      const data = await res.json();
-      const assistantText = data.choices?.[0]?.message?.content ?? 'Sorry, I could not generate a response.';
+      // Safe parse: API may return a plain-text error string on 5xx
+      let data: any;
+      const rawText = await res.text();
+      try { data = JSON.parse(rawText); }
+      catch { throw new Error(`API error (${res.status}): ${rawText.slice(0, 200)}`); }
+      if (!res.ok) throw new Error(data?.error ?? `API error ${res.status}`);
+      // Support both Anthropic shape (content[0].text) and OpenAI shape (choices[0].message.content)
+      const assistantText: string =
+        data?.content?.[0]?.text ??
+        data?.choices?.[0]?.message?.content ??
+        'Sorry, I could not generate a response.';
       const assistantMsg: ChatMessage = { role: 'assistant', content: assistantText, timestamp: new Date().toISOString() };
       const finalMessages = [...updatedMessages, assistantMsg];
       const detected = detectArtifact(assistantText);
