@@ -180,36 +180,81 @@ async function callInstructionAPI(body: Record<string, unknown>) {
   return res.json();
 }
 
-// Build the request shape the evaluate-web-session API expects:
-//   promptHistory: [{action, prompt}]   — full chat history
-//   pages: [{name, code}]               — project files mapped to the API's page format
-function buildEvalPayload(
+// ── Evaluation via /api/chat (Anthropic Sonnet — routed by chat.js) ────────────
+// Replaces the old /api/evaluate-web-session (OpenAI) endpoint.
+// chat.js routes page='WebDevelopmentPage' → Anthropic claude-sonnet-4-6 automatically.
+
+const EVAL_SYSTEM = `You are an expert evaluator of student web development projects.
+Evaluate the student's work and return ONLY valid JSON — no prose, no markdown fences.`;
+
+function buildEvalPrompt(
   promptHistory: PromptEntry[],
   projectFiles: { path: string; content: string }[]
-) {
-  return {
-    model: 'claude-sonnet-4-6',
-    promptHistory: promptHistory.map(e => ({ action: e.action, prompt: e.prompt })),
-    pages: projectFiles
-      .filter(f => f.content.length > 30)
-      .map(f => ({ name: f.path, code: f.content })),
-  };
+): string {
+  const historyText = promptHistory
+    .map(e => `[${e.action.toUpperCase()}] Task: ${e.taskId} | Prompt: ${e.prompt}${e.aiCritique ? ` | Feedback: ${e.aiCritique}` : ''}`)
+    .join('\n');
+
+  const fileText = projectFiles
+    .filter(f => f.content.length > 30)
+    .map(f => `--- ${f.path} ---\n${f.content.substring(0, 800)}`)
+    .join('\n\n');
+
+  return `Evaluate this student's React/Vite web development session.
+
+PROMPT HISTORY:
+${historyText || 'No prompts yet.'}
+
+PROJECT FILES (truncated):
+${fileText || 'No files yet.'}
+
+Return ONLY this JSON structure:
+{
+  "evaluation": {
+    "promptClarity":        { "score": <0-3>, "comment": "<one sentence>" },
+    "taskCompletion":       { "score": <0-3>, "comment": "<one sentence>" },
+    "codeQuality":          { "score": <0-3>, "comment": "<one sentence>" },
+    "iterativeRefinement":  { "score": <0-3>, "comment": "<one sentence>" },
+    "overallScore":         <0-12>,
+    "summary":              "<2-3 sentence overall assessment>"
+  },
+  "advice": "<3-4 sentences of specific, actionable next steps for this student>"
+}`
 }
 
 async function callEvaluateAPI(
   promptHistory: PromptEntry[],
   projectFiles: { path: string; content: string }[]
-) {
-  const res = await fetch('/api/evaluate-web-session', {
+): Promise<{ evaluation: any; advice: string | null }> {
+  const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildEvalPayload(promptHistory, projectFiles)),
+    body: JSON.stringify({
+      page:       'WebDevelopmentPage',   // → chat.js routes to claude-sonnet-4-6
+      system:     EVAL_SYSTEM,
+      messages:   [{ role: 'user', content: buildEvalPrompt(promptHistory, projectFiles) }],
+      max_tokens: 1000,
+      temperature: 0.3,
+    }),
   });
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({}));
-    throw new Error(e.error || `HTTP ${res.status}`);
-  }
-  return res.json(); // { success, evaluation, advice }
+
+  const rawText = await res.text();
+  let data: any;
+  try { data = JSON.parse(rawText); }
+  catch { throw new Error(`Evaluation API error (${res.status}): ${rawText.slice(0, 200)}`); }
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+  // chat.js returns OpenAI-shaped response: choices[0].message.content
+  const content: string = data?.choices?.[0]?.message?.content ?? '';
+  const clean = content.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
+  let parsed: any;
+  try { parsed = JSON.parse(clean); }
+  catch { throw new Error('Evaluation response was not valid JSON'); }
+
+  return {
+    evaluation: parsed.evaluation ?? null,
+    advice:     parsed.advice     ?? null,
+  };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
