@@ -175,6 +175,16 @@ const StudentLearnerTable: React.FC<{
       alert('Could not load learner profile: ' + err.message);
     }
   };
+
+  // Use scrollIntoView so right-click "open in new tab" on the name/button
+  // doesn't reload the admin dashboard (the old <a href="#..."> caused this).
+  const handleViewDashboard = (learnerId: string) => {
+    onSelectLearner(learnerId);
+    setTimeout(() => {
+      document.getElementById('student-dashboard-detail')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
   const [sortKey, setSortKey] = useState<'name' | 'total' | 'monthTotal' | 'certAttempted' | 'certAchieved' | 'completionRate' | 'lastActive'>('total');
   const [sortAsc, setSortAsc] = useState(false);
   // monthStartMs = UTC midnight on the 1st of the current month.
@@ -323,18 +333,17 @@ const StudentLearnerTable: React.FC<{
               {sorted.map((s) => (
                 <tr key={s.id} className={classNames('hover:bg-purple-50 transition-colors', selectedId === s.id ? 'bg-purple-50/70' : '')}>
                   <td className="px-4 py-3">
-                    <a
-                      href="#student-dashboard-detail"
-                      onClick={(e) => { e.preventDefault(); onSelectLearner(s.id); }}
-                      className={classNames(
-                        'font-semibold text-left',
-                        canViewStudentDashboard
-                          ? 'text-purple-700 hover:underline cursor-pointer'
-                          : 'text-gray-800'
-                      )}
-                    >
-                      {s.name}
-                    </a>
+                    {canViewStudentDashboard ? (
+                      <button
+                        type="button"
+                        onClick={() => handleViewDashboard(s.id)}
+                        className="font-semibold text-purple-700 hover:underline text-left"
+                      >
+                        {s.name}
+                      </button>
+                    ) : (
+                      <span className="font-semibold text-gray-800">{s.name}</span>
+                    )}
                     <div className="text-[11px] text-gray-400">{s.email}</div>
                   </td>
                   <td className="px-4 py-3 font-mono text-gray-700">{s.totalEngaged}</td>
@@ -369,14 +378,14 @@ const StudentLearnerTable: React.FC<{
                   </td>
                   {canViewStudentDashboard && (
                     <td className="px-4 py-3">
-                      <a
-                        href="#student-dashboard-detail"
-                        onClick={(e) => { e.preventDefault(); onSelectLearner(s.id); }}
+                      <button
+                        type="button"
+                        onClick={() => handleViewDashboard(s.id)}
                         title={`View ${s.name}'s dashboard`}
                         className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors whitespace-nowrap"
                       >
                         <User size={12} /> View
-                      </a>
+                      </button>
                     </td>
                   )}
                   {isPlatformAdmin && (
