@@ -182,59 +182,123 @@ async function callInstructionAPI(body: Record<string, unknown>) {
 
 // ── Evaluation via /api/chat (Anthropic Sonnet — routed by chat.js) ────────────
 // Replaces the old /api/evaluate-web-session (OpenAI) endpoint.
-// chat.js routes page='WebDevelopmentPage' → Anthropic claude-sonnet-4-6 automatically.
+// chat.js routes page='WebDevelopmentPage' → Anthropic claude-sonnet-4-6.
+//
+// JSON shape returned MUST match what the evaluation modal renders:
+//   evaluation.overall_score_average       (number, 0–3)
+//   evaluation.phase_averages              ({ phase_1_think_first, … })
+//   evaluation.module_averages             ({ m1_purpose_and_audience, …m8 })
+//   evaluation.detailed_scores             ({ skill: { score, justification } })
+//   evaluation.strengths_summary           (string)
+//   evaluation.highest_leverage_improvements (string)
+//   evaluation.certification_readiness    (string)
+//   advice                                 (string)
 
-const EVAL_SYSTEM = `You are an expert evaluator of student web development projects.
-Evaluate the student's work and return ONLY valid JSON — no prose, no markdown fences.`;
+const EVAL_SYSTEM = `You are an expert evaluator of student web development projects built with React and Vite.
+Assess the student's planning and execution quality across all phases they have attempted.
+Return ONLY valid JSON — no prose, no markdown fences, no extra keys.`;
+
+function getCompletedPhases(promptHistory: PromptEntry[]): Set<string> {
+  const taskIds = new Set(promptHistory.map(e => e.taskId));
+  const phases = new Set<string>();
+  if (['define_site', 'plan_pages'].some(t => taskIds.has(t))) phases.add('phase_1_think_first');
+  if (['app_shell', 'home_page', 'content_pages', 'interactivity'].some(t => taskIds.has(t))) phases.add('phase_2_build_it');
+  if (['styling', 'responsive', 'deploy_prep'].some(t => taskIds.has(t))) phases.add('phase_3_refine_it');
+  return phases;
+}
 
 function buildEvalPrompt(
   promptHistory: PromptEntry[],
-  projectFiles: { path: string; content: string }[]
+  projectFiles: { path: string; content: string }[],
+  currentTaskIndex: number,
 ): string {
-  const historyText = promptHistory
-    .map(e => `[${e.action.toUpperCase()}] Task: ${e.taskId} | Prompt: ${e.prompt}${e.aiCritique ? ` | Feedback: ${e.aiCritique}` : ''}`)
-    .join('\n');
+  const completedPhases = getCompletedPhases(promptHistory);
+  const hasPhase1 = completedPhases.has('phase_1_think_first') || currentTaskIndex >= 1;
+  const hasPhase2 = completedPhases.has('phase_2_build_it');
+  const hasPhase3 = completedPhases.has('phase_3_refine_it');
+
+  const historyText = promptHistory.length > 0
+    ? promptHistory
+        .map(e => `[${e.action.toUpperCase()}] Task:${e.taskId} | Student: ${e.prompt}${e.aiCritique ? ` | AI feedback: ${e.aiCritique}` : ''}`)
+        .join('\n')
+    : 'No prompts submitted yet — student is in early planning stage.';
 
   const fileText = projectFiles
-    .filter(f => f.content.length > 30)
-    .map(f => `--- ${f.path} ---\n${f.content.substring(0, 800)}`)
-    .join('\n\n');
+    .filter(f => f.content.length > 30 && !f.path.startsWith('public/'))
+    .map(f => `--- ${f.path} ---\n${f.content.substring(0, 600)}`)
+    .join('\n\n') || 'Only starter files present — no student code yet.';
+
+  const na = '"not yet reached this phase"';
 
   return `Evaluate this student's React/Vite web development session.
+Student is at task index ${currentTaskIndex}/10. Only Phase 1 (planning) has been attempted${hasPhase2 ? ' and Phase 2 (build)' : ''}${hasPhase3 ? ' and Phase 3 (polish)' : ''}.
 
 PROMPT HISTORY:
-${historyText || 'No prompts yet.'}
+${historyText}
 
-PROJECT FILES (truncated):
-${fileText || 'No files yet.'}
+PROJECT FILES (student code, truncated to 600 chars each):
+${fileText}
 
-Return ONLY this JSON structure:
+SCORING RULES:
+- Score each module 0–3 based ONLY on phases attempted
+- Modules from phases NOT YET reached must score 0 with justification ${na}
+- Phase 1 modules (m1–m3): evaluate from the prompt history — this is planning, not code
+- Phase 2 modules (m4–m7): evaluate from code files — use 0 + ${na} if not reached
+- Phase 3 module (m8): evaluate iterative refinement — use 0 + ${na} if not reached
+- overall_score_average = mean of m1..m8 scores (include the zeros), rounded to 1 decimal
+- Be honest but encouraging — this is a first-generation digital learner
+
+Return ONLY this exact JSON (no markdown, no extra text):
 {
   "evaluation": {
-    "promptClarity":        { "score": <0-3>, "comment": "<one sentence>" },
-    "taskCompletion":       { "score": <0-3>, "comment": "<one sentence>" },
-    "codeQuality":          { "score": <0-3>, "comment": "<one sentence>" },
-    "iterativeRefinement":  { "score": <0-3>, "comment": "<one sentence>" },
-    "overallScore":         <0-12>,
-    "summary":              "<2-3 sentence overall assessment>"
+    "overall_score_average": <mean of m1 through m8>,
+    "phase_averages": {
+      "phase_1_think_first": <average of m1+m2+m3 divided by 3>,
+      "phase_2_build_it": ${hasPhase2 ? '<average of m4+m5+m6+m7 divided by 4>' : '0'},
+      "phase_3_refine_it": ${hasPhase3 ? '<m8 score>' : '0'}
+    },
+    "module_averages": {
+      "m1_purpose_and_audience": <0–3>,
+      "m2_content_strategy": <0–3>,
+      "m3_site_architecture": <0–3>,
+      "m4_page_layout_and_structure": ${hasPhase2 ? '<0–3>' : '0'},
+      "m5_visual_design_and_styling": ${hasPhase2 ? '<0–3>' : '0'},
+      "m6_media_and_assets": ${hasPhase2 ? '<0–3>' : '0'},
+      "m7_interactivity_and_data": ${hasPhase2 ? '<0–3>' : '0'},
+      "m8_iteration_and_quality": ${hasPhase3 ? '<0–3>' : '0'}
+    },
+    "detailed_scores": {
+      "m1_purpose_and_audience": { "score": <0–3>, "justification": "<evidence from prompts or lack thereof>" },
+      "m2_content_strategy": { "score": <0–3>, "justification": "<evidence from prompts or lack thereof>" },
+      "m3_site_architecture": { "score": <0–3>, "justification": "<evidence from prompts or lack thereof>" },
+      "m4_page_layout_and_structure": { "score": ${hasPhase2 ? '<0–3>' : '0'}, "justification": ${hasPhase2 ? '"<evidence from code>"' : '"Not yet reached this phase"'} },
+      "m5_visual_design_and_styling": { "score": ${hasPhase2 ? '<0–3>' : '0'}, "justification": ${hasPhase2 ? '"<evidence from code>"' : '"Not yet reached this phase"'} },
+      "m6_media_and_assets": { "score": ${hasPhase2 ? '<0–3>' : '0'}, "justification": ${hasPhase2 ? '"<evidence from code>"' : '"Not yet reached this phase"'} },
+      "m7_interactivity_and_data": { "score": ${hasPhase2 ? '<0–3>' : '0'}, "justification": ${hasPhase2 ? '"<evidence from code>"' : '"Not yet reached this phase"'} },
+      "m8_iteration_and_quality": { "score": ${hasPhase3 ? '<0–3>' : '0'}, "justification": ${hasPhase3 ? '"<evidence from code>"' : '"Not yet reached this phase"'} }
+    },
+    "strengths_summary": "<2 sentences on what the student did well so far>",
+    "highest_leverage_improvements": "<2–3 specific things that would most improve their current phase work>",
+    "certification_readiness": "<honest 1-sentence assessment of where they are relative to completion>"
   },
-  "advice": "<3-4 sentences of specific, actionable next steps for this student>"
-}`
+  "advice": "<3–4 sentences of concrete next steps for where this student is right now>"
+}`;
 }
 
 async function callEvaluateAPI(
   promptHistory: PromptEntry[],
-  projectFiles: { path: string; content: string }[]
+  projectFiles: { path: string; content: string }[],
+  currentTaskIndex = 0,
 ): Promise<{ evaluation: any; advice: string | null }> {
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      page:       'WebDevelopmentPage',   // → chat.js routes to claude-sonnet-4-6
-      system:     EVAL_SYSTEM,
-      messages:   [{ role: 'user', content: buildEvalPrompt(promptHistory, projectFiles) }],
-      max_tokens: 1000,
-      temperature: 0.3,
+      page:        'WebDevelopmentPage',  // → chat.js routes to claude-sonnet-4-6
+      system:      EVAL_SYSTEM,
+      messages:    [{ role: 'user', content: buildEvalPrompt(promptHistory, projectFiles, currentTaskIndex) }],
+      max_tokens:  1800,
+      temperature: 0.2,
     }),
   });
 
@@ -244,18 +308,19 @@ async function callEvaluateAPI(
   catch { throw new Error(`Evaluation API error (${res.status}): ${rawText.slice(0, 200)}`); }
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
 
-  // chat.js returns OpenAI-shaped response: choices[0].message.content
+  // chat.js wraps Anthropic response in OpenAI shape: choices[0].message.content
   const content: string = data?.choices?.[0]?.message?.content ?? '';
   const clean = content.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
   let parsed: any;
   try { parsed = JSON.parse(clean); }
-  catch { throw new Error('Evaluation response was not valid JSON'); }
+  catch { throw new Error(`Evaluation returned invalid JSON: ${clean.slice(0, 300)}`); }
 
   return {
     evaluation: parsed.evaluation ?? null,
     advice:     parsed.advice     ?? null,
   };
 }
+
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -796,7 +861,7 @@ const WebDevelopmentPage: React.FC = () => {
       let evalScores: any = null;
       let advice: string | null = null;
       try {
-        const evalResult = await callEvaluateAPI(promptHistory, projectFiles);
+        const evalResult = await callEvaluateAPI(promptHistory, projectFiles, taskIndex);
         evalScores = evalResult.evaluation ?? null;
         advice     = evalResult.advice     ?? null;
       } catch { /* evaluation failure does not block save */ }
@@ -1275,7 +1340,7 @@ const WebDevelopmentPage: React.FC = () => {
     setIsEvaluating(true); setEvalError(null); setShowEvaluation(true);
     await ensureSession();
     try {
-      const result = await callEvaluateAPI(promptHistory, projectFiles);
+      const result = await callEvaluateAPI(promptHistory, projectFiles, taskIndex);
       setEvaluation(result.evaluation);
       setEvalAdvice(result.advice || null);
       await persistSession(projectFiles, promptHistory, taskIndex, sessionContext, result.evaluation);
