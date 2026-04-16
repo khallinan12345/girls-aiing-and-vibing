@@ -284,9 +284,27 @@ const AIPlaygroundPage: React.FC = () => {
           page:            'AIPlaygroundPage',
           playgroundModel: playgroundModel,
           messages:        apiMessages,
-          system:          'You are a helpful AI assistant. Be clear, thoughtful, and concise.',
+          system: `You are an expert coding assistant. Follow these rules for every response:
+
+CODE BLOCKS
+- Always wrap ALL code, terminal commands, and bash commands in labeled code blocks with the correct language tag (e.g. \`\`\`bash, \`\`\`typescript, \`\`\`python, \`\`\`tsx).
+- Every code block must be self-contained and copy-pasteable — never mix explanation text inside a code block.
+- For terminal/shell commands, always use \`\`\`bash.
+- For multi-step instructions, give each step its own labeled code block.
+
+FILE PLACEMENT
+- Always state the exact file path before any code block, e.g. "In src/pages/MyPage.tsx, replace lines 42–55 with:"
+- If adding new code, say exactly where it goes: "Add this after the imports at the top of the file" or "Add this function before the return statement."
+- If editing existing code, quote the 1–3 lines immediately before and after the change so the user can locate the exact spot.
+- If creating a new file, state the full path where it should be saved.
+
+EXPLANATIONS
+- Write a brief plain-English explanation BEFORE each code block, not inside it.
+- After a code block, note any follow-up steps (e.g. "Then run \`npm install\` in the terminal").
+
+Be clear, precise, and assume the user is learning. When in doubt, over-specify the location.`,
           max_tokens:      8000,
-          temperature:     0.7,
+          temperature:     0.3,
         }),
       });
       // Safe parse: API may return a plain-text error string on 5xx
