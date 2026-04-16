@@ -710,7 +710,7 @@ const FishingBackground: React.FC = () => {
     window.addEventListener('mousemove', h);
     return () => { window.removeEventListener('mousemove', h); if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
-  const img = "url('/fishing-bg.jpg')";
+  const img = "url('/background_fishing_consultant.webp')";
   return (
     <>
       <svg className="absolute w-0 h-0" aria-hidden="true">
