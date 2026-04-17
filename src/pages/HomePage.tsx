@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import AppLayout from '../components/layout/AppLayout';
-import { Sparkles, Brain, Award, CheckCircle, Globe2 } from 'lucide-react';
+import { Sparkles, Brain, Award, CheckCircle, Globe2, Newspaper, ChevronRight, X as XIcon } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabaseClient';
 
@@ -50,6 +50,27 @@ const HomePage: React.FC = () => {
   const [windowSize, setWindowSize] = useState({ width: 1920, height: 1080 });
   const [isMouseMoving, setIsMouseMoving] = useState(false);
   const mouseTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // ── News banner ───────────────────────────────────────────────────────────
+  interface NewsItem {
+    id: number;
+    title: string;
+    body: string;
+    link?: string;
+    link_label?: string;
+    emoji?: string;
+    created_at: string;
+  }
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [newsDismissed, setNewsDismissed] = useState(false);
+  const [newsIndex, setNewsIndex] = useState(0);
+
+  useEffect(() => {
+    fetch('/api/platform-news')
+      .then(r => r.ok ? r.json() : [])
+      .then((items: NewsItem[]) => setNewsItems(items))
+      .catch(() => {});
+  }, []);
 
   // Track window size for proper background positioning
   useEffect(() => {
@@ -440,6 +461,67 @@ const HomePage: React.FC = () => {
 
           {/* Content */}
           <div className="relative z-10 flex flex-col justify-center items-center min-h-screen px-6 py-20 text-center">
+
+            {/* ── News banner ─────────────────────────────────────────────── */}
+            {!newsDismissed && newsItems.length > 0 && (
+              <div className="w-full max-w-4xl mb-8 animate-fade-in">
+                <div className="relative bg-gradient-to-r from-yellow-500/20 to-orange-500/20 backdrop-blur-md border border-yellow-400/40 rounded-2xl px-5 py-4 shadow-xl">
+                  {/* Header row */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Newspaper size={16} className="text-yellow-300 flex-shrink-0" />
+                      <span className="text-xs font-bold text-yellow-300 uppercase tracking-widest">What's New</span>
+                      {newsItems.length > 1 && (
+                        <span className="text-[10px] text-yellow-400/70 font-medium">
+                          {newsIndex + 1} / {newsItems.length}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {newsItems.length > 1 && (
+                        <button
+                          onClick={() => setNewsIndex(i => (i + 1) % newsItems.length)}
+                          className="text-yellow-400 hover:text-yellow-200 transition-colors"
+                          title="Next news item"
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setNewsDismissed(true)}
+                        className="text-yellow-400/60 hover:text-yellow-200 transition-colors"
+                        title="Dismiss"
+                      >
+                        <XIcon size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* News item */}
+                  {(() => {
+                    const item = newsItems[newsIndex];
+                    return (
+                      <div className="text-left">
+                        <p className="text-sm font-bold text-white mb-0.5">
+                          {item.emoji && <span className="mr-1.5">{item.emoji}</span>}
+                          {item.title}
+                        </p>
+                        <p className="text-xs text-gray-200 leading-relaxed">{item.body}</p>
+                        {item.link && (
+                          <a
+                            href={item.link}
+                            className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-yellow-300 hover:text-yellow-100 underline underline-offset-2 transition-colors"
+                          >
+                            {item.link_label ?? 'Learn more'} <ChevronRight size={11} />
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
             <div className="mb-8">
               <Award
                 className="h-12 w-12 mx-auto text-pink-300 mb-4 animate-pulse"
