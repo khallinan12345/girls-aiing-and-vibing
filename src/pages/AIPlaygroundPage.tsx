@@ -501,6 +501,9 @@ const AIPlaygroundPage: React.FC = () => {
   const chatEndRef   = useRef<HTMLDivElement>(null);
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
   const dropZoneRef  = useRef<HTMLDivElement>(null);
+  // Tracks when activeChatId changes because WE just created a new chat mid-send,
+  // so the reset effect below doesn't wipe the artifact we just opened.
+  const justCreatedChatRef = useRef(false);
 
   // ── Voice state ──────────────────────────────────────────────────────────────
   const [continent, setContinent]                   = useState<string | null>(null);
@@ -538,6 +541,12 @@ const AIPlaygroundPage: React.FC = () => {
 
   // ── Reset on chat switch — clear history too ──────────────────────────────────
   useEffect(() => {
+    // Skip the reset when the activeChatId changed because we just created
+    // a new chat during handleSend — the artifact is already set correctly.
+    if (justCreatedChatRef.current) {
+      justCreatedChatRef.current = false;
+      return;
+    }
     cancelSpeech();
     setArtifact(null);
     setShowReflection(false);
@@ -752,6 +761,7 @@ const AIPlaygroundPage: React.FC = () => {
           .select().single();
         if (error) throw error;
         setChats(prev => [newChat, ...prev]);
+        justCreatedChatRef.current = true; // prevent reset effect from clearing the artifact
         setActiveChatId(newChat.id);
       }
     } catch (err) {
