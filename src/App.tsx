@@ -49,6 +49,7 @@ import VoiceCreationPage from './pages/tech-skills/VoiceCreationPage';
 import AIContentCreationPage from './pages/AIContentCreationPage';
 import AIWorkflowDevPage from './pages/tech-skills/AIWorkflowDevPage';
 import AIForBusinessPage from './pages/tech-skills/AIForBusinessPage';
+import MicrosoftAI900Page from './pages/tech-skills/MicrosoftAI900Page';
 import VibeCodingCertificationPage from './pages/tech-skills/VibeCodingCertificationPage';
 import WebDevCertificationPage from './pages/tech-skills/WebDevCertificationPage';
 import AIVideoProductionCertificationPage from './pages/tech-skills/AIVideoProductionCertificationPage';
@@ -209,6 +210,7 @@ const AppContent: React.FC = () => {
         <Route path="/tech-skills/ai-content-creation" element={<AIContentCreationPage />} />
         <Route path="/tech-skills/ai-workflow-development" element={<AIWorkflowDevPage />} />
         <Route path="/tech-skills/ai-for-business" element={<AIForBusinessPage />} />
+        <Route path="/tech-skills/microsoft-ai900" element={<MicrosoftAI900Page />} />
 
         {/* Community Impact Routes */}
         <Route path="/community-impact/ai-ambassadors" element={<AIAmbassadorsPage />} />

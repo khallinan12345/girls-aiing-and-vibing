@@ -48,6 +48,7 @@ const Navbar: React.FC = () => {
         { name: 'AI Content Creation', path: '/tech-skills/ai-content-creation' },
         { name: 'AI Workflow Development', path: '/tech-skills/ai-workflow-development' },
         { name: 'AI for Business', path: '/tech-skills/ai-for-business' },
+        { name: 'Microsoft AI-900 Prep', path: '/tech-skills/microsoft-ai900' },
       ],
     },
     {
