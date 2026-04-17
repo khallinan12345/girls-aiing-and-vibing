@@ -9,7 +9,8 @@ import { supabase } from '../lib/supabaseClient';
 
 const US_BACKGROUND =
   'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=2832&q=80';
-const AFRICA_BACKGROUND = '/home_page_africa.png';
+const AFRICA_BACKGROUND       = '/home_page_africa.png';
+const NORTH_AMERICA_BACKGROUND = '/background_home_page_North_America.png';
 
 const aiReadySkills = [
   {
@@ -225,8 +226,11 @@ const HomePage: React.FC = () => {
   }, [user?.id]);
 
   // 2) Determine theme
-  const isAfrica = continent === 'Africa';
-  const backgroundUrl = isAfrica ? AFRICA_BACKGROUND : US_BACKGROUND;
+  const isAfrica       = continent === 'Africa';
+  const isNorthAmerica = continent === 'North America';
+  const backgroundUrl  = isAfrica       ? AFRICA_BACKGROUND
+                       : isNorthAmerica ? NORTH_AMERICA_BACKGROUND
+                       : US_BACKGROUND;
 
   // ── Communication-level content ───────────────────────────────────────────
   // level null  = no baseline yet (default to level 1 — Emerging)
