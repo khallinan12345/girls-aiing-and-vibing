@@ -300,6 +300,34 @@ const AI900Onboarding: React.FC<{ onComplete: () => void }> = ({ onComplete }) =
       </div>
     </div>
 
+    {/* Free voucher CTA */}
+    <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl">
+      <p className="text-xs font-bold text-emerald-400 mb-1.5">🎟️ Get Your Free Exam Voucher</p>
+      <p className="text-xs text-gray-300 leading-relaxed mb-2">
+        Nigerian citizens can claim a <strong className="text-white">fully paid AI-900 exam voucher</strong> through
+        the Microsoft Digital Skills Nigeria programme — at zero cost. Complete the learning, score above 60%
+        on the mock exam, and receive your voucher.
+      </p>
+      <div className="flex flex-col gap-1.5">
+        <a
+          href="https://aka.ms/registerngcertification"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors"
+        >
+          <GraduationCap size={13} /> Register — Digital Skills Nigeria
+        </a>
+        <a
+          href="https://techcommunity.microsoft.com/blog/educatordeveloperblog/free-microsoft-associate-and-expert-certification-vouchers-in-nigeria/3695976"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-medium rounded-lg transition-colors"
+        >
+          <BookOpen size={13} /> Step-by-step voucher guide (Microsoft)
+        </a>
+      </div>
+    </div>
+
     <button onClick={onComplete}
       className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors">
       Let's start with Domain 1! <ArrowRight size={16} />
