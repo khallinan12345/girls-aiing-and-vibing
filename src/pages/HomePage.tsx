@@ -462,6 +462,18 @@ const HomePage: React.FC = () => {
           {/* Content */}
           <div className="relative z-10 flex flex-col justify-center items-center min-h-screen px-6 py-20 text-center">
 
+            <div className="mb-8">
+              <Award
+                className="h-12 w-12 mx-auto text-pink-300 mb-4 animate-pulse"
+              />
+              <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold bg-gradient-to-r from-pink-300 via-purple-300 to-blue-300 bg-clip-text text-transparent mb-4">
+                {loadingContinent ? 'Loading…' : content.headline1}
+              </h1>
+              <h2 className="text-4xl md:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-blue-300 via-purple-300 to-pink-300 bg-clip-text text-transparent">
+                {content.headline2}
+              </h2>
+            </div>
+
             {/* ── News banner ─────────────────────────────────────────────── */}
             {!newsDismissed && newsItems.length > 0 && (
               <div className="w-full max-w-4xl mb-8 animate-fade-in">
@@ -521,18 +533,6 @@ const HomePage: React.FC = () => {
                 </div>
               </div>
             )}
-
-            <div className="mb-8">
-              <Award
-                className="h-12 w-12 mx-auto text-pink-300 mb-4 animate-pulse"
-              />
-              <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold bg-gradient-to-r from-pink-300 via-purple-300 to-blue-300 bg-clip-text text-transparent mb-4">
-                {loadingContinent ? 'Loading…' : content.headline1}
-              </h1>
-              <h2 className="text-4xl md:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-blue-300 via-purple-300 to-pink-300 bg-clip-text text-transparent">
-                {content.headline2}
-              </h2>
-            </div>
 
             {user && (
               <div className="inline-block bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg px-8 py-4 shadow-md mb-8">
