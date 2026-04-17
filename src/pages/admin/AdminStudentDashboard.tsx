@@ -1388,22 +1388,57 @@ const AdminStudentDashboard: React.FC = () => {
   const isPlatformAdmin = ADMIN_IDS.has(user?.id ?? '') || userRole === 'platform_administrator';
   const isLeader        = userRole === 'leader' && !isPlatformAdmin;
 
-  // Fetch all orgs this leader belongs to (via junction table)
+  // Fetch orgs and resolve which join codes belong to this leader specifically.
+  // A leader's "own" codes are those stored in organizations where leader_id = user.id.
+  // Co-leaders (joined via a code but not primary leader_id) see only learners
+  // who used the specific code they joined with (stored in their own join_code_used).
   useEffect(() => {
     if (!isLeader || !user?.id) return;
-    supabase
-      .from('profile_organizations')
-      .select('organization_id, organizations(id, name, join_code, city)')
-      .eq('profile_id', user.id)
-      .then(({ data }) => {
-        if (!data?.length) return;
-        const orgs = data
-          .map((r: any) => r.organizations)
-          .filter(Boolean);
-        setLeaderOrgs(orgs);
-        // Auto-select first org (or the one from their profile)
-        setSelectedOrgId(orgs[0]?.id ?? userOrgId);
-      });
+
+    (async () => {
+      // 1. Orgs where this user is the PRIMARY leader
+      const { data: ownedOrgs } = await supabase
+        .from('organizations')
+        .select('id, name, join_code, join_codes, city')
+        .eq('leader_id', user.id);
+
+      // 2. This user's own profile — to find the join_code_used (co-leader case)
+      const { data: myProfile } = await supabase
+        .from('profiles')
+        .select('join_code_used, organization_id')
+        .eq('id', user.id)
+        .single();
+
+      const codes: string[] = [];
+      const orgs: typeof leaderOrgs = [];
+
+      if (ownedOrgs?.length) {
+        // Primary leader: all codes in their org's join_codes array are theirs
+        for (const org of ownedOrgs) {
+          orgs.push({ id: org.id, name: org.name, join_code: org.join_code, city: org.city });
+          const orgCodes: string[] = Array.isArray(org.join_codes) && org.join_codes.length
+            ? org.join_codes
+            : org.join_code ? [org.join_code] : [];
+          codes.push(...orgCodes);
+        }
+      } else if (myProfile?.join_code_used) {
+        // Co-leader: only the specific code they signed up with
+        codes.push(myProfile.join_code_used);
+        // Fetch the org name for display
+        if (myProfile.organization_id) {
+          const { data: orgData } = await supabase
+            .from('organizations')
+            .select('id, name, join_code, city')
+            .eq('id', myProfile.organization_id)
+            .single();
+          if (orgData) orgs.push(orgData);
+        }
+      }
+
+      setLeaderOrgs(orgs);
+      setLeaderJoinCodes([...new Set(codes)]); // deduplicate
+      setSelectedOrgId(orgs[0]?.id ?? myProfile?.organization_id ?? null);
+    })();
   }, [isLeader, user?.id]);
 
   const [learners,        setLearners]        = useState<Learner[]>([]);
@@ -1423,6 +1458,8 @@ const AdminStudentDashboard: React.FC = () => {
   // ── Multi-org support for leaders ──────────────────────────────────────────
   const [leaderOrgs, setLeaderOrgs] = useState<{ id: string; name: string; join_code: string; city: string | null }[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  // The join codes that belong to this leader (used to scope the learner list)
+  const [leaderJoinCodes, setLeaderJoinCodes] = useState<string[]>([]);
 
   // ── Cost data ───────────────────────────────────────────────────────────────
   const [costRows,        setCostRows]        = useState<CostRow[]>([]);
@@ -1504,22 +1541,34 @@ const AdminStudentDashboard: React.FC = () => {
     }
   }, [learners]);
 
-  // Fetch all Nigerian learners
+  // Fetch learners scoped correctly per role:
+  //   platform_admin → all African learners
+  //   leader (primary) → learners whose join_code_used is in leader's own join_codes[]
+  //   leader (co-leader) → learners whose join_code_used matches the code they joined with
   useEffect(() => {
+    if (!authChecked) return;
     (async () => {
       setLoadingLearners(true);
       try {
         let query = supabase
           .from('profiles')
-          .select('id, name, email, grade_level, continent, country, organization_id')
+          .select('id, name, email, grade_level, continent, country, organization_id, join_code_used')
           .order('name', { ascending: true });
-        // Leaders see only their selected org's learners; platform admins see all
+
         if (isLeader) {
-          const orgId = selectedOrgId || userOrgId;
-          if (orgId) query = query.eq('organization_id', orgId);
+          if (leaderJoinCodes.length > 0) {
+            // Filter to only learners who used one of this leader's codes
+            query = query.in('join_code_used', leaderJoinCodes);
+          } else {
+            // Codes not loaded yet — fall back to org filter to avoid showing everyone
+            const orgId = selectedOrgId || userOrgId;
+            if (orgId) query = query.eq('organization_id', orgId);
+          }
         } else {
+          // Platform admin sees all African learners
           query = query.eq('continent', 'Africa');
         }
+
         const { data, error } = await query;
         if (error) throw error;
         setLearners((data || []).filter(l => !EXCLUDED_IDS.has(l.id)));
@@ -1529,7 +1578,7 @@ const AdminStudentDashboard: React.FC = () => {
         setLoadingLearners(false);
       }
     })();
-  }, []);
+  }, [authChecked, isLeader, leaderJoinCodes, selectedOrgId, userOrgId]);
 
   useEffect(() => {
     if (activeTab !== 'student') return;
@@ -1636,6 +1685,16 @@ const AdminStudentDashboard: React.FC = () => {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Scope notice for leaders — shows which codes they can see */}
+        {isLeader && leaderJoinCodes.length > 0 && (
+          <div className="mb-4 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-indigo-700">Showing learners who joined with your code{leaderJoinCodes.length > 1 ? 's' : ''}:</span>
+            {leaderJoinCodes.map(code => (
+              <span key={code} className="font-mono text-xs font-black text-indigo-900 bg-white border border-indigo-200 rounded px-2 py-0.5">{code}</span>
+            ))}
           </div>
         )}
 
