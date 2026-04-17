@@ -100,6 +100,7 @@ const Sidebar: React.FC = () => {
         { name: 'AI Workflow Dev',     path: '/tech-skills/ai-workflow-development', icon: <Zap size={20} />       },
         { name: 'AI for Business',     path: '/tech-skills/ai-for-business',         icon: <Briefcase size={20} /> },
         { name: 'Microsoft AI-900',    path: '/tech-skills/microsoft-ai900',         icon: <GraduationCap size={20} /> },
+        { name: 'Microsoft AB-730',    path: '/tech-skills/microsoft-ab730',         icon: <Briefcase size={20} /> },
       ],
     },
     {
