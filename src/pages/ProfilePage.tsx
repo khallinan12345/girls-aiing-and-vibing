@@ -39,6 +39,7 @@ interface UserProfile {
   team_id?: string;
   organization_id?: string;
   join_code_used?: string;
+  is_primary_leader?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -380,15 +381,24 @@ const ProfilePage: React.FC = () => {
 
           setOrgInfo({ ...orgData, join_codes: codes, learner_count: count ?? 0 });
 
-          // For leaders — fetch the student list (only their own org members)
+          // For leaders — fetch the student list scoped by their role
           if (profileData.role === 'leader' || profileData.role === 'platform_administrator') {
             setLoadingStudents(true);
-            const { data: students } = await supabase
+            let studentQuery = supabase
               .from('profiles')
               .select('id, name, email, join_code_used, created_at')
-              .eq('organization_id', profileData.organization_id)
               .not('role', 'in', '("leader","platform_administrator")')
               .order('created_at', { ascending: false });
+
+            if (profileData.is_primary_leader) {
+              // Primary leader sees ALL learners in their org
+              studentQuery = studentQuery.eq('organization_id', profileData.organization_id);
+            } else {
+              // Co-leader sees only learners who used the same code they joined with
+              studentQuery = studentQuery.eq('join_code_used', profileData.join_code_used ?? '');
+            }
+
+            const { data: students } = await studentQuery;
             setOrgStudents(students ?? []);
             setLoadingStudents(false);
           }
@@ -1183,21 +1193,29 @@ const ProfilePage: React.FC = () => {
                       {(profile?.role === 'leader' || profile?.role === 'platform_administrator') && (
                         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 space-y-3">
                           <div className="flex items-center justify-between">
-                            <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">
-                              Join Codes
-                            </p>
-                            <button
-                              onClick={handleGenerateCode}
-                              disabled={generatingCode}
-                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50"
-                            >
-                              {generatingCode ? (
-                                <span className="animate-spin">⟳</span>
-                              ) : (
-                                <Key className="h-3 w-3" />
-                              )}
-                              Generate New Code
-                            </button>
+                            <div>
+                              <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">
+                                Join Codes
+                              </p>
+                              {profile?.is_primary_leader
+                                ? <p className="text-[10px] text-indigo-500 mt-0.5">You are the primary leader of this organization</p>
+                                : <p className="text-[10px] text-indigo-500 mt-0.5">You are a co-facilitator — contact the primary leader to generate new codes</p>
+                              }
+                            </div>
+                            {profile?.is_primary_leader && (
+                              <button
+                                onClick={handleGenerateCode}
+                                disabled={generatingCode}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50"
+                              >
+                                {generatingCode ? (
+                                  <span className="animate-spin">⟳</span>
+                                ) : (
+                                  <Key className="h-3 w-3" />
+                                )}
+                                Generate New Code
+                              </button>
+                            )}
                           </div>
 
                           {/* Code chips */}
@@ -1232,7 +1250,8 @@ const ProfilePage: React.FC = () => {
                       {(profile?.role === 'leader' || profile?.role === 'platform_administrator') && (
                         <div className="space-y-2">
                           <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                            <Users className="h-4 w-4 text-indigo-500" /> Your Learners
+                            <Users className="h-4 w-4 text-indigo-500" />
+                            {profile?.is_primary_leader ? 'All Enrolled Learners' : 'Learners in Your Cohort'}
                           </h4>
                           {loadingStudents ? (
                             <div className="flex items-center gap-2 py-4">

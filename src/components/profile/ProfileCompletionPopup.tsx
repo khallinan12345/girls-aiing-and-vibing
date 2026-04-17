@@ -254,20 +254,22 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
         (city || null);
 
       const profilePayload: Record<string, any> = {
-        id:                actualUserId,
-        email:             actualEmail || email,
-        name:              name.trim(),
+        id:                 actualUserId,
+        email:              actualEmail || email,
+        name:               name.trim(),
         role,
         gender,
-        continent:         profileContinent || null,
-        country:           profileCountry   || null,
-        state:             profileState,
-        city:              profileCity,
+        continent:          profileContinent || null,
+        country:            profileCountry   || null,
+        state:              profileState,
+        city:               profileCity,
         organization_id,
         join_code_used,
-        profile_completed: true,
-        created_at:        new Date().toISOString(),
-        updated_at:        new Date().toISOString(),
+        // Primary leaders (who registered the org) get this flag — co-leaders do not
+        is_primary_leader:  role === 'leader' && leaderOrgMode === 'create',
+        profile_completed:  true,
+        created_at:         new Date().toISOString(),
+        updated_at:         new Date().toISOString(),
       };
 
       if (role === 'learner') {
@@ -508,8 +510,8 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
                   </label>
                   <div className="grid grid-cols-2 gap-3 mb-3">
                     {([
-                      { mode: 'join'   as LeaderOrgMode, Icon: Search,      label: 'Join Existing',  desc: 'I have a join code from the primary leader' },
-                      { mode: 'create' as LeaderOrgMode, Icon: PlusCircle,  label: 'Create New',     desc: 'Start a new organization for my cohort' },
+                      { mode: 'create' as LeaderOrgMode, Icon: PlusCircle, label: 'Register My Organization', desc: 'I am the primary leader — set up a new org' },
+                      { mode: 'join'   as LeaderOrgMode, Icon: Search,     label: 'Join as Co-Facilitator',   desc: 'Another leader already registered — I have a join code' },
                     ]).map(({ mode, Icon, label, desc }) => (
                       <button key={mode} type="button"
                         onClick={() => setLeaderOrgMode(mode)}
@@ -531,6 +533,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
                     <div className="space-y-3 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
                       <p className="text-xs text-indigo-700 font-medium">
                         Enter a join code from the primary leader of the organization you are co-facilitating.
+                        Your view will be scoped to learners who joined using this specific code.
                       </p>
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -685,9 +688,9 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
                 {isSubmitting
                   ? 'Completing...'
                   : role === 'leader' && leaderOrgMode === 'create'
-                  ? 'Create Organization & Complete Profile'
+                  ? 'Register Organization & Complete Profile'
                   : role === 'leader' && leaderOrgMode === 'join'
-                  ? 'Join Organization & Complete Profile'
+                  ? 'Join as Co-Facilitator & Complete Profile'
                   : 'Complete Profile'}
               </button>
             </div>
