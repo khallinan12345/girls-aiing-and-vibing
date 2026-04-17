@@ -27,7 +27,7 @@ interface UserProfile {
   id: string;
   name: string;
   email: string;
-  role: 'student' | 'teacher';
+  role: 'student' | 'learner' | 'teacher' | 'leader' | 'platform_administrator';
   grade_level?: number;
   gender?: 'female' | 'male' | 'other';
   continent?: string;
@@ -37,8 +37,22 @@ interface UserProfile {
   school_name?: string;
   avatar_url?: string;
   team_id?: string;
+  organization_id?: string;
+  join_code_used?: string;
   created_at: string;
   updated_at: string;
+}
+
+interface OrgInfo {
+  id: string;
+  name: string;
+  join_code: string;       // legacy single code — still present
+  join_codes: string[];    // array of all active codes
+  continent: string | null;
+  country: string | null;
+  city: string | null;
+  description: string | null;
+  learner_count?: number;
 }
 
 interface SkillProgress {
@@ -135,6 +149,11 @@ const ProfilePage: React.FC = () => {
   const { user: authUser, refreshUserProfile } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [teamInfo, setTeamInfo] = useState<TeamInfo | null>(null);
+  const [orgInfo,  setOrgInfo]  = useState<OrgInfo | null>(null);
+  const [savedJoinCode, setSavedJoinCode] = useState<string | null>(null);
+  const [generatingCode, setGeneratingCode] = useState(false);
+  const [orgStudents, setOrgStudents]     = useState<{ id: string; name: string; email: string; join_code_used: string | null; created_at: string }[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
   const [skillsProgress, setSkillsProgress] = useState<SkillProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -148,7 +167,7 @@ const ProfilePage: React.FC = () => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    role: 'student' as 'student' | 'teacher',
+    role: 'learner' as 'learner' | 'leader' | 'student' | 'teacher',
     grade_level: '1',
     gender: 'female' as 'female' | 'male' | 'other',
     continent: '',
@@ -335,6 +354,47 @@ const ProfilePage: React.FC = () => {
         }
       }
 
+      // Fetch org info — or check localStorage for newly created org code
+      const savedCode = localStorage.getItem('my_org_join_code');
+      if (savedCode) setSavedJoinCode(savedCode);
+
+      if (profileData.organization_id) {
+        const { data: orgData } = await supabase
+          .from('organizations')
+          .select('id, name, join_code, join_codes, continent, country, city, description')
+          .eq('id', profileData.organization_id)
+          .single();
+        if (orgData) {
+          // Normalise: if join_codes is empty/null, fall back to [join_code]
+          const codes: string[] =
+            Array.isArray(orgData.join_codes) && orgData.join_codes.length > 0
+              ? orgData.join_codes
+              : orgData.join_code ? [orgData.join_code] : [];
+
+          // Learner count
+          const { count } = await supabase
+            .from('profiles')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', profileData.organization_id)
+            .not('role', 'in', '("leader","platform_administrator")');
+
+          setOrgInfo({ ...orgData, join_codes: codes, learner_count: count ?? 0 });
+
+          // For leaders — fetch the student list (only their own org members)
+          if (profileData.role === 'leader' || profileData.role === 'platform_administrator') {
+            setLoadingStudents(true);
+            const { data: students } = await supabase
+              .from('profiles')
+              .select('id, name, email, join_code_used, created_at')
+              .eq('organization_id', profileData.organization_id)
+              .not('role', 'in', '("leader","platform_administrator")')
+              .order('created_at', { ascending: false });
+            setOrgStudents(students ?? []);
+            setLoadingStudents(false);
+          }
+        }
+      }
+
       // Fetch skills progress
       const { data: skillsData, error: skillsError } = await supabase
         .from('skills_progress')
@@ -470,6 +530,28 @@ const ProfilePage: React.FC = () => {
   const getCompletedSkillsCount = useCallback(() => {
     return skillsProgress.filter(skill => skill.progress === 100).length;
   }, [skillsProgress]);
+
+  // ── Generate a new join code for the org ────────────────────────────────────
+  const handleGenerateCode = useCallback(async () => {
+    if (!authUser || !orgInfo) return;
+    setGeneratingCode(true);
+    try {
+      const { data, error } = await supabase
+        .rpc('add_org_join_code', {
+          org_id:               orgInfo.id,
+          requesting_user_id:   authUser.id,
+        });
+      if (error) throw error;
+      const newCode = data as string;
+      setOrgInfo(prev => prev ? { ...prev, join_codes: [...prev.join_codes, newCode] } : prev);
+      setSuccess(`New join code generated: ${newCode}`);
+      setTimeout(() => setSuccess(null), 5000);
+    } catch (err: any) {
+      setError(err.message || 'Could not generate join code');
+    } finally {
+      setGeneratingCode(false);
+    }
+  }, [authUser, orgInfo]);
 
   const handleCancelEdit = useCallback(() => {
     setEditing(false);
@@ -1074,6 +1156,132 @@ const ProfilePage: React.FC = () => {
                       </p>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Organization Info (for leaders and learners linked to an org) */}
+            {(orgInfo || savedJoinCode) && (
+              <div className="bg-white rounded-lg shadow">
+                <div className="px-6 py-4 border-b border-gray-200">
+                  <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                    <span>🏢</span> Organization
+                  </h2>
+                </div>
+                <div className="p-6 space-y-4">
+                  {orgInfo && (
+                    <>
+                      <div>
+                        <h3 className="font-semibold text-gray-900 text-lg">{orgInfo.name}</h3>
+                        {orgInfo.description && <p className="text-sm text-gray-500 mt-1">{orgInfo.description}</p>}
+                        <p className="text-sm text-gray-500 mt-1">
+                          {[orgInfo.city, orgInfo.country, orgInfo.continent].filter(Boolean).join(', ')}
+                        </p>
+                      </div>
+
+                      {/* Join codes — leaders only */}
+                      {(profile?.role === 'leader' || profile?.role === 'platform_administrator') && (
+                        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">
+                              Join Codes
+                            </p>
+                            <button
+                              onClick={handleGenerateCode}
+                              disabled={generatingCode}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              {generatingCode ? (
+                                <span className="animate-spin">⟳</span>
+                              ) : (
+                                <Key className="h-3 w-3" />
+                              )}
+                              Generate New Code
+                            </button>
+                          </div>
+
+                          {/* Code chips */}
+                          <div className="flex flex-wrap gap-2">
+                            {(orgInfo.join_codes.length > 0 ? orgInfo.join_codes : [orgInfo.join_code]).map((code, i) => (
+                              <div key={code} className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-3 py-2">
+                                <span className="text-lg font-black text-indigo-900 tracking-widest font-mono">{code}</span>
+                                {i === 0 && (
+                                  <span className="text-[10px] font-medium text-indigo-500 bg-indigo-100 rounded px-1.5 py-0.5">primary</span>
+                                )}
+                                <button
+                                  onClick={() => navigator.clipboard.writeText(code)}
+                                  className="text-indigo-400 hover:text-indigo-700 transition-colors"
+                                  title="Copy to clipboard"
+                                >
+                                  <CheckCircle className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+
+                          <p className="text-xs text-indigo-600">
+                            Share any code with learners during signup. Generate a new code for each new session cohort.
+                          </p>
+                          <div className="text-sm text-gray-600 pt-1 border-t border-indigo-100">
+                            <span className="font-semibold">{orgInfo.learner_count ?? 0}</span> learners enrolled
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Student list — leaders only */}
+                      {(profile?.role === 'leader' || profile?.role === 'platform_administrator') && (
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                            <Users className="h-4 w-4 text-indigo-500" /> Your Learners
+                          </h4>
+                          {loadingStudents ? (
+                            <div className="flex items-center gap-2 py-4">
+                              <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-indigo-500" />
+                              <span className="text-sm text-gray-400">Loading learners…</span>
+                            </div>
+                          ) : orgStudents.length === 0 ? (
+                            <p className="text-sm text-gray-400 py-2">
+                              No learners have joined yet. Share a join code to get started.
+                            </p>
+                          ) : (
+                            <div className="overflow-x-auto rounded-lg border border-gray-200">
+                              <table className="min-w-full text-sm">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Email</th>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Code Used</th>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Joined</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {orgStudents.map(student => (
+                                    <tr key={student.id} className="hover:bg-gray-50 transition-colors">
+                                      <td className="px-4 py-2 font-medium text-gray-900">{student.name || '—'}</td>
+                                      <td className="px-4 py-2 text-gray-600 truncate max-w-[180px]">{student.email}</td>
+                                      <td className="px-4 py-2 font-mono text-xs text-indigo-700">{student.join_code_used || '—'}</td>
+                                      <td className="px-4 py-2 text-gray-500 text-xs">
+                                        {new Date(student.created_at).toLocaleDateString()}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Fallback: localStorage code if org not yet in DB */}
+                  {!orgInfo && savedJoinCode && (
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                      <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider mb-2">Your Join Code</p>
+                      <p className="text-3xl font-black text-indigo-900 tracking-widest font-mono">{savedJoinCode}</p>
+                      <p className="text-xs text-indigo-600 mt-2">Share this code with learners so they can join your organization during signup.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

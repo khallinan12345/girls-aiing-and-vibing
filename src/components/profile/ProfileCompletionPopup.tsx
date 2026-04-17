@@ -2,7 +2,11 @@
 
 import React, { useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
-import { User, GraduationCap, Globe, MapPin, Key, Building2 } from 'lucide-react';
+import { User, GraduationCap, Globe, MapPin, Key, Building2, Search, PlusCircle } from 'lucide-react';
+
+// Leader can either join an existing org (they have a co-leader join code)
+// or create a brand-new org for their own cohort.
+type LeaderOrgMode = 'choose' | 'join' | 'create';
 
 interface ProfileCompletionPopupProps {
   userId: string;
@@ -93,6 +97,14 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
   const [gradeLevel, setGradeLevel] = useState('3');
 
   // ── Leader-only ────────────────────────────────────────────────────────────
+  const [leaderOrgMode, setLeaderOrgMode] = useState<LeaderOrgMode>('choose');
+
+  // co-leader: joining an existing org
+  const [coJoinCode, setCoJoinCode]           = useState('');
+  const [coJoinStatus, setCoJoinStatus]       = useState<'idle'|'checking'|'found'|'not_found'>('idle');
+  const [coOrgCtx, setCoOrgCtx]               = useState<OrgContext | null>(null);
+
+  // creator: making a new org
   const [orgName, setOrgName] = useState('');
   const [orgDescription, setOrgDescription] = useState('');
   const [continent, setContinent] = useState('');
@@ -106,26 +118,41 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Join code lookup ───────────────────────────────────────────────────────
+  // ── Learner join code lookup (array-aware via RPC) ────────────────────────
   const handleJoinCodeChange = async (code: string) => {
     const upper = code.toUpperCase();
     setJoinCode(upper);
     if (upper.length < 6) { setJoinCodeStatus('idle'); setOrgCtx(null); return; }
     setJoinCodeStatus('checking');
     const { data } = await supabase
-      .from('organizations')
-      .select('id, name, continent, country, state, city, learner_age_min, learner_age_max, learner_gender')
-      .eq('join_code', upper)
-      .maybeSingle();
-    if (data) {
+      .rpc('find_org_by_join_code', { lookup_code: upper });
+    const found = Array.isArray(data) ? data[0] ?? null : data ?? null;
+    if (found) {
       setJoinCodeStatus('found');
-      setOrgCtx(data as OrgContext);
-      // Auto-set gender if org is single-gender
-      if (data.learner_gender === 'female') setGender('female');
-      if (data.learner_gender === 'male')   setGender('male');
+      setOrgCtx(found as OrgContext);
+      if (found.learner_gender === 'female') setGender('female');
+      if (found.learner_gender === 'male')   setGender('male');
     } else {
       setJoinCodeStatus('not_found');
       setOrgCtx(null);
+    }
+  };
+
+  // ── Co-leader join code lookup ─────────────────────────────────────────────
+  const handleCoJoinCodeChange = async (code: string) => {
+    const upper = code.toUpperCase();
+    setCoJoinCode(upper);
+    if (upper.length < 6) { setCoJoinStatus('idle'); setCoOrgCtx(null); return; }
+    setCoJoinStatus('checking');
+    const { data } = await supabase
+      .rpc('find_org_by_join_code', { lookup_code: upper });
+    const found = Array.isArray(data) ? data[0] ?? null : data ?? null;
+    if (found) {
+      setCoJoinStatus('found');
+      setCoOrgCtx(found as OrgContext);
+    } else {
+      setCoJoinStatus('not_found');
+      setCoOrgCtx(null);
     }
   };
 
@@ -137,12 +164,20 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
     if (!name.trim()) { setError('Please enter your name'); return; }
 
     if (role === 'leader') {
-      if (!orgName.trim()) { setError('Please enter your organization name'); return; }
-      if (!continent)      { setError('Please select your continent'); return; }
-      if (!country)        { setError('Please select your country'); return; }
-      if (!ageMin || !ageMax) { setError('Please enter the learner age range'); return; }
-      if (parseInt(ageMin) >= parseInt(ageMax)) {
-        setError('Minimum age must be less than maximum age'); return;
+      if (leaderOrgMode === 'choose') {
+        setError('Please choose to join an existing organization or create a new one'); return;
+      }
+      if (leaderOrgMode === 'join') {
+        if (!coOrgCtx) { setError('Please enter a valid organization join code'); return; }
+      }
+      if (leaderOrgMode === 'create') {
+        if (!orgName.trim()) { setError('Please enter your organization name'); return; }
+        if (!continent)      { setError('Please select your continent'); return; }
+        if (!country)        { setError('Please select your country'); return; }
+        if (!ageMin || !ageMax) { setError('Please enter the learner age range'); return; }
+        if (parseInt(ageMin) >= parseInt(ageMax)) {
+          setError('Minimum age must be less than maximum age'); return;
+        }
       }
     }
 
@@ -156,8 +191,15 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
       let organization_id: string | null = null;
       let join_code_used: string | null  = null;
 
-      // ── LEADER: create org ─────────────────────────────────────────────────
-      if (role === 'leader') {
+      // ── LEADER: join existing org ──────────────────────────────────────────
+      if (role === 'leader' && leaderOrgMode === 'join' && coOrgCtx) {
+        organization_id = coOrgCtx.id;
+        join_code_used  = coJoinCode;
+        // co-leader just links their profile to the org; leader_id stays unchanged
+      }
+
+      // ── LEADER: create new org ─────────────────────────────────────────────
+      if (role === 'leader' && leaderOrgMode === 'create') {
         const { data: codeData } = await supabase.rpc('generate_join_code');
         const newCode = codeData as string;
         const { data: orgData, error: orgError } = await supabase
@@ -165,7 +207,8 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
           .insert({
             name:             orgName.trim(),
             description:      orgDescription.trim() || null,
-            join_code:        newCode,
+            join_code:        newCode,          // legacy single column — keep for compat
+            join_codes:       [newCode],        // new array column
             leader_id:        actualUserId,
             continent,
             country,
@@ -175,12 +218,13 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
             learner_age_max:  parseInt(ageMax),
             learner_gender:   learnerGender,
           })
-          .select('id, join_code')
+          .select('id, join_code, join_codes')
           .single();
         if (orgError) throw new Error('Could not create organization: ' + orgError.message);
         organization_id = orgData.id;
-        localStorage.setItem('my_org_join_code', orgData.join_code);
-        localStorage.setItem('my_org_name', orgName.trim());
+        localStorage.setItem('my_org_join_code',  orgData.join_code);
+        localStorage.setItem('my_org_join_codes', JSON.stringify(orgData.join_codes));
+        localStorage.setItem('my_org_name',       orgName.trim());
       }
 
       // ── LEARNER with code: link to org ─────────────────────────────────────
@@ -189,11 +233,25 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
         join_code_used  = joinCode;
       }
 
-      // ── Determine location: learner inherits from org if linked ────────────
-      const profileContinent = role === 'learner' ? (orgCtx?.continent ?? '') : continent;
-      const profileCountry   = role === 'learner' ? (orgCtx?.country   ?? '') : country;
-      const profileState     = role === 'learner' ? (orgCtx?.state     ?? null) : (state || null);
-      const profileCity      = role === 'learner' ? (orgCtx?.city      ?? null) : (city  || null);
+      // ── Determine location ─────────────────────────────────────────────────
+      // Learners inherit from their org. Co-leaders inherit from the org they joined.
+      // New-org leaders use what they filled in.
+      const profileContinent =
+        role === 'learner'                        ? (orgCtx?.continent    ?? '') :
+        leaderOrgMode === 'join'                  ? (coOrgCtx?.continent  ?? '') :
+        continent;
+      const profileCountry =
+        role === 'learner'                        ? (orgCtx?.country      ?? '') :
+        leaderOrgMode === 'join'                  ? (coOrgCtx?.country    ?? '') :
+        country;
+      const profileState =
+        role === 'learner'                        ? (orgCtx?.state        ?? null) :
+        leaderOrgMode === 'join'                  ? (coOrgCtx?.state      ?? null) :
+        (state || null);
+      const profileCity =
+        role === 'learner'                        ? (orgCtx?.city         ?? null) :
+        leaderOrgMode === 'join'                  ? (coOrgCtx?.city       ?? null) :
+        (city || null);
 
       const profilePayload: Record<string, any> = {
         id:                actualUserId,
@@ -443,11 +501,72 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
                   </div>
                 </div>
 
-                {/* Org details */}
-                <div className="space-y-4 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
-                  <div className="text-sm font-semibold text-indigo-800 flex items-center gap-2">
-                    <Building2 size={15} /> Your Organization
+                {/* ── Join or Create choice ─────────────────────────────── */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Building2 className="inline mr-1" size={14} /> Organization *
+                  </label>
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    {([
+                      { mode: 'join'   as LeaderOrgMode, Icon: Search,      label: 'Join Existing',  desc: 'I have a join code from the primary leader' },
+                      { mode: 'create' as LeaderOrgMode, Icon: PlusCircle,  label: 'Create New',     desc: 'Start a new organization for my cohort' },
+                    ]).map(({ mode, Icon, label, desc }) => (
+                      <button key={mode} type="button"
+                        onClick={() => setLeaderOrgMode(mode)}
+                        className={'flex flex-col items-start p-3 border-2 rounded-lg text-left transition-colors ' +
+                          (leaderOrgMode === mode
+                            ? 'border-indigo-500 bg-indigo-50'
+                            : 'border-gray-200 hover:border-indigo-300')}>
+                        <span className={'flex items-center gap-1.5 text-sm font-semibold mb-0.5 ' +
+                          (leaderOrgMode === mode ? 'text-indigo-700' : 'text-gray-800')}>
+                          <Icon size={13} />{label}
+                        </span>
+                        <span className="text-xs text-gray-500 leading-snug">{desc}</span>
+                      </button>
+                    ))}
                   </div>
+
+                  {/* ── Join existing org ────────────────────────────────── */}
+                  {leaderOrgMode === 'join' && (
+                    <div className="space-y-3 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                      <p className="text-xs text-indigo-700 font-medium">
+                        Enter a join code from the primary leader of the organization you are co-facilitating.
+                      </p>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          <Key className="inline mr-1" size={12} /> Organization Join Code *
+                        </label>
+                        <input type="text" value={coJoinCode}
+                          onChange={e => handleCoJoinCodeChange(e.target.value)}
+                          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 font-mono tracking-widest uppercase text-sm"
+                          placeholder="e.g. DAV001" maxLength={6} />
+                        {coJoinStatus === 'checking' && (
+                          <p className="mt-1.5 text-xs text-gray-400">Looking up code…</p>
+                        )}
+                        {coJoinStatus === 'found' && coOrgCtx && (
+                          <div className="mt-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                            <p className="text-sm font-semibold text-emerald-800">✓ {coOrgCtx.name}</p>
+                            <p className="text-xs text-emerald-600 mt-0.5">
+                              {[coOrgCtx.city, coOrgCtx.state, coOrgCtx.country].filter(Boolean).join(', ')}
+                            </p>
+                            <p className="text-xs text-indigo-600 mt-1.5">
+                              You will be added as a co-facilitator. The primary leader remains unchanged.
+                            </p>
+                          </div>
+                        )}
+                        {coJoinStatus === 'not_found' && coJoinCode.length === 6 && (
+                          <p className="mt-1.5 text-sm text-red-600">Code not found — check with the primary leader</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Create new org ────────────────────────────────────── */}
+                  {leaderOrgMode === 'create' && (
+                    <div className="space-y-4 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                      <div className="text-xs font-semibold text-indigo-800 flex items-center gap-2">
+                        <Building2 size={13} /> New Organization Details
+                      </div>
 
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Organization Name *</label>
@@ -496,12 +615,16 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
                     </div>
                   </div>
 
-                  <p className="text-xs text-indigo-600">
-                    After completing your profile you will receive a unique 6-character join code to share with your learners.
-                  </p>
+                      <p className="text-xs text-indigo-600">
+                        After completing your profile you will receive a unique 6-character join code to share with your learners.
+                        You can generate additional codes later from your Profile page.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
-                {/* Location */}
+                {/* Location — only for leaders creating a new org */}
+                {leaderOrgMode === 'create' && (<>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Continent *</label>
                   <select value={continent}
@@ -552,6 +675,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="Enter your city, town, or village" />
                 </div>
+                </>)}
               </>
             )}
 
@@ -560,8 +684,10 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
                 className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium transition-colors">
                 {isSubmitting
                   ? 'Completing...'
-                  : role === 'leader'
+                  : role === 'leader' && leaderOrgMode === 'create'
                   ? 'Create Organization & Complete Profile'
+                  : role === 'leader' && leaderOrgMode === 'join'
+                  ? 'Join Organization & Complete Profile'
                   : 'Complete Profile'}
               </button>
             </div>
