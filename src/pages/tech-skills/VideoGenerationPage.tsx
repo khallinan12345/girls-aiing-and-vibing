@@ -1013,7 +1013,7 @@ Return ONLY the improved text. No explanation, no preamble.`
   const isGenerating = activeJob?.status === 'processing' || activeJob?.status === 'pending';
   const charCount    = prompt.length;
 
-  // ── Access gate — Africa only ─────────────────────────────────────────────
+  // ── Loading state ─────────────────────────────────────────────────────────
   if (loadingContinent) {
     return (
       <AppLayout>
@@ -1024,29 +1024,7 @@ Return ONLY the improved text. No explanation, no preamble.`
     );
   }
 
-  if (continent !== 'Africa') {
-    return (
-      <AppLayout>
-        <div className="fixed top-16 left-64 right-0 bottom-0 bg-slate-950 flex items-center justify-center p-8">
-          <div className="max-w-md text-center space-y-6">
-            <div className="text-6xl">🌍</div>
-            <div className="bg-slate-900/80 border border-slate-700/60 rounded-2xl p-8 backdrop-blur-sm">
-              <h2 className="text-xl font-bold text-white mb-3">
-                {lvl <= 1 ? 'This page is for Africa students only.' : 'Africa Region Only'}
-              </h2>
-              <p className="text-slate-400 text-sm leading-relaxed">
-                {lvl <= 1
-                  ? 'AI Video Creation is a special tool for students in Africa. It is not available in your region right now.'
-                  : 'AI Video Creation is currently available exclusively to learners in Africa as part of the Davidson AI Innovation Center programme. It is not available in your region at this time.'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </AppLayout>
-    );
-  }
-
-  // ── Render (Africa users only) ────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <AppLayout>
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
