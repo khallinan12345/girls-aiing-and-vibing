@@ -2649,6 +2649,8 @@ Respond ONLY with valid JSON:
       setCreateForm({ title: '', description: '', location: '', constraints: '', stakeholders: '', entrepreneurialContext: '', category: 'A' });
       await fetchAllAIActivities(userCity);
       await handleActivitySelect(newActivity);
+    } catch (err) {
+      console.error('[Create Activity] Error:', err);
       alert('Failed to create your activity. Please try again.');
     } finally {
       setIsCreatingModule(false);
