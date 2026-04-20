@@ -2277,13 +2277,21 @@ Respond ONLY with valid JSON:
         if (initialChatHistory.length > 0) {
           setChatHistory(initialChatHistory);
         } else {
-          setChatHistory([
-            {
-              role: 'assistant',
-              content: `Hello, I'm your AI assistant. Are you ready to dive into ${details.title}?`,
-              timestamp: new Date()
-            }
-          ]);
+          // Generate an AI opening question grounded in the activity topic
+          let openingMessage = `Welcome! Let us start your session on "${details.title}". What do you already know about this topic?`;
+          try {
+            const opening = await chatText({
+              messages: [{ role: 'user', content: 'Begin the session.' }],
+              system: `${details.aiInstructions}\n\nMODULE DESCRIPTION:\n${details.description}\n\nThis is the very first message of the session. Greet the learner warmly in one sentence, then ask ONE specific opening question directly grounded in the topic above. Do not ask generic questions like "are you ready?" — ask something that immediately gets the learner thinking about the actual subject matter.`,
+              max_tokens: 200,
+              temperature: 0.7,
+              page: 'AILearningPage',
+            });
+            if (opening) openingMessage = opening;
+          } catch (e) {
+            console.error('[AI Opening] Failed to generate opening question:', e);
+          }
+          setChatHistory([{ role: 'assistant', content: openingMessage, timestamp: new Date() }]);
         }
         
         // Scroll to top when activity loads
@@ -2767,11 +2775,11 @@ Respond ONLY with valid JSON:
 
     infoBoxTitle:      lvl <= 1 ? 'Your AI coach will ask you about…'    : 'What your coach will push you to think about',
     infoBoxItems: userContinent === 'North America' ? [
-      { icon: '🎓', bold: 'Skill building',         text: '— What can you do now that you couldn't before? How does this level up your abilities?' },
+      { icon: '🎓', bold: 'Skill building',         text: '— What can you do now that you could not do before? How does this level up your abilities?' },
       { icon: '📜', bold: 'Certification value',    text: '— How does this connect to Google, Microsoft, or other AI certifications?' },
       { icon: '🏙️', bold: 'Local relevance',        text: '— How could this help someone in your city, school, or neighborhood?' },
       { icon: '🚀', bold: 'Entrepreneurial angle',  text: '— Could this support a freelance service, startup idea, or community project?' },
-      { icon: '📈', bold: 'Next steps',             text: '— What's the next skill to learn? How do you keep growing?' },
+      { icon: '📈', bold: 'Next steps',             text: '— What is the next skill to learn? How do you keep growing?' },
     ] : lvl <= 1 ? [
       { icon: '💰', bold: 'Cost and value', text: '— Is AI worth it here? How much does it cost?' },
       { icon: '⚖️', bold: 'Tradeoffs',      text: '— What do you give up? Who wins and who loses?' },

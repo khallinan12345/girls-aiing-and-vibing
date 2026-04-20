@@ -989,19 +989,19 @@ ${(RUBRIC_DEFINITIONS[subCategory] || []).map(d => `- ${d.replace(/_/g, ' ')}`).
 Scoring: 0=No Evidence, 1=Emerging, 2=Proficient, 3=Advanced
 
 ─────────────────────────────────────────
-SECONDARY LENS — ENTREPRENEURIAL & PUE GROUNDING:
+SECONDARY LENS — REAL-WORLD APPLICATION:
 ─────────────────────────────────────────
-The learner's scenario has a real-world productive or entrepreneurial dimension. Where it fits naturally within the skill-building flow, deepen the learning by connecting ${subCategory} to:
+The learner's scenario has a real-world dimension. Where it fits naturally within the skill-building flow, deepen the learning by connecting ${subCategory} to:
 
-- Costs & benefits: what value does applying this skill well actually create?
+- Skill value: what does applying this skill well actually achieve or enable?
 - Tradeoffs: what do you give up by choosing one approach over another?
-- Long-term thinking: will this still work or be valuable in 2–5 years?
-- Productive use of resources: does this create real economic value, or just consume time and energy?
-- Business viability: could this become a service, livelihood, or competitive advantage?
+- Long-term thinking: will this skill still be relevant and useful in 2–5 years?
+- Community or career impact: how could this help someone in your community, advance a career goal, or support a project?
+- Next steps: what is the logical next skill or certification to pursue after this?
 
-Apply this lens selectively — when the learner's answer is technically sound but misses the "so what does this achieve in the real world?" dimension. A natural prompt when this happens: "Good work on the skill — now, what's the real-world payoff of doing this well here? Who benefits and what does it cost?"
+Apply this lens selectively — when the learner's answer is technically sound but misses the "so what does this achieve in the real world?" dimension. A natural prompt: "Good work on the skill — now, what's the real-world payoff of doing this well here? Who benefits?"
 
-Do NOT force a business framing onto every exchange. Some turns will be purely about developing the skill. The productive-use lens sharpens the learning, it does not replace it.
+Do NOT force a career or business framing onto every exchange. Some turns will be purely about developing the skill. The real-world lens sharpens the learning, it does not replace it.
 ─────────────────────────────────────────
 
 SESSION FLOW:
@@ -1378,12 +1378,13 @@ Remember: Every response is an opportunity to help them improve. Be specific, en
     try {
       setLoading(true);
 
-      // Resolve which city_town to show: Ibiade users see Ibiade modules, everyone else sees Oloibiri
-      const cityTown = city === 'Ibiade' ? 'Ibiade' : 'Oloibiri';
+      // Resolve which city_town to show
+      const isNorthAmerica = userContinent === 'North America';
+      const cityTown = city === 'Ibiade' ? 'Ibiade' : isNorthAmerica ? 'Cincinnati' : 'Oloibiri';
 
       console.log('[Skills Activities] Querying with JOIN to learning_modules');
       console.log('[Skills Activities] User ID:', user.id);
-      console.log('[Skills Activities] Filtering by city_town:', cityTown);
+      console.log('[Skills Activities] Filtering by city_town:', cityTown, '| NA:', isNorthAmerica);
       
       // Join with learning_modules to get the actual category
       const { data: dashboardData, error } = await supabase
@@ -1415,7 +1416,9 @@ Remember: Every response is an opportunity to help them improve. Be specific, en
           module &&
           module.category === 'Skills' &&
           module.sub_category !== 'Vibe Coding' &&
-          (module.city_town === cityTown || module.city_town == null)
+          (isNorthAmerica
+            ? (module.city_town === 'Cincinnati' || module.city_town == null)
+            : (module.city_town === cityTown || module.city_town == null))
         );
       }) || []).map(activity => ({
         ...activity,
@@ -2770,13 +2773,20 @@ Provide assessment now:`;
       if (initialChatHistory.length > 0) {
         setChatHistory(initialChatHistory);
       } else {
-        setChatHistory([
-          {
-            role: 'assistant',
-            content: `Hello! I'm your AI learning assistant. I'm here to guide you through "${details.title}". Are you ready to get going?`,
-            timestamp: new Date()
-          }
-        ]);
+        // Generate an AI opening question grounded in the activity topic
+        let openingMessage = `Welcome! Let us start your session on "${details.title}". What do you already know about this topic?`;
+        try {
+          const opening = await chatText({
+            messages: [{ role: 'user', content: 'Begin the session.' }],
+            system: `${details.aiInstructions}\n\nMODULE DESCRIPTION:\n${details.description}\n\nThis is the very first message of the session. Greet the learner warmly in one sentence, then ask ONE specific opening question directly grounded in the topic and skill above. Do not ask generic questions like "are you ready?" — ask something that immediately gets the learner thinking about the actual subject matter and its real-world application.`,
+            max_tokens: 200,
+            temperature: 0.7,
+          });
+          if (opening) openingMessage = opening;
+        } catch (e) {
+          console.error('[AI Opening] Failed to generate opening question:', e);
+        }
+        setChatHistory([{ role: 'assistant', content: openingMessage, timestamp: new Date() }]);
       }
     } else {
       const gradeInstructions = getGradeAppropriateInstructions(userGradeLevel, communicationLevel);
@@ -2795,13 +2805,7 @@ Provide assessment now:`;
       if (initialChatHistory.length > 0) {
         setChatHistory(initialChatHistory);
       } else {
-        setChatHistory([
-          {
-            role: 'assistant',
-            content: `Hello! I'm your AI learning assistant. I'm here to guide you through "${activity.title}". What would you like to explore first?`,
-            timestamp: new Date()
-          }
-        ]);
+        setChatHistory([{ role: 'assistant', content: `Welcome! Let us explore "${activity.title}" together. What aspect of this topic would you like to start with?`, timestamp: new Date() }]);
       }
     }
   };
@@ -3537,58 +3541,87 @@ const handleExecuteCode = async (code: string, language: 'python' | 'javascript'
     createBtnLabel:    lvl <= 1 ? '+ Make My Own'                        : 'Create Your Own',
 
     createPageTitle:   lvl <= 1 ? 'Make Your Own Activity'               : 'Create Your Own Activity',
-    createPageSub:     lvl <= 1 ? 'Choose a skill and a topic you know'  : 'Design a personalised skills session rooted in your real world',
+    createPageSub: userContinent === 'North America'
+      ? 'Design a personalised skills session relevant to your community and career'
+      : lvl <= 1 ? 'Choose a skill and a topic you know' : 'Design a personalised skills session rooted in your real world',
 
-    createBannerTitle: lvl <= 1 ? '💡 Use something from your real life' : '💡 Ground your skills in real productive value',
-    createBannerBody:  lvl <= 1
-      ? 'The best topics are things you already know — your farm, your market stall, your school, your community. When you practise a skill using something real, it is much easier to understand and remember.'
-      : 'The best skill-building scenarios connect directly to something that creates economic value — starting or strengthening a business, improving agriculture, reducing costs, increasing income, or making a community service more productive. Your AI coach will push you to think about costs, benefits, tradeoffs, and long-term viability.',
-    createBannerExamples: lvl <= 1
-      ? 'Examples: Problem-solving a food shortage in my village · Critical thinking about which crop to plant · Coding a price calculator for my stall'
-      : 'Examples: Problem-solving a supply chain for a market stall · Critical thinking about which crops to plant for best yield · Vibe Coding a price calculator for a solar kiosk · Communication skills for pitching a new product to investors',
+    createBannerTitle: userContinent === 'North America'
+      ? '💡 Connect your skills to your community and career'
+      : lvl <= 1 ? '💡 Use something from your real life' : '💡 Ground your skills in real productive value',
+    createBannerBody: userContinent === 'North America'
+      ? 'The best topics are things that matter in your city, school, or neighborhood. Practise skills using real situations — a career goal, a community project, a certification you are working toward, or a problem you want to solve for people around you.'
+      : lvl <= 1
+        ? 'The best topics are things you already know — your farm, your market stall, your school, your community. When you practise a skill using something real, it is much easier to understand and remember.'
+        : 'The best skill-building scenarios connect directly to something that creates economic value — starting or strengthening a business, improving agriculture, reducing costs, increasing income, or making a community service more productive. Your AI coach will push you to think about costs, benefits, tradeoffs, and long-term viability.',
+    createBannerExamples: userContinent === 'North America'
+      ? 'Examples: Problem-solving for a school or nonprofit project · Critical thinking about an AI tool I want to use at work · Vibe Coding a simple app for my neighborhood · Communication skills for a job interview or pitch'
+      : lvl <= 1
+        ? 'Examples: Problem-solving a food shortage in my village · Critical thinking about which crop to plant · Coding a price calculator for my stall'
+        : 'Examples: Problem-solving a supply chain for a market stall · Critical thinking about which crops to plant for best yield · Vibe Coding a price calculator for a solar kiosk · Communication skills for pitching a new product to investors',
 
-    titleLabel:        lvl <= 1 ? 'Name of your activity'                : 'Activity Title',
-    titlePlaceholder:  lvl <= 1 ? 'e.g. Solving the water problem in my village'
-                                 : 'e.g. Solving the Cold-Storage Problem for My Fish Cooperative',
-    categoryLabel:     lvl <= 1 ? 'What skill do you want to practise?'  : 'Skill Category',
-    categoryHelp:      lvl <= 1 ? 'Your coach will use this skill to guide and score your session.'
-                                 : "The AI coach uses this skill's rubric to guide and score your session — and connects every dimension to your real-world productive context.",
-    problemLabel:      lvl <= 1 ? 'What do you want to work on?'         : 'Problem / Topic / Challenge',
-    problemPlaceholder: lvl <= 1
-      ? 'Tell me the problem or topic. What is happening? e.g. My family\'s farm has too many weeds and we do not know the best way to remove them.'
-      : 'Describe the scenario or challenge you want to work through. Be specific — what is broken, inefficient, or costly right now?',
+    titleLabel:       lvl <= 1 ? 'Name of your activity'                : 'Activity Title',
+    titlePlaceholder: userContinent === 'North America'
+      ? 'e.g. Using problem-solving skills to design a community app'
+      : lvl <= 1 ? 'e.g. Solving the water problem in my village'
+                 : 'e.g. Solving the Cold-Storage Problem for My Fish Cooperative',
+    categoryLabel:    lvl <= 1 ? 'What skill do you want to practise?'  : 'Skill Category',
+    categoryHelp:     lvl <= 1 ? 'Your coach will use this skill to guide and score your session.'
+                               : "The AI coach uses this skill's rubric to guide and score your session — and connects every dimension to your real-world context.",
+    problemLabel:     lvl <= 1 ? 'What do you want to work on?'         : 'Problem / Topic / Challenge',
+    problemPlaceholder: userContinent === 'North America'
+      ? 'Describe what you want to work on. What problem, goal, or community need does this address? e.g. How can I use critical thinking to evaluate AI tools for a local nonprofit?'
+      : lvl <= 1
+        ? "Tell me the problem or topic. What is happening? e.g. My family's farm has too many weeds and we do not know the best way to remove them."
+        : 'Describe the scenario or challenge you want to work through. Be specific — what is broken, inefficient, or costly right now?',
 
-    pueLabel:  lvl <= 1 ? '💼 Could this help you earn or save money? (helps a lot)'
-                        : '💼 Entrepreneurial or Productive-Use Angle (strongly recommended)',
-    pueHelp:   lvl <= 1 ? 'Can this skill help you make money, save money, or help people? Even a small idea is good.'
-                        : 'How could applying this skill create income, save money, improve a business, or strengthen a community? Even a rough idea helps your coach push you toward real economic thinking.',
-    puePlaceholder: lvl <= 1
-      ? 'e.g. I want to use problem-solving to help my family sell more fish. Or: I want to use coding to count my stock faster.'
-      : 'e.g. I want to use problem-solving skills to reduce post-harvest losses for my cooperative so we can sell at better prices. Or: I\'m building a Vibe Coding tool to automate stock tracking for my family\'s shop.',
+    pueLabel: userContinent === 'North America'
+      ? '🚀 Career, Certification, or Community Angle (strongly recommended)'
+      : lvl <= 1 ? '💼 Could this help you earn or save money? (helps a lot)'
+                 : '💼 Entrepreneurial or Productive-Use Angle (strongly recommended)',
+    pueHelp: userContinent === 'North America'
+      ? 'How does this connect to a career goal, certification, entrepreneurial idea, or community project? Even a rough idea helps your coach make the session more relevant.'
+      : lvl <= 1 ? 'Can this skill help you make money, save money, or help people? Even a small idea is good.'
+                 : 'How could applying this skill create income, save money, improve a business, or strengthen a community? Even a rough idea helps your coach push you toward real economic thinking.',
+    puePlaceholder: userContinent === 'North America'
+      ? "e.g. I want to build communication skills to ace job interviews. Or: I'm developing an app idea for my neighborhood and need problem-solving practice. Or: I want to prep for a tech certification."
+      : lvl <= 1
+        ? 'e.g. I want to use problem-solving to help my family sell more fish. Or: I want to use coding to count my stock faster.'
+        : "e.g. I want to use problem-solving skills to reduce post-harvest losses for my cooperative so we can sell at better prices. Or: I'm building a Vibe Coding tool to automate stock tracking for my family's shop.",
 
     locationLabel:       lvl <= 1 ? 'Where are you? (optional)'          : 'Location (optional)',
-    locationPlaceholder: lvl <= 1 ? 'e.g. Oloibiri, Bayelsa'             : 'City, school, community, or region — helps the coach give locally relevant examples',
+    locationPlaceholder: userContinent === 'North America'
+      ? 'e.g. Cincinnati, OH — helps the coach give locally relevant examples'
+      : lvl <= 1 ? 'e.g. Oloibiri, Bayelsa'
+                 : 'City, school, community, or region — helps the coach give locally relevant examples',
     constraintsLabel:    lvl <= 1 ? 'What makes this hard? (optional)'   : 'Constraints (optional)',
-    constraintsPlaceholder: lvl <= 1
-      ? 'e.g. No money, no internet, people cannot read well'
-      : 'Budget limits, unreliable internet, no electricity, seasonal markets, low literacy in target users, etc.',
+    constraintsPlaceholder: userContinent === 'North America'
+      ? 'e.g. Limited time, no prior coding experience, need free tools only, working around school or work schedule'
+      : lvl <= 1 ? 'e.g. No money, no internet, people cannot read well'
+                 : 'Budget limits, unreliable internet, no electricity, seasonal markets, low literacy in target users, etc.',
     stakeholdersLabel:   lvl <= 1 ? 'Who is affected? (optional)'        : 'Stakeholders (optional)',
-    stakeholdersPlaceholder: lvl <= 1
-      ? 'e.g. Farmers in my village, my customers, my family'
-      : 'Customers, suppliers, community members, competitors, local government — anyone who gains or loses from this solution',
+    stakeholdersPlaceholder: userContinent === 'North America'
+      ? 'e.g. Classmates, neighbors, a local nonprofit, a small business owner, future employers'
+      : lvl <= 1 ? 'e.g. Farmers in my village, my customers, my family'
+                 : 'Customers, suppliers, community members, competitors, local government — anyone who gains or loses from this solution',
 
     infoBoxTitle: lvl <= 1 ? 'Your coach will ask you about…'            : 'What your coach will push you to think about',
-    infoBoxItems: lvl <= 1 ? [
+    infoBoxItems: userContinent === 'North America' ? [
+      { icon: '🎓', bold: 'Skill growth',            text: '— What can you do now that you could not before? How does this level you up?' },
+      { icon: '📜', bold: 'Certification value',     text: '— How does this skill connect to a Google, Microsoft, or industry certification?' },
+      { icon: '🏙️', bold: 'Local relevance',         text: '— How could this help someone in your city, school, or neighborhood?' },
+      { icon: '🚀', bold: 'Career or entrepreneurial angle', text: '— Could this support a job goal, freelance service, or community project?' },
+      { icon: '📈', bold: 'Next steps',              text: '— What is the next skill to build? How do you keep growing?' },
+    ] : lvl <= 1 ? [
       { icon: '💰', bold: 'Cost and value',  text: '— Is your idea worth it? What does it cost?' },
       { icon: '⚖️', bold: 'Tradeoffs',       text: '— What do you give up? Who wins and who loses?' },
       { icon: '📈', bold: 'The future',      text: '— Will this still work in 2 years?' },
       { icon: '🏪', bold: 'Business',        text: '— Could someone pay for this?' },
     ] : [
-      { icon: '💰', bold: 'Costs vs benefits',        text: '— Is your solution worth it? What does it cost to build or sustain?' },
-      { icon: '⚖️', bold: 'Tradeoffs',                text: '— What do you give up by choosing this approach? Who benefits, who bears the risk?' },
-      { icon: '📈', bold: 'Long-term thinking',       text: '— Will this still be useful or profitable in 2–5 years?' },
+      { icon: '💰', bold: 'Costs vs benefits',           text: '— Is your solution worth it? What does it cost to build or sustain?' },
+      { icon: '⚖️', bold: 'Tradeoffs',                   text: '— What do you give up by choosing this approach? Who benefits, who bears the risk?' },
+      { icon: '📈', bold: 'Long-term thinking',          text: '— Will this still be useful or profitable in 2–5 years?' },
       { icon: '⚡', bold: 'Productive use of resources', text: '— Are time, energy, and money creating real value, or just being consumed?' },
-      { icon: '🏪', bold: 'Business viability',       text: '— Could this become a real service, product, or livelihood?' },
+      { icon: '🏪', bold: 'Business viability',          text: '— Could this become a real service, product, or livelihood?' },
     ],
 
     submitBtn: lvl <= 1 ? 'Start My Activity →'  : 'Create & Start Activity',
