@@ -1063,18 +1063,25 @@ go deeper immediately — do not praise and move on.`;
     if (!user?.id) return;
   
     try {
-      // Resolve which city_town to show: Ibiade users see Ibiade modules, everyone else sees Oloibiri
-      const cityTown = city === 'Ibiade' ? 'Ibiade' : 'Oloibiri';
+      // Resolve which city_town to show
+      const isNorthAmerica = userContinent === 'North America';
+      const cityTown = city === 'Ibiade' ? 'Ibiade' : isNorthAmerica ? 'Cincinnati' : 'Oloibiri';
 
       // 1. Fetch all relevant learning modules filtered by city_town
-      const { data, error } = await supabase
+      // NA users: show modules tagged Cincinnati plus their own private modules
+      const moduleQuery = supabase
         .from('learning_modules')
         .select('*')
         .eq('category', 'AI Proficiency')
         .eq('learning_or_certification', 'learning')
-        .eq('city_town', cityTown)
         .or(`public.eq.1,user_id.eq.${user.id}`)
         .order('sub_category', { ascending: true });
+
+      // For Africa cohorts, filter by city_town; for NA show Cincinnati public + user's own
+      if (!isNorthAmerica) moduleQuery.eq('city_town', cityTown);
+      else moduleQuery.or(`city_town.eq.Cincinnati,user_id.eq.${user.id}`);
+
+      const { data, error } = await moduleQuery;
   
       if (error) throw error;
       
@@ -2623,7 +2630,7 @@ Respond ONLY with valid JSON:
         description: context,
         category: 'AI Proficiency',
         sub_category: subCategory,
-        ai_facilitator_instructions: AI_SESSION_BUILDER_PROMPT,
+        ai_facilitator_instructions: userContinent === 'North America' ? NA_SESSION_BUILDER_PROMPT : AI_SESSION_BUILDER_PROMPT,
         ai_assessment_instructions: buildUNESCOAssessmentInstructions(),
         metrics_for_success: metricsForSuccess,
         outcomes: '',
@@ -2698,47 +2705,74 @@ Respond ONLY with valid JSON:
 
     // ── Create Your Own form ─────────────────────────────────────────────────
     createPageTitle:   lvl <= 1 ? 'Make Your Own Activity'               : 'Create Your Own Activity',
-    createPageSub:     lvl <= 1 ? 'Choose a topic from your life'        : 'Design a personalized AI learning session rooted in your real world',
+    createPageSub:     userContinent === 'North America' ? 'Design a personalized AI learning session relevant to your community and career' : lvl <= 1 ? 'Choose a topic from your life' : 'Design a personalized AI learning session rooted in your real world',
 
-    createBannerTitle: lvl <= 1 ? '💡 Connect to your real life'         : '💡 Ground your learning in real productive value',
-    createBannerBody:  lvl <= 1
-      ? 'The best topics are things you already know — your farm, your market stall, your school, your community. When you learn about AI using something real, it is easier to understand.'
-      : 'The best learning activities connect AI skills to something that creates economic value — starting or strengthening a business, improving agriculture, reducing costs, increasing income, or making a community service more productive. Your AI coach will push you to think about costs, benefits, tradeoffs, and long-term viability.',
-    createBannerExamples: lvl <= 1
-      ? 'Examples: AI to find plant diseases on my farm · AI to help price goods at my market · AI to answer questions for students'
-      : 'Examples: AI-assisted crop disease detection → sell diagnosis as a service · Solar-powered cold storage pricing tool · AI chatbot for a market stall · Smart irrigation scheduling for a farm cooperative',
+    createBannerTitle: userContinent === 'North America'
+      ? '💡 Connect AI to your community and career'
+      : lvl <= 1 ? '💡 Connect to your real life' : '💡 Ground your learning in real productive value',
+    createBannerBody: userContinent === 'North America'
+      ? 'The best topics are things that matter in your city, school, or neighborhood. Use this to build real AI skills — for a certification, a career goal, a local project, or to help people around you.'
+      : lvl <= 1
+        ? 'The best topics are things you already know — your farm, your market stall, your school, your community. When you learn about AI using something real, it is easier to understand.'
+        : 'The best learning activities connect AI skills to something that creates economic value — starting or strengthening a business, improving agriculture, reducing costs, increasing income, or making a community service more productive. Your AI coach will push you to think about costs, benefits, tradeoffs, and long-term viability.',
+    createBannerExamples: userContinent === 'North America'
+      ? 'Examples: AI to help write college application essays · AI tools for a local nonprofit · Using AI to prep for a Google or Microsoft certification · AI to support a small business in my neighborhood'
+      : lvl <= 1
+        ? 'Examples: AI to find plant diseases on my farm · AI to help price goods at my market · AI to answer questions for students'
+        : 'Examples: AI-assisted crop disease detection → sell diagnosis as a service · Solar-powered cold storage pricing tool · AI chatbot for a market stall · Smart irrigation scheduling for a farm cooperative',
 
     titleLabel:        lvl <= 1 ? 'Name of your activity'                : 'Activity Title',
-    titlePlaceholder:  lvl <= 1 ? 'e.g. Using AI to check my crops'      : 'e.g. Using AI to Price Solar-Dried Fish in My Market',
+    titlePlaceholder: userContinent === 'North America'
+      ? 'e.g. Using AI to prep for my Google AI certification'
+      : lvl <= 1 ? 'e.g. Using AI to check my crops' : 'e.g. Using AI to Price Solar-Dried Fish in My Market',
     categoryLabel:     lvl <= 1 ? 'What type of AI skill?'               : 'AI Proficiency Category',
     categoryHelp:      lvl <= 1 ? 'Your coach will use this to guide your session.'
-                                : "The AI coach will use this category's rubric to guide your session — and connect every criterion to your real-world business context.",
+                                : "The AI coach will use this category's rubric to guide your session — and connect every criterion to your real-world context.",
     problemLabel:      lvl <= 1 ? 'What do you want to learn about?'     : 'Problem / Topic / Challenge',
-    problemPlaceholder: lvl <= 1
-      ? 'Tell me what you want to explore. What is the problem or question? e.g. How can AI help me know when to water my garden?'
-      : 'Describe the problem or challenge you want to explore. Be specific — what is broken, inefficient, or costly right now?',
+    problemPlaceholder: userContinent === 'North America'
+      ? 'Describe what you want to explore. What problem, goal, or community need drives this? e.g. How can I use AI to help students in my school improve their writing?'
+      : lvl <= 1
+        ? 'Tell me what you want to explore. What is the problem or question? e.g. How can AI help me know when to water my garden?'
+        : 'Describe the problem or challenge you want to explore. Be specific — what is broken, inefficient, or costly right now?',
 
-    pueLabel:          lvl <= 1 ? '💼 How could this help you earn or save money? (helps a lot)'
-                                : '💼 Entrepreneurial or Productive-Use Angle (strongly recommended)',
-    pueHelp:           lvl <= 1 ? 'Can this help you make money, save money, or help people in your community? Even a small idea is good.'
-                                : 'How could solving this problem create income, save money, improve a business, or strengthen a community? Even a rough idea helps your coach push you toward real economic thinking.',
-    puePlaceholder:    lvl <= 1
-      ? 'e.g. I want to charge farmers to check their crops with AI. Or: I want to use AI to help me decide prices at my stall.'
-      : "e.g. I want to start a small service charging farmers to identify crop diseases using AI. Or: I manage a solar kiosk and want to use AI to predict demand so I don't waste power.",
+    pueLabel: userContinent === 'North America'
+      ? '🚀 Career, Certification, or Entrepreneurial Angle (strongly recommended)'
+      : lvl <= 1 ? '💼 How could this help you earn or save money? (helps a lot)' : '💼 Entrepreneurial or Productive-Use Angle (strongly recommended)',
+    pueHelp: userContinent === 'North America'
+      ? 'How does this connect to a career goal, certification path, or entrepreneurial idea? Or how could it help someone in your community? Even a rough idea helps your coach make the session more relevant.'
+      : lvl <= 1 ? 'Can this help you make money, save money, or help people in your community? Even a small idea is good.'
+                : 'How could solving this problem create income, save money, improve a business, or strengthen a community? Even a rough idea helps your coach push you toward real economic thinking.',
+    puePlaceholder: userContinent === 'North America'
+      ? 'e.g. I want to use this to prep for a Google AI cert. Or: I want to build an AI tool to help students at my school. Or: I have a freelance idea and need AI skills.'
+      : lvl <= 1
+        ? 'e.g. I want to charge farmers to check their crops with AI. Or: I want to use AI to help me decide prices at my stall.'
+        : "e.g. I want to start a small service charging farmers to identify crop diseases using AI. Or: I manage a solar kiosk and want to use AI to predict demand so I don't waste power.",
 
     locationLabel:     lvl <= 1 ? 'Where are you? (optional)'            : 'Location (optional)',
-    locationPlaceholder: lvl <= 1 ? 'e.g. Oloibiri, Bayelsa'            : 'City, town, or region — helps the coach give locally relevant examples',
+    locationPlaceholder: userContinent === 'North America'
+      ? 'e.g. Cincinnati, OH — helps the coach give locally relevant examples'
+      : lvl <= 1 ? 'e.g. Oloibiri, Bayelsa' : 'City, town, or region — helps the coach give locally relevant examples',
     constraintsLabel:  lvl <= 1 ? 'What makes this hard? (optional)'     : 'Constraints (optional)',
-    constraintsPlaceholder: lvl <= 1
-      ? 'e.g. No internet, not much money, people cannot read well'
-      : 'Budget limits, unreliable internet, no electricity at site, low literacy in target users, seasonal market, etc.',
+    constraintsPlaceholder: userContinent === 'North America'
+      ? 'e.g. Limited time, no prior coding experience, need free tools only, working around a school schedule'
+      : lvl <= 1
+        ? 'e.g. No internet, not much money, people cannot read well'
+        : 'Budget limits, unreliable internet, no electricity at site, low literacy in target users, seasonal market, etc.',
     stakeholdersLabel: lvl <= 1 ? 'Who is affected? (optional)'          : 'Stakeholders (optional)',
-    stakeholdersPlaceholder: lvl <= 1
-      ? 'e.g. Farmers in my village, my customers, my family'
-      : 'Customers, suppliers, community members, local government, competitors — anyone who gains or loses from this solution',
+    stakeholdersPlaceholder: userContinent === 'North America'
+      ? 'e.g. Classmates, neighbors, a local nonprofit, a small business owner, future employers'
+      : lvl <= 1
+        ? 'e.g. Farmers in my village, my customers, my family'
+        : 'Customers, suppliers, community members, local government, competitors — anyone who gains or loses from this solution',
 
     infoBoxTitle:      lvl <= 1 ? 'Your AI coach will ask you about…'    : 'What your coach will push you to think about',
-    infoBoxItems:      lvl <= 1 ? [
+    infoBoxItems: userContinent === 'North America' ? [
+      { icon: '🎓', bold: 'Skill building',         text: '— What can you do now that you couldn't before? How does this level up your abilities?' },
+      { icon: '📜', bold: 'Certification value',    text: '— How does this connect to Google, Microsoft, or other AI certifications?' },
+      { icon: '🏙️', bold: 'Local relevance',        text: '— How could this help someone in your city, school, or neighborhood?' },
+      { icon: '🚀', bold: 'Entrepreneurial angle',  text: '— Could this support a freelance service, startup idea, or community project?' },
+      { icon: '📈', bold: 'Next steps',             text: '— What's the next skill to learn? How do you keep growing?' },
+    ] : lvl <= 1 ? [
       { icon: '💰', bold: 'Cost and value', text: '— Is AI worth it here? How much does it cost?' },
       { icon: '⚖️', bold: 'Tradeoffs',      text: '— What do you give up? Who wins and who loses?' },
       { icon: '📈', bold: 'The future',     text: '— Will this still work in 2 years?' },
