@@ -63,6 +63,7 @@ type ViewMode = 'overview' | 'build' | 'results' | 'certificate';
 
 const CERT_NAME     = 'Vibe Coding';
 const CERT_ACTIVITY = 'Vibe Coding Certification';
+const NPOWER_ORG_ID = 'cd0fc311-2194-485f-b8f4-e3d69022fcde';
 const makeId        = () => Math.random().toString(36).substring(2, 9);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -141,11 +142,17 @@ const VibeCodingCertificationPage: React.FC = () => {
 
   // ── Voice ─────────────────────────────────────────────────────────────────
   const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin');
+  const [userContinent, setUserContinent] = useState<string | null>(null);
+  const [userOrgId, setUserOrgId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user?.id) return;
-    supabase.from('profiles').select('continent').eq('id', user.id).single()
-      .then(({ data }) => setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english'));
+    supabase.from('profiles').select('continent, organization_id').eq('id', user.id).single()
+      .then(({ data }) => {
+        setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english');
+        setUserContinent(data?.continent || null);
+        setUserOrgId(data?.organization_id || null);
+      });
   }, [user?.id]);
 
   const {
@@ -435,9 +442,35 @@ Respond ONLY in this JSON format:
       doc.setFontSize(20); doc.setTextColor(168, 85, 247);
       doc.text(`Vibe Coding Certification — ${certLevel}`, W / 2, 43, { align: 'center' });
 
-      doc.setFontSize(13); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
-      doc.text('Davidson AI Innovation Center · Oloibiri, Nigeria', W / 2, 53, { align: 'center' });
-      doc.text('This certificate is proudly presented to', W / 2, 64, { align: 'center' });
+      const isNpower = userOrgId === NPOWER_ORG_ID;
+      const institutionLine = isNpower ? 'NPower'
+        : userContinent === 'North America' ? 'vAI · Girls AIing and Vibing Platform'
+        : 'Davidson AI Innovation Center · Oloibiri, Nigeria';
+
+      // Add NPower logo if applicable
+      if (isNpower) {
+        try {
+          const logoResp = await fetch('/npower_logo.svg');
+          if (logoResp.ok) {
+            const logoBlob = await logoResp.blob();
+            const logoBase64 = await new Promise<string>((res, rej) => {
+              const reader = new FileReader();
+              reader.onloadend = () => res(reader.result as string);
+              reader.onerror = rej;
+              reader.readAsDataURL(logoBlob);
+            });
+            const logoW = 40; const logoH = 14;
+            doc.addImage(logoBase64, 'SVG', (W - logoW) / 2, 44, logoW, logoH);
+          }
+        } catch (e) { console.warn('[Certificate] NPower logo failed:', e); }
+        doc.setFontSize(11); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
+        doc.text('Certified by NPower', W / 2, 61, { align: 'center' });
+        doc.text('This certificate is proudly presented to', W / 2, 68, { align: 'center' });
+      } else {
+        doc.setFontSize(13); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
+        doc.text(institutionLine, W / 2, 53, { align: 'center' });
+        doc.text('This certificate is proudly presented to', W / 2, 64, { align: 'center' });
+      }
 
       doc.setFontSize(36); doc.setFont('helvetica', 'bold'); doc.setTextColor(20, 20, 20);
       doc.text(certName.trim(), W / 2, 78, { align: 'center' });
@@ -974,7 +1007,7 @@ Respond ONLY in this JSON format:
                     {isGenCert ? <><Loader2 size={18} className="animate-spin" /> Generating PDF…</> : <><Download size={18} /> Download Certificate</>}
                   </button>
                   <p className="text-center text-xs text-gray-500">
-                    Pink-themed PDF · Davidson AI Innovation Center · Oloibiri, Nigeria
+                    {userOrgId === NPOWER_ORG_ID ? 'Pink-themed PDF · Certified by NPower' : userContinent === 'North America' ? 'Pink-themed PDF · vAI · Girls AIing and Vibing Platform' : 'Pink-themed PDF · Davidson AI Innovation Center · Oloibiri, Nigeria'}
                   </p>
                 </div>
               </>
