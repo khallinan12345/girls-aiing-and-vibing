@@ -167,11 +167,16 @@ const AIProficiencyPage: React.FC = () => {
   // ── Voice state ────────────────────────────────────────────────────────
   const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin'); // Africa default
 
-  // Set voiceMode from profiles.continent once user loads
+  const [userContinent, setUserContinent] = useState<string | null>(null);
+
+  // Set voiceMode and userContinent from profiles once user loads
   useEffect(() => {
     if (!user?.id) return;
     supabase.from('profiles').select('continent').eq('id', user.id).single()
-      .then(({ data }) => setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english'));
+      .then(({ data }) => {
+        setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english');
+        setUserContinent(data?.continent || null);
+      });
   }, [user?.id]);
 
   const {
@@ -1403,12 +1408,12 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
         <div className="bg-blue-50 border-2 border-blue-300 rounded-xl p-6 mb-8">
           <h3 className="text-lg font-bold text-gray-800 mb-3">Define Your Context</h3>
           <p className="text-gray-700 mb-4">
-            Choose a real-world scenario that matters to you. This makes the assessment more meaningful 
-            and helps you apply AI skills to authentic situations. You can retake this assessment anytime 
+            Choose a real-world scenario that matters to you. This makes the assessment more meaningful
+            and helps you apply AI skills to authentic situations. You can retake this assessment anytime
             with a different context.
           </p>
           <p className="text-sm text-gray-600">
-            <strong>Note:</strong> Once you score Proficient or higher, it will be stored in your record 
+            <strong>Note:</strong> Once you score Proficient or higher, it will be stored in your record
             and you won't need to retake this particular assessment.
           </p>
         </div>
@@ -1421,29 +1426,45 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
               type="text"
               value={learnerContext.topic}
               onChange={(e) => setLearnerContext({ ...learnerContext, topic: e.target.value })}
-              placeholder="e.g., Clean water access, school attendance, crop yields"
+              placeholder={userContinent === 'North America'
+                ? 'e.g., Using AI to improve my study habits, AI tools for a community project, AI for a small business idea'
+                : 'e.g., Clean water access, school attendance, crop yields'}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
             />
-            <p className="text-sm text-gray-500 mt-1">Choose a local problem, interest, or opportunity you care about</p>
+            <p className="text-sm text-gray-500 mt-1">
+              {userContinent === 'North America'
+                ? 'Choose something relevant to your life, community, or a goal you are working toward'
+                : 'Choose a local problem, interest, or opportunity you care about'}
+            </p>
           </div>
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">
               Setting <span className="text-red-500">*</span>
             </label>
-            <select
-              value={learnerContext.setting}
-              onChange={(e) => setLearnerContext({ ...learnerContext, setting: e.target.value })}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
-            >
-              <option value="">Select a setting...</option>
-              <option value="village">Village</option>
-              <option value="school">School</option>
-              <option value="home">Home</option>
-              <option value="market">Market</option>
-              <option value="farm">Farm</option>
-              <option value="clinic">Clinic</option>
-              <option value="other">Other</option>
-            </select>
+            {userContinent === 'North America' ? (
+              <input
+                type="text"
+                value={learnerContext.setting}
+                onChange={(e) => setLearnerContext({ ...learnerContext, setting: e.target.value })}
+                placeholder="e.g., Urban high school in Cincinnati, community nonprofit, neighborhood, home"
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
+              />
+            ) : (
+              <select
+                value={learnerContext.setting}
+                onChange={(e) => setLearnerContext({ ...learnerContext, setting: e.target.value })}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
+              >
+                <option value="">Select a setting...</option>
+                <option value="village">Village</option>
+                <option value="school">School</option>
+                <option value="home">Home</option>
+                <option value="market">Market</option>
+                <option value="farm">Farm</option>
+                <option value="clinic">Clinic</option>
+                <option value="other">Other</option>
+              </select>
+            )}
           </div>
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -1453,10 +1474,16 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
               type="text"
               value={learnerContext.constraints}
               onChange={(e) => setLearnerContext({ ...learnerContext, constraints: e.target.value })}
-              placeholder="e.g., Limited internet, low budget, time constraints"
+              placeholder={userContinent === 'North America'
+                ? 'e.g., Limited time, no coding experience, free tools only, working around school schedule'
+                : 'e.g., Limited internet, low budget, time constraints'}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
             />
-            <p className="text-sm text-gray-500 mt-1">Include at least one real limitation (power, internet, money, time, etc.)</p>
+            <p className="text-sm text-gray-500 mt-1">
+              {userContinent === 'North America'
+                ? 'What limits what you can do? Time, skills, access to tools, budget?'
+                : 'Include at least one real limitation (power, internet, money, time, etc.)'}
+            </p>
           </div>
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -1466,10 +1493,16 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
               type="text"
               value={learnerContext.audience}
               onChange={(e) => setLearnerContext({ ...learnerContext, audience: e.target.value })}
-              placeholder="e.g., My peers, family members, community leaders"
+              placeholder={userContinent === 'North America'
+                ? 'e.g., Classmates, neighbors, a local nonprofit, small business customers, future employers'
+                : 'e.g., My peers, family members, community leaders'}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
             />
-            <p className="text-sm text-gray-500 mt-1">Who is the solution for? (peer, family, community member, etc.)</p>
+            <p className="text-sm text-gray-500 mt-1">
+              {userContinent === 'North America'
+                ? 'Who benefits from this? Who are you building or thinking for?'
+                : 'Who is the solution for? (peer, family, community member, etc.)'}
+            </p>
           </div>
           {error && (
             <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4 flex items-start gap-3">

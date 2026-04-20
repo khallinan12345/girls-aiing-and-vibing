@@ -174,11 +174,16 @@ const AIReadySkillsPage: React.FC = () => {
   // ── Voice state ────────────────────────────────────────────────────────
   const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin'); // Africa default
 
-  // Set voiceMode from profiles.continent once user loads
+  const [userContinent, setUserContinent] = useState<string | null>(null);
+
+  // Set voiceMode and userContinent from profiles once user loads
   useEffect(() => {
     if (!user?.id) return;
     supabase.from('profiles').select('continent').eq('id', user.id).single()
-      .then(({ data }) => setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english'));
+      .then(({ data }) => {
+        setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english');
+        setUserContinent(data?.continent || null);
+      });
   }, [user?.id]);
 
   const {
@@ -462,8 +467,12 @@ ${ls ? `- Learning style: ${ls.learning_style ?? 'n/a'}, motivation: ${ls.motiva
 Adapt the language and framing of the prompt to match this learner's style.
 ` : '';
 
+    const isNA = userContinent === 'North America';
     const pueBlock = learnerContext.entrepreneurialContext.trim()
-      ? `Entrepreneurial / Productive-Use Angle: ${learnerContext.entrepreneurialContext.trim()}
+      ? isNA
+        ? `Learning & Opportunity Angle: ${learnerContext.entrepreneurialContext.trim()}
+This context should be woven into the challenge so the learner is asked to demonstrate the skill in a way that connects directly to this goal, interest, or community opportunity.`
+        : `Entrepreneurial / Productive-Use Angle: ${learnerContext.entrepreneurialContext.trim()}
 This context should be woven into the challenge so the learner is asked to demonstrate the skill in a way that connects directly to this real economic or productive activity.`
       : '';
 
@@ -520,7 +529,7 @@ ${personalizedBlock}${commLevelBlock}
 
 Write a tailored certification challenge prompt that:
 1. GROUNDS the challenge entirely in the learner's specific topic, setting, constraints, and audience — make every question reference their real situation
-2. CONNECTS to the entrepreneurial/productive-use angle if provided — at least one part of the challenge should ask the learner to reason about costs, benefits, tradeoffs, or real-world value creation
+2. CONNECTS to the context angle if provided — for Africa/global learners, ask the learner to reason about costs, benefits, tradeoffs, or real-world value creation; for North America learners, connect to skill growth, career relevance, local community impact, or opportunity made possible through AI
 3. STRUCTURES the challenge so the learner must clearly demonstrate the rubric skill — someone scoring Proficient must address specific, concrete elements; someone scoring Advanced must show strategic thinking
 4. Uses NUMBERED STEPS or CLEAR SUB-QUESTIONS to guide the learner's response structure
 5. Is written at the COMMUNICATION LEVEL specified above — vocabulary, sentence length, and framing must match
@@ -588,8 +597,11 @@ Respond with ONLY the tailored prompt text, nothing else.
   const evaluateResponse = async () => {
     if (!selectedAssessment) return null;
 
+    const isNAEval = userContinent === 'North America';
     const pueNote = learnerContext.entrepreneurialContext.trim()
-      ? `\nEntrepreneurial/PUE Angle: ${learnerContext.entrepreneurialContext.trim()}\nWhere the learner connects their answer to real economic value, costs, benefits, or productive outcomes, this is evidence of applied, real-world thinking and should be rewarded at higher rubric levels.`
+      ? isNAEval
+        ? `\nLearning & Opportunity Angle: ${learnerContext.entrepreneurialContext.trim()}\nWhere the learner connects their answer to real skill growth, career relevance, community impact, or opportunity enabled by AI, this is evidence of applied real-world thinking and should be rewarded at higher rubric levels.`
+        : `\nEntrepreneurial/PUE Angle: ${learnerContext.entrepreneurialContext.trim()}\nWhere the learner connects their answer to real economic value, costs, benefits, or productive outcomes, this is evidence of applied, real-world thinking and should be rewarded at higher rubric levels.`
       : '';
 
     const evaluationPrompt = `
@@ -1617,7 +1629,9 @@ Return ONLY the description, nothing else.`
               Once you start the assessment, you'll receive a personalised challenge based on your context below. You must write your full response on your own — <strong>no AI coaching or hints</strong> during the attempt. The AI will only evaluate what you submit.
             </p>
             <p className="text-amber-700 text-xs mt-2 font-medium">
-              Tip: Connect your context to something you genuinely care about — a business idea, farm challenge, community service, or product. This will make your response stronger and more specific.
+              {userContinent === 'North America'
+                ? 'Tip: Connect your context to something you genuinely care about — a career goal, a community project, a skill you want to build, or an opportunity you see in your neighborhood. This will make your response stronger and more specific.'
+                : 'Tip: Connect your context to something you genuinely care about — a business idea, farm challenge, community service, or product. This will make your response stronger and more specific.'}
             </p>
           </div>
         </div>
@@ -1631,11 +1645,15 @@ Return ONLY the description, nothing else.`
               type="text"
               value={learnerContext.topic}
               onChange={(e) => setLearnerContext({...learnerContext, topic: e.target.value})}
-              placeholder="e.g. Solar-powered cold storage for fish, AI crop disease detection, Mobile money for market traders"
+              placeholder={userContinent === 'North America'
+                ? 'e.g. Using AI to improve my study habits, building an app for my community, AI tools for a freelance business'
+                : 'e.g. Solar-powered cold storage for fish, AI crop disease detection, Mobile money for market traders'}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
             />
             <p className="text-sm text-gray-500 mt-1">
-              What real-world subject, challenge, or project will your assessment focus on?
+              {userContinent === 'North America'
+                ? 'What topic, goal, or community challenge will your assessment focus on?'
+                : 'What real-world subject, challenge, or project will your assessment focus on?'}
             </p>
           </div>
 
@@ -1647,11 +1665,13 @@ Return ONLY the description, nothing else.`
               type="text"
               value={learnerContext.setting}
               onChange={(e) => setLearnerContext({...learnerContext, setting: e.target.value})}
-              placeholder="e.g. Rural farming community in Bayelsa, Small market stall in Oloibiri, School in a town with unreliable electricity"
+              placeholder={userContinent === 'North America'
+                ? 'e.g. Urban high school in Cincinnati, neighborhood nonprofit, home, local small business'
+                : 'e.g. Rural farming community in Bayelsa, Small market stall in Oloibiri, School in a town with unreliable electricity'}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
             />
             <p className="text-sm text-gray-500 mt-1">
-              Where does this challenge occur? Be as specific as possible.
+              Where does this challenge or opportunity occur? Be as specific as possible.
             </p>
           </div>
 
@@ -1663,11 +1683,13 @@ Return ONLY the description, nothing else.`
               rows={2}
               value={learnerContext.constraints}
               onChange={(e) => setLearnerContext({...learnerContext, constraints: e.target.value})}
-              placeholder="e.g. Limited budget, no reliable internet, low digital literacy in the community, seasonal income, language barriers"
+              placeholder={userContinent === 'North America'
+                ? 'e.g. Limited time, no prior coding experience, free tools only, working around a school or work schedule'
+                : 'e.g. Limited budget, no reliable internet, low digital literacy in the community, seasonal income, language barriers'}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none resize-none"
             />
             <p className="text-sm text-gray-500 mt-1">
-              What limits what you can do? Budget, infrastructure, time, skills, access to technology?
+              What limits what you can do? Budget, time, skills, access to technology?
             </p>
           </div>
 
@@ -1679,27 +1701,35 @@ Return ONLY the description, nothing else.`
               type="text"
               value={learnerContext.audience}
               onChange={(e) => setLearnerContext({...learnerContext, audience: e.target.value})}
-              placeholder="e.g. Smallholder farmers aged 35–60, market traders with low digital skills, cooperative members, local school students"
+              placeholder={userContinent === 'North America'
+                ? 'e.g. Classmates, neighborhood residents, nonprofit volunteers, local small business customers, future employers'
+                : 'e.g. Smallholder farmers aged 35–60, market traders with low digital skills, cooperative members, local school students'}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
             />
             <p className="text-sm text-gray-500 mt-1">
-              Who is this for? Describe the people who will be affected or who need to understand your solution.
+              Who is this for? Describe the people who will be affected or who benefit from your work.
             </p>
           </div>
 
-          {/* PUE / Entrepreneurial angle — new field */}
+          {/* Entrepreneurial / Learning & Opportunity angle */}
           <div className="bg-green-50 border border-green-200 rounded-xl p-4">
             <label className="block text-sm font-semibold text-green-900 mb-1">
-              💼 Entrepreneurial or Productive-Use Angle <span className="text-gray-400 font-normal">(strongly recommended)</span>
+              {userContinent === 'North America'
+                ? '🚀 Learning, Growth, or Opportunity Angle (strongly recommended)'
+                : '💼 Entrepreneurial or Productive-Use Angle (strongly recommended)'}
             </label>
             <p className="text-xs text-green-700 mb-2">
-              How does this challenge connect to creating real economic value — earning income, reducing costs, improving a business, or making a community service more productive? The more specific you are, the stronger your assessment prompt will be.
+              {userContinent === 'North America'
+                ? 'How does this connect to a skill you want to build, a career goal, a certification, or an opportunity in your community made possible through AI? The more specific you are, the stronger your assessment prompt will be.'
+                : 'How does this challenge connect to creating real economic value — earning income, reducing costs, improving a business, or making a community service more productive? The more specific you are, the stronger your assessment prompt will be.'}
             </p>
             <textarea
               rows={3}
               value={learnerContext.entrepreneurialContext}
               onChange={(e) => setLearnerContext({...learnerContext, entrepreneurialContext: e.target.value})}
-              placeholder="e.g. I want to start a paid service diagnosing crop disease using AI so farmers in my area get faster advice. Or: My family runs a solar kiosk and I want to use better thinking to decide which services to offer. Or: I want to help the women's cooperative reduce post-harvest losses and sell at better prices."
+              placeholder={userContinent === 'North America'
+                ? 'e.g. I want to build AI skills to prep for a Google certification. Or: I am creating a tool to help students at my school. Or: I have a freelance idea and need to understand how AI can make it real.'
+                : "e.g. I want to start a paid service diagnosing crop disease using AI so farmers in my area get faster advice. Or: My family runs a solar kiosk and I want to use better thinking to decide which services to offer. Or: I want to help the women's cooperative reduce post-harvest losses and sell at better prices."}
               className="w-full border border-green-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-400 focus:border-green-400 resize-none bg-white"
             />
           </div>
