@@ -91,6 +91,7 @@ export const VibeCodingWorkflow: React.FC<VibeCodingWorkflowProps> = ({
 
   // AI-improved instructions state
   const [improvingWithAI, setImprovingWithAI] = useState(false);
+  const [improvingFromResults, setImprovingFromResults] = useState(false);
   const [showImprovedPromptPanel, setShowImprovedPromptPanel] = useState(false);
 
   // Consume injected prompt from the design chat panel
@@ -237,6 +238,43 @@ Output ONLY the improved prompt — no explanation, no preamble, no labels.`,
       setCurrentPhase('instructions');
     } finally {
       setImprovingWithAI(false);
+    }
+  };
+
+  // Improve code based on observed results — regenerates with output context
+  const handleImproveFromResults = async () => {
+    if (!generatedCode.trim()) return;
+    setImprovingFromResults(true);
+    try {
+      const resultContext = executionResult?.output
+        ? `OUTPUT / OBSERVED BEHAVIOUR:\n${executionResult.output}`
+        : 'The page opened in the browser — the student reviewed it visually.';
+
+      const improvedPrompt = `You are a vibe coding coach. A student generated code, ran it, and now wants to improve it based on the results.
+
+ORIGINAL INSTRUCTIONS:
+${instructions.trim()}
+
+GENERATED CODE:
+\`\`\`${language}
+${generatedCode.slice(0, 1500)}${generatedCode.length > 1500 ? '\n... (truncated)' : ''}
+\`\`\`
+
+${resultContext}
+
+Rewrite the original instructions to be more specific and complete so the next code generation improves on this version. Address any gaps, missing features, or things that could be better.
+Output ONLY the improved prompt — no explanation, no preamble, no labels.`;
+
+      const improved = await onGenerateCode(improvedPrompt, 'python')
+        .then(r => r.replace(/^\`\`\`\w*\n?/i, '').replace(/\n?\`\`\`$/i, '').trim());
+
+      setInstructions(improved);
+      setCurrentPhase('instructions');
+      setShowImprovedPromptPanel(true);
+    } catch (err) {
+      setCurrentPhase('instructions');
+    } finally {
+      setImprovingFromResults(false);
     }
   };
 
@@ -497,12 +535,14 @@ Output ONLY the improved prompt — no explanation, no preamble, no labels.`,
                   {critique.problemDecomposition.score}/3
                 </span>
               </div>
-              <p className="text-sm text-gray-600 mb-2">
-                <strong>Evidence:</strong> {critique.problemDecomposition.evidence}
-              </p>
-              <p className="text-sm text-amber-700">
-                <strong>How to improve:</strong> {critique.problemDecomposition.improvement}
-              </p>
+              <div className="bg-gray-50 rounded p-3 mb-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Evidence</p>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">{critique.problemDecomposition.evidence}</p>
+              </div>
+              <div className="bg-amber-50 rounded p-3">
+                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-1">How to improve</p>
+                <p className="text-sm text-amber-800 whitespace-pre-wrap">{critique.problemDecomposition.improvement}</p>
+              </div>
             </div>
 
             {/* Prompt Engineering */}
@@ -519,12 +559,14 @@ Output ONLY the improved prompt — no explanation, no preamble, no labels.`,
                   {critique.promptEngineering.score}/3
                 </span>
               </div>
-              <p className="text-sm text-gray-600 mb-2">
-                <strong>Evidence:</strong> {critique.promptEngineering.evidence}
-              </p>
-              <p className="text-sm text-amber-700">
-                <strong>How to improve:</strong> {critique.promptEngineering.improvement}
-              </p>
+              <div className="bg-gray-50 rounded p-3 mb-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Evidence</p>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">{critique.promptEngineering.evidence}</p>
+              </div>
+              <div className="bg-amber-50 rounded p-3">
+                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-1">How to improve</p>
+                <p className="text-sm text-amber-800 whitespace-pre-wrap">{critique.promptEngineering.improvement}</p>
+              </div>
             </div>
 
             {/* Recommendation */}
@@ -736,7 +778,17 @@ Output ONLY the improved prompt — no explanation, no preamble, no labels.`,
 
                 {/* Success Actions */}
                 {!executionResult.error && (
-                  <div className="mt-4 flex gap-3">
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <Button
+                      onClick={handleImproveFromResults}
+                      isLoading={improvingFromResults}
+                      disabled={improvingFromResults}
+                      size="sm"
+                      className="bg-purple-600 hover:bg-purple-700 text-white"
+                      icon={<RefreshCw size={14} />}
+                    >
+                      {improvingFromResults ? 'Improving…' : 'Improve Based on Results'}
+                    </Button>
                     <Button
                       onClick={handleStartOver}
                       size="sm"
