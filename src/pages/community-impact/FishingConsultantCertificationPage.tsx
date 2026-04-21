@@ -25,6 +25,7 @@ import Navbar from '../../components/layout/Navbar';
 import { supabase } from '../../lib/supabaseClient';
 import { chatText, chatJSON } from '../../lib/chatClient';
 import { useAuth } from '../../hooks/useAuth';
+import { useBranding } from '../../lib/useBranding';
 import {
   Fish, Award, Trophy, Loader2, Download, AlertCircle,
   Volume2, VolumeX, Star, CheckCircle, ArrowRight, RefreshCw,
@@ -358,6 +359,7 @@ const ScoreRing: React.FC<{ score: number | null }> = ({ score }) => {
 
 const FishingConsultantCertificationPage: React.FC = () => {
   const { user } = useAuth();
+  const branding = useBranding();
 
   const [view, setView]                         = useState<ViewMode>('overview');
   const [buildTab, setBuildTab]                 = useState<BuildTab>('written');
@@ -518,7 +520,7 @@ const FishingConsultantCertificationPage: React.FC = () => {
         s.transcript.map(m => `${m.role === 'user' ? 'CONSULTANT STUDENT' : s.personaName}: ${m.content}`).join('\n\n')
       ).join('\n\n');
 
-      const prompt = `You are evaluating a student's Fishing Consultant Certification portfolio from the Davidson AI Innovation Center, Oloibiri, Nigeria.
+      const prompt = `You are evaluating a student's Fishing Consultant Certification portfolio from the ${branding.institutionName}.
 
 The student's role: advise fishermen, fish traders, and aspiring aquaculture farmers in the Niger Delta — covering local fish species, oil contamination and food safety, catfish pond farming, and sustainable fishing practice.
 
@@ -774,7 +776,7 @@ Return valid JSON only (no markdown, no code fences):
                 <Fish size={32} className="text-white" />
               </div>
               <h1 className="text-2xl font-bold text-white">Fishing Consultant Certification</h1>
-              <p className="text-sm text-cyan-300">Community Impact Track · Davidson AI Innovation Center</p>
+              <p className="text-sm text-cyan-300">Community Impact Track · {branding.institutionName}</p>
               <p className="text-sm text-gray-300 leading-relaxed max-w-md mx-auto">
                 Prove you can advise fishermen, fish traders, and aspiring aquaculture farmers in the Niger Delta — with accurate knowledge, honest safety guidance, and practical advice for each person's situation.
               </p>
@@ -1115,7 +1117,7 @@ Return valid JSON only (no markdown, no code fences):
                     className="w-full flex items-center justify-center gap-3 py-3.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all">
                     {isGenCert ? <><Loader2 size={18} className="animate-spin" /> Generating PDF…</> : <><Download size={18} /> Download Certificate</>}
                   </button>
-                  <p className="text-center text-xs text-gray-500">Cyan-themed PDF · Davidson AI Innovation Center · Oloibiri, Nigeria</p>
+                  <p className="text-center text-xs text-gray-500">{`Cyan-themed PDF · ${branding.institutionName}`}</p>
                 </div>
               </>
             )}

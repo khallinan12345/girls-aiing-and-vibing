@@ -26,6 +26,7 @@ import Navbar from '../../components/layout/Navbar';
 import { supabase } from '../../lib/supabaseClient';
 import { chatText, chatJSON } from '../../lib/chatClient';
 import { useAuth } from '../../hooks/useAuth';
+import { useBranding } from '../../lib/useBranding';
 import {
   Heart, Award, Trophy, Loader2, Download, AlertCircle,
   Volume2, VolumeX, Star, CheckCircle, ArrowRight, RefreshCw,
@@ -420,6 +421,7 @@ const ScoreRing: React.FC<{ score: number | null }> = ({ score }) => {
 
 const HealthcareNavigatorCertificationPage: React.FC = () => {
   const { user } = useAuth();
+  const branding = useBranding();
 
   const [view, setView]                         = useState<ViewMode>('overview');
   const [buildTab, setBuildTab]                 = useState<BuildTab>('written');
@@ -580,7 +582,7 @@ const HealthcareNavigatorCertificationPage: React.FC = () => {
         s.transcript.map(m => `${m.role === 'user' ? 'NAVIGATOR STUDENT' : s.personaName}: ${m.content}`).join('\n\n')
       ).join('\n\n');
 
-      const prompt = `You are evaluating a student's Healthcare Navigator Certification portfolio from the Davidson AI Innovation Center, Oloibiri, Nigeria.
+      const prompt = `You are evaluating a student's Healthcare Navigator Certification portfolio from the ${branding.institutionName}.
 
 The student's role: Community Health Navigator — ASSESS, TRIAGE, and REFER patients using WHO IMCI protocols. They do NOT diagnose or prescribe. They collect measurements, identify danger signs, classify urgency (RED/YELLOW/GREEN), and prepare referral notes.
 
@@ -846,7 +848,7 @@ Return valid JSON only (no markdown, no code fences):
                 <Heart size={32} className="text-white" />
               </div>
               <h1 className="text-2xl font-bold text-white">Healthcare Navigator Certification</h1>
-              <p className="text-sm text-rose-300">Community Impact Track · Davidson AI Innovation Center</p>
+              <p className="text-sm text-rose-300">Community Impact Track · {branding.institutionName}</p>
               <p className="text-sm text-gray-300 leading-relaxed max-w-md mx-auto">
                 Prove you can assess patients systematically, apply WHO IMCI triage correctly, communicate urgency clearly to caregivers, and produce a complete referral note.
               </p>
@@ -1190,7 +1192,7 @@ Return valid JSON only (no markdown, no code fences):
                     className="w-full flex items-center justify-center gap-3 py-3.5 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all">
                     {isGenCert ? <><Loader2 size={18} className="animate-spin" /> Generating PDF…</> : <><Download size={18} /> Download Certificate</>}
                   </button>
-                  <p className="text-center text-xs text-gray-500">Rose-themed PDF · Davidson AI Innovation Center · Oloibiri, Nigeria</p>
+                  <p className="text-center text-xs text-gray-500">{`Rose-themed PDF · ${branding.institutionName}`}</p>
                 </div>
               </>
             )}

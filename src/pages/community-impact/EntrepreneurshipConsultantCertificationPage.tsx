@@ -24,6 +24,7 @@ import Navbar from '../../components/layout/Navbar';
 import { supabase } from '../../lib/supabaseClient';
 import { chatText, chatJSON } from '../../lib/chatClient';
 import { useAuth } from '../../hooks/useAuth';
+import { useBranding } from '../../lib/useBranding';
 import {
   Briefcase, Award, Trophy, Loader2, Download, AlertCircle,
   Volume2, VolumeX, Star, CheckCircle, ArrowRight, RefreshCw,
@@ -326,6 +327,7 @@ const EntrepreneurCertBackground: React.FC = () => {
 
 const EntrepreneurshipConsultantCertificationPage: React.FC = () => {
   const { user } = useAuth();
+  const branding = useBranding();
   const [view, setView]                         = useState<ViewMode>('overview');
   const [buildTab, setBuildTab]                 = useState<BuildTab>('written');
   const [portfolio, setPortfolio]               = useState<EntrepreneurshipPortfolio>(EMPTY_PORTFOLIO);
@@ -468,7 +470,7 @@ const EntrepreneurshipConsultantCertificationPage: React.FC = () => {
         s.transcript.map(m => `${m.role === 'user' ? 'ADVISOR STUDENT' : s.personaName}: ${m.content}`).join('\n\n')
       ).join('\n\n');
 
-      const prompt = `You are evaluating a student's Entrepreneurship Consultant Certification portfolio from the Davidson AI Innovation Center, Oloibiri, Nigeria.
+      const prompt = `You are evaluating a student's Entrepreneurship Consultant Certification portfolio from the ${branding.institutionName}.
 
 The student's role: advise young Nigerians starting or growing a business — covering CAC registration, pricing, WhatsApp marketing, Ajo savings, grants (Tony Elumelu Foundation), and lean business planning.
 
@@ -678,7 +680,7 @@ Return valid JSON only (no markdown, no code fences):
                 <Briefcase size={32} className="text-white" />
               </div>
               <h1 className="text-2xl font-bold text-white">Entrepreneurship Consultant Certification</h1>
-              <p className="text-sm text-amber-300">Community Impact Track · Davidson AI Innovation Center</p>
+              <p className="text-sm text-amber-300">Community Impact Track · {branding.institutionName}</p>
               <p className="text-sm text-gray-300 leading-relaxed max-w-md mx-auto">
                 Prove you can advise young Nigerians starting businesses — with accurate knowledge of CAC registration, pricing, WhatsApp marketing, Ajo savings, and lean business planning.
               </p>
@@ -983,7 +985,7 @@ Return valid JSON only (no markdown, no code fences):
                     className="w-full flex items-center justify-center gap-3 py-3.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all">
                     {isGenCert ? <><Loader2 size={18} className="animate-spin" /> Generating PDF…</> : <><Download size={18} /> Download Certificate</>}
                   </button>
-                  <p className="text-center text-xs text-gray-500">Amber-themed PDF · Davidson AI Innovation Center · Oloibiri, Nigeria</p>
+                  <p className="text-center text-xs text-gray-500">{`Amber-themed PDF · ${branding.institutionName}`}</p>
                 </div>
               </>
             )}
