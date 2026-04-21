@@ -26,6 +26,7 @@ import { chatText, chatJSON } from '../lib/chatClient';
 import { supabase } from '../lib/supabaseClient';
 import { useVoice } from '../hooks/useVoice';
 import { VoiceFallback } from '../components/VoiceFallback';
+import { useBranding, addBrandingToPDF } from '../lib/useBranding';
 
 
 // Distorted Background Component
@@ -140,7 +141,6 @@ const ASSESSMENT_COLUMN_MAP: Record<string, string> = {
   'Verification & Bias': 'certification_ai_proficiency_verification_bias'
 };
 
-const NPOWER_ORG_ID = 'cd0fc311-2194-485f-b8f4-e3d69022fcde';
 
 const AIProficiencyPage: React.FC = () => {
   const { user } = useAuth();
@@ -169,19 +169,13 @@ const AIProficiencyPage: React.FC = () => {
   // ── Voice state ────────────────────────────────────────────────────────
   const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin'); // Africa default
 
-  const [userContinent, setUserContinent] = useState<string | null>(null);
-  const [userOrgId, setUserOrgId] = useState<string | null>(null);
+  const branding = useBranding();
 
-  // Set voiceMode, userContinent, and userOrgId from profiles once user loads
+  // Set voiceMode from branding once ready
   useEffect(() => {
-    if (!user?.id) return;
-    supabase.from('profiles').select('continent, organization_id').eq('id', user.id).single()
-      .then(({ data }) => {
-        setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english');
-        setUserContinent(data?.continent || null);
-        setUserOrgId(data?.organization_id || null);
-      });
-  }, [user?.id]);
+    if (!branding.isReady) return;
+    setVoiceMode(branding.variant === 'vai' ? 'pidgin' : 'english');
+  }, [branding.isReady, branding.variant]);
 
   const {
     speak: hookSpeak,
@@ -1063,33 +1057,9 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
         }
       });
 
-      // Organization (footer) - moved up by 1/4 inch (6.35mm)
-      yPos = pageHeight - 34.35; // Was 28, now 28 + 6.35 = 34.35
-      doc.setFontSize(36);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(138, 43, 226);
-      // NPower logo + org name
-      const isNpower = userOrgId === NPOWER_ORG_ID;
-      if (isNpower) {
-        try {
-          const logoResp = await fetch('/npower_logo.svg');
-          if (logoResp.ok) {
-            const logoBlob = await logoResp.blob();
-            const logoBase64 = await new Promise<string>((res, rej) => {
-              const reader = new FileReader();
-              reader.onloadend = () => res(reader.result as string);
-              reader.onerror = rej;
-              reader.readAsDataURL(logoBlob);
-            });
-            const logoW = 50; const logoH = 17;
-            doc.addImage(logoBase64, 'SVG', (pageWidth - logoW) / 2, yPos - 18, logoW, logoH);
-          }
-        } catch (e) { console.warn('[Certificate] NPower logo failed:', e); }
-        doc.setFontSize(24); doc.setFont('helvetica', 'bold'); doc.setTextColor(138, 43, 226);
-        doc.text('Certified by NPower', pageWidth / 2, yPos + 2, { align: 'center' });
-      } else {
-        doc.text('Davidson AI Innovation Center', pageWidth / 2, yPos, { align: 'center' });
-      }
+      // Organization (footer)
+      yPos = pageHeight - 34.35;
+      await addBrandingToPDF({ doc, pageWidth, pageHeight, footerY: yPos, branding });
 
       // Date
       doc.setFontSize(14);
@@ -1775,7 +1745,7 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
           Download Certificate
         </button>
         <p className="text-sm text-gray-600 mt-6">
-          Issued by: <strong>Davidson AI Innovation Center</strong>
+          Issued by: <strong>{branding.institutionName}</strong>
         </p>
         <button
           onClick={() => setViewMode('overview')}

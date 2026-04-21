@@ -31,6 +31,7 @@ import { chatText, chatJSON } from '../lib/chatClient';
 import { supabase } from '../lib/supabaseClient';
 import { useVoice } from '../hooks/useVoice';
 import { VoiceFallback } from '../components/VoiceFallback';
+import { useBranding, addBrandingToPDF } from '../lib/useBranding';
 
 // Distorted Background Component
 const DistortedBackground: React.FC<{ imageUrl: string }> = ({ imageUrl }) => {
@@ -144,7 +145,6 @@ interface PersonalityBaseline {
 
 type ViewMode = 'overview' | 'select-certification' | 'select-assessment' | 'define-context' | 'take-assessment' | 'results' | 'certificate';
 
-const NPOWER_ORG_ID = 'cd0fc311-2194-485f-b8f4-e3d69022fcde';
 
 const AIReadySkillsPage: React.FC = () => {
   const { user } = useAuth();
@@ -176,19 +176,13 @@ const AIReadySkillsPage: React.FC = () => {
   // ── Voice state ────────────────────────────────────────────────────────
   const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin'); // Africa default
 
-  const [userContinent, setUserContinent] = useState<string | null>(null);
-  const [userOrgId, setUserOrgId] = useState<string | null>(null);
+  const branding = useBranding();
 
-  // Set voiceMode, userContinent, and userOrgId from profiles once user loads
+  // Set voiceMode from branding once ready
   useEffect(() => {
-    if (!user?.id) return;
-    supabase.from('profiles').select('continent, organization_id').eq('id', user.id).single()
-      .then(({ data }) => {
-        setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english');
-        setUserContinent(data?.continent || null);
-        setUserOrgId(data?.organization_id || null);
-      });
-  }, [user?.id]);
+    if (!branding.isReady) return;
+    setVoiceMode(branding.variant === 'vai' ? 'pidgin' : 'english');
+  }, [branding.isReady, branding.variant]);
 
   const {
     speak: hookSpeak,
@@ -1194,28 +1188,7 @@ Return ONLY the description, nothing else.`
       doc.setFontSize(36);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(138, 43, 226); // Purple
-      // NPower logo + org name
-      const isNpower = userOrgId === NPOWER_ORG_ID;
-      if (isNpower) {
-        try {
-          const logoResp = await fetch('/npower_logo.svg');
-          if (logoResp.ok) {
-            const logoBlob = await logoResp.blob();
-            const logoBase64 = await new Promise<string>((res, rej) => {
-              const reader = new FileReader();
-              reader.onloadend = () => res(reader.result as string);
-              reader.onerror = rej;
-              reader.readAsDataURL(logoBlob);
-            });
-            const logoW = 50; const logoH = 17;
-            doc.addImage(logoBase64, 'SVG', (pageWidth - logoW) / 2, footerY - 18, logoW, logoH);
-          }
-        } catch (e) { console.warn('[Certificate] NPower logo failed:', e); }
-        doc.setFontSize(24); doc.setFont('helvetica', 'bold'); doc.setTextColor(138, 43, 226);
-        doc.text('Certified by NPower', pageWidth / 2, footerY + 2, { align: 'center' });
-      } else {
-        doc.text('Davidson AI Innovation Center', pageWidth / 2, footerY, { align: 'center' });
-      }
+      await addBrandingToPDF({ doc, pageWidth, pageHeight, footerY, branding });
 
       // Date
       doc.setFontSize(14);
