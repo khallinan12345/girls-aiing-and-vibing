@@ -21,6 +21,7 @@ import { useAuth } from '../../hooks/useAuth';
 import Editor from '@monaco-editor/react';
 import { useVoice } from '../../hooks/useVoice';
 import { VoiceFallback } from '../../components/VoiceFallback';
+import { useBranding, addBrandingToPDF } from '../../lib/useBranding';
 import {
   Code, Award, GraduationCap, CheckCircle, XCircle,
   Loader2, Download, ExternalLink, Star, Trophy,
@@ -236,15 +237,14 @@ const WebDevCertificationPage: React.FC = () => {
   // ── Personality ───────────────────────────────────────────────────────
   const [communicationLevel, setCommunicationLevel] = useState(1);
 
-  // ── Voice ────────────────────────────────────────────────────────────
-  const [voiceMode,     setVoiceMode]     = useState<'english' | 'pidgin'>('pidgin'); // Africa default
+  // ── Voice + Branding ────────────────────────────────────────────────
+  const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin'); // Africa default
+  const branding = useBranding();
 
-  // Set voiceMode from profiles.continent once user loads
   useEffect(() => {
-    if (!user?.id) return;
-    supabase.from('profiles').select('continent').eq('id', user.id).single()
-      .then(({ data }) => setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english'));
-  }, [user?.id]);
+    if (!branding.isReady) return;
+    setVoiceMode(branding.variant === 'vai' ? 'pidgin' : 'english');
+  }, [branding.isReady, branding.variant]);
 
   const {
     speak: hookSpeak,
@@ -522,10 +522,8 @@ Respond ONLY in this JSON format:
       doc.setFontSize(20); doc.setTextColor(79, 70, 229);
       doc.text(`Web Development Certification — ${certLevel}`, W / 2, 43, { align: 'center' });
 
-      doc.setFontSize(14); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
-      doc.text('Davidson AI Innovation Center · Oloibiri, Nigeria', W / 2, 53, { align: 'center' });
-
-      doc.setFontSize(13); doc.setTextColor(100, 100, 100);
+      await addBrandingToPDF({ doc, pageWidth: W, pageHeight: H, footerY: 53, branding, fontSize: 14, textColor: [80, 80, 80] });
+      doc.setFontSize(13); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100);
       doc.text('This certificate is proudly presented to', W / 2, 64, { align: 'center' });
 
       // Name
@@ -570,14 +568,14 @@ Respond ONLY in this JSON format:
       const footerY = H - 22;
       doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(130, 130, 130);
       doc.text(`Awarded: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`, 20, footerY);
-      doc.text('Girls AIing and Vibing Programme', W / 2, footerY, { align: 'center' });
+      doc.text(`${branding.institutionName} Programme`, W / 2, footerY, { align: 'center' });
       doc.text(`Certification ID: WD-${makeId().toUpperCase()}`, W - 20, footerY, { align: 'right' });
 
       doc.save(`${certName.trim().replace(/\s+/g, '-')}-WebDev-Certificate.pdf`);
 
     } catch (err) { console.error('Certificate error:', err); }
     finally { setIsGenCert(false); }
-  }, [certName, assessmentScores]);
+  }, [certName, assessmentScores, branding]);
 
   // ── Computed ──────────────────────────────────────────────────────────
   const allProficient  = assessmentScores.length > 0 && assessmentScores.every(s => (s.score ?? 0) >= 2);
@@ -1133,7 +1131,7 @@ Respond ONLY in this JSON format:
                     <div className="my-4 h-px bg-indigo-500/30" />
                     <p className="text-gray-400 text-xs">Awarded to</p>
                     <p className="text-2xl font-bold text-white mt-1">{certName || '[ Your Name ]'}</p>
-                    <p className="text-gray-400 text-xs mt-1">Davidson AI Innovation Center · Oloibiri, Nigeria</p>
+                    <p className="text-gray-400 text-xs mt-1">{branding.institutionName}</p>
                     <div className="my-4 h-px bg-indigo-500/30" />
                     <div className="grid grid-cols-2 gap-2 text-left">
                       {assessmentScores.map(sc => {
