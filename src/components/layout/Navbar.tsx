@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../hooks/useAuth';
 import { Menu, X, Sparkles, LogOut, ShieldCheck } from 'lucide-react';
 import classNames from 'classnames';
+
+const NPOWER_ORG_ID = 'cd0fc311-2194-485f-b8f4-e3d69022fcde';
+const BGS100_ORG_ID  = 'c0b48eae-67af-449d-8c04-cc6950bf0982';
 
 const Navbar: React.FC = () => {
   const navigate = useNavigate();
@@ -17,6 +20,21 @@ const Navbar: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [continent, setContinent] = useState<string | null>(null);
+  const [userOrgId, setUserOrgId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from('profiles').select('continent, organization_id').eq('id', user.id).single()
+      .then(({ data }) => {
+        setContinent(data?.continent ?? null);
+        setUserOrgId(data?.organization_id ?? null);
+      });
+  }, [user?.id]);
+
+  const isNpower = userOrgId === NPOWER_ORG_ID;
+  const is100BGS  = userOrgId === BGS100_ORG_ID;
+  const isAfrica  = continent === 'Africa';
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -109,16 +127,24 @@ const Navbar: React.FC = () => {
       <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14 gap-4">
 
-          {/* Brand */}
+          {/* Brand — org-aware logo */}
           <div className="flex-shrink-0">
             <Link to="/home" className="flex items-center gap-1.5 group">
-              <Sparkles
-                size={20}
-                className="text-purple-600 group-hover:text-purple-700 transition-colors"
-              />
-              <span className="text-sm font-bold text-purple-700 tracking-tight hidden lg:inline">
-                Girls AIing
-              </span>
+              {isNpower ? (
+                <img src="/npower-logo.svg" alt="NPower" className="h-7 object-contain" />
+              ) : is100BGS ? (
+                <>
+                  <Sparkles size={20} className="text-pink-500 group-hover:text-pink-600 transition-colors" />
+                  <span className="text-sm font-bold text-pink-600 tracking-tight hidden lg:inline">Girls AI-ing</span>
+                </>
+              ) : isAfrica ? (
+                <img src="/vai-logo.svg" alt="vAI" className="h-7 object-contain" />
+              ) : (
+                <>
+                  <Sparkles size={20} className="text-purple-600 group-hover:text-purple-700 transition-colors" />
+                  <span className="text-sm font-bold text-purple-700 tracking-tight hidden lg:inline">AIing &amp; Vibing</span>
+                </>
+              )}
             </Link>
           </div>
 
