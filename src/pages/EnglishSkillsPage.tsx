@@ -497,17 +497,35 @@ const buildSpokenEvaluation = (evaluation: SessionEvaluation): string => {
 
 // ─── Message renderer — detects ✅ correction lines → green bold ─────────────
 
-const deriveProgress = (rows: DashboardSession[]): UserProgress => {
+// Returns the minimum unlockedUpTo based on communication_level alone.
+// Level 0-1 → only Stage 1 accessible (floor = 0)
+// Level 2   → Stages 3 & 4 accessible (floor = 3), Stage 5 still earned
+// Level 3   → Stages 2-5 accessible  (floor = 4)
+const levelFloor = (communicationLevel: number): number => {
+  if (communicationLevel >= 3) return 4; // all stages open
+  if (communicationLevel === 2) return 3; // stages 1–4 open (indices 0–3)
+  return 0; // levels 0 & 1: only stage 1
+};
+
+const deriveProgress = (rows: DashboardSession[], communicationLevel: number = 1): UserProgress => {
   const completedStages = [false, false, false, false, false];
-  let unlockedUpTo = 0;
+  let earnedUpTo = 0;
   for (const row of rows) {
     const ev = row.english_skills_evaluation;
     if (!ev || ev.stage_id < 0 || ev.stage_id > 4) continue;
     if (ev.is_complete) completedStages[ev.stage_id] = true;
     if (ev.can_advance || ev.is_complete) {
-      unlockedUpTo = Math.max(unlockedUpTo, Math.min(4, ev.stage_id + 1));
+      earnedUpTo = Math.max(earnedUpTo, Math.min(4, ev.stage_id + 1));
     }
   }
+
+  // For level 2: Stage 5 (index 4) only unlocks once Stages 3 & 4 (indices 2 & 3) are complete.
+  const floor = levelFloor(communicationLevel);
+  const adjustedFloor = (communicationLevel === 2 && !(completedStages[2] && completedStages[3]))
+    ? Math.min(floor, 3)  // cap at index 3 (Stage 4) until 3+4 complete
+    : floor;
+
+  const unlockedUpTo = Math.max(earnedUpTo, adjustedFloor);
   return { unlockedUpTo, completedStages };
 };
 
@@ -784,9 +802,9 @@ const EnglishSkillsPage: React.FC = () => {
       .eq('user_id', user.id)
       .eq('activity', 'english_skills')
       .order('updated_at', { ascending: false });
-    setProgress(deriveProgress((data ?? []) as DashboardSession[]));
+    setProgress(deriveProgress((data ?? []) as DashboardSession[], communicationLevel));
     setLoadingProgress(false);
-  }, [user?.id]);
+  }, [user?.id, communicationLevel]);
 
   useEffect(() => { loadAllProgress(); }, [loadAllProgress]);
 
@@ -1276,7 +1294,13 @@ Respond ONLY with valid JSON:
                           <div className="flex items-center gap-3 flex-wrap mb-1">
                             <span className={`text-sm font-semibold uppercase tracking-wider ${unlocked ? 'text-slate-300' : 'text-slate-400'}`}>Stage {idx + 1}</span>
                             {completed && <span className="text-sm bg-green-500/30 text-green-300 px-2 py-0.5 rounded-full border border-green-500/40">🏆 Complete</span>}
-                            {!unlocked && <span className="text-sm bg-slate-600/80 text-slate-300 px-2 py-0.5 rounded-full border border-slate-500/60">🔒 Complete Stage {idx} to unlock</span>}
+                            {!unlocked && (
+                              <span className="text-sm bg-slate-600/80 text-slate-300 px-2 py-0.5 rounded-full border border-slate-500/60">
+                                {idx === 4 && communicationLevel === 2
+                                  ? '🔒 Complete Stages 3 & 4 to unlock'
+                                  : `🔒 Complete Stage ${idx} to unlock`}
+                              </span>
+                            )}
                           </div>
                           <h3 className={`text-2xl font-bold ${unlocked ? 'text-white' : 'text-slate-300'}`}>{stage.name}</h3>
                           <p className={`text-base font-medium mt-0.5 ${unlocked ? stage.textColor : 'text-slate-400'}`}>{stage.subtitle}</p>
