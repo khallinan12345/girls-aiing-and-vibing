@@ -504,6 +504,7 @@ const AIPlaygroundPage: React.FC = () => {
 
   // ── Voice state ──────────────────────────────────────────────────────────────
   const [continent, setContinent]                   = useState<string | null>(null);
+  const [profileName, setProfileName]               = useState<string | null>(null);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(false);
   const [isListening, setIsListening]               = useState(false);
   const recognitionRef = useRef<any>(null);
