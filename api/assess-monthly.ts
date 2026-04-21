@@ -18,7 +18,7 @@
  * Sends a rich longitudinal email report to khallinan1@udayton.edu.
  *
  * Required env vars:
- *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY,
+ *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY,
  *   RESEND_API_KEY, CRON_SECRET
  */
 
@@ -1105,13 +1105,19 @@ Return this exact JSON:
 // ─── User Discovery ───────────────────────────────────────────────────────────
 
 async function getAfricanUsersNeedingAssessment(startDate: Date, endDate: Date): Promise<string[]> {
-  const { data: profiles } = await supabase.from("profiles").select("id").eq("continent", "Africa");
+  // Broadened: Africa continent OR vAI org OR Solardero org
+  const VAI_ORG_ID       = 'c0b48eae-67af-449d-8c04-cc6950bf0982';
+  const SOLARDERO_ORG_ID = 'a1b2c3d4-0002-0002-0002-000000000002';
+  const { data: profiles } = await supabase
+    .from("profiles").select("id")
+    .or(`continent.eq.Africa,organization_id.eq.${VAI_ORG_ID},organization_id.eq.${SOLARDERO_ORG_ID}`);
   if (!profiles?.length) return [];
-  const ids = profiles.map((p) => p.id);
+  const ids = profiles.map((p) => p.id).filter((id) => !EXCLUDED_USER_IDS.has(id));
 
+  // Any dashboard activity in window — not gated on chat_history
   const { data: activities } = await supabase
     .from("dashboard").select("user_id").in("user_id", ids)
-    .gte("created_at", startDate.toISOString()).lte("created_at", endDate.toISOString());
+    .gte("updated_at", startDate.toISOString()).lte("updated_at", endDate.toISOString());
   if (!activities?.length) return [];
 
   const activeIds = [...new Set(activities.map((a) => a.user_id).filter(Boolean))] as string[];
@@ -1694,7 +1700,7 @@ function buildEmailHtml(
     ${userCards || `<div style="background:#fef9c3;border-radius:8px;padding:16px;color:#854d0e;font-size:13px;">No new assessments this period.</div>`}
 
     <div style="border-top:1px solid #e5e7eb;padding-top:16px;color:#9ca3af;font-size:11px;">
-      <div>⏱️ ${(durationMs/1000).toFixed(1)}s &nbsp;·&nbsp; 🤖 GPT-4o v2.0 &nbsp;·&nbsp; 🌍 Africa cohort &nbsp;·&nbsp;
+      <div>⏱️ ${(durationMs/1000).toFixed(1)}s &nbsp;·&nbsp; 🤖 Claude Sonnet 4.6 &nbsp;·&nbsp; 🌍 Africa cohort &nbsp;·&nbsp;
         <a href="https://girls-aiing-and-vibing.vercel.app" style="color:#2d6a4f;text-decoration:none;">Open App ↗</a></div>
       <div style="margin-top:3px;">v2.1 captures PUE domain linkage, scaffolding convergence, reasoning levels, metacognition, role readiness, enterprise artifacts, AI Proficiency scores (formal + GPT), and certification summaries.</div>
     </div>
@@ -1715,8 +1721,12 @@ async function sendEmailReport(
   const resendKey = process.env.RESEND_API_KEY;
   if (!resendKey) { console.warn("⚠️  RESEND_API_KEY not set"); return; }
 
+  // Broadened: Africa continent OR vAI org OR Solardero org
+  const VAI_ORG_ID_SEND       = 'c0b48eae-67af-449d-8c04-cc6950bf0982';
+  const SOLARDERO_ORG_ID_SEND = 'a1b2c3d4-0002-0002-0002-000000000002';
   const { data: africanProfiles } = await supabase
-    .from("profiles").select("id, name").eq("continent", "Africa");
+    .from("profiles").select("id, name")
+    .or(`continent.eq.Africa,organization_id.eq.${VAI_ORG_ID_SEND},organization_id.eq.${SOLARDERO_ORG_ID_SEND}`);
 
   const nameMap: Record<string, string> = {};
   for (const p of africanProfiles || []) nameMap[p.id] = p.name || "Unknown";
@@ -1850,8 +1860,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log(`[report] Building email for ${monthLabel}`);
     const startTime = Date.now();
     try {
+      // Broadened: Africa continent OR vAI org OR Solardero org
+      const VAI_ORG_ID_RPT       = 'c0b48eae-67af-449d-8c04-cc6950bf0982';
+      const SOLARDERO_ORG_ID_RPT = 'a1b2c3d4-0002-0002-0002-000000000002';
       const { data: africanProfiles } = await supabase
-        .from("profiles").select("id, name").eq("continent", "Africa");
+        .from("profiles").select("id, name")
+        .or(`continent.eq.Africa,organization_id.eq.${VAI_ORG_ID_RPT},organization_id.eq.${SOLARDERO_ORG_ID_RPT}`);
       const nameMap: Record<string, string> = {};
       for (const p of africanProfiles || []) nameMap[p.id] = p.name || "Unknown";
       const allIds = (africanProfiles || []).map((p) => p.id)
