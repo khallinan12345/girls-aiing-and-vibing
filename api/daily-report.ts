@@ -5,7 +5,7 @@
  * Vercel cron: "0 11 * * *"
  *
  * Reports on Africa-cohort users who were active today:
- *   • Total users with dashboard sessions (chat_history not null)
+ *   • Total users with any dashboard activity today (created or updated)
  *   • Breakdown by category_activity
  *   • AI Playground users and chat counts
  *   • Certification attempt counts (all-time + today)
@@ -118,14 +118,12 @@ async function fetchMetrics(logDate: string, cohortIds: string[], city: string):
       .from("dashboard")
       .select("id, user_id, category_activity, activity")
       .in("user_id", cohortIds)
-      .not("chat_history", "is", null)
       .gte("created_at", dayStartUTC)
       .lte("created_at", dayEndUTC),
     supabase
       .from("dashboard")
       .select("id, user_id, category_activity, activity")
       .in("user_id", cohortIds)
-      .not("chat_history", "is", null)
       .gte("updated_at", dayStartUTC)
       .lte("updated_at", dayEndUTC),
   ]);
@@ -516,7 +514,7 @@ function buildEmailHtml(oloibiri: DailyMetrics, ibiade: DailyMetrics, dateLabel:
       <div>🕛 Generated at 12:00 WAT (11:00 UTC) &nbsp;·&nbsp; 🌍 Oloibiri + Ibiade cohorts &nbsp;·&nbsp;
         <a href="https://girls-aiing-and-vibing.vercel.app" style="color:#2d6a4f;text-decoration:none;">Open App ↗</a>
       </div>
-      <div style="margin-top:3px;">Facilitator accounts excluded. Active users and Playground users are distinct user counts per cohort. Cohorts derived from profiles.city.</div>
+      <div style="margin-top:3px;">Facilitator accounts excluded. Active users and Playground users are distinct user counts per cohort. Cohorts derived from profiles.continent and organization_id (vAI + Solardero).</div>
     </div>
   </div>
 </div>
@@ -539,15 +537,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log(`\n${"─".repeat(50)}\nDAILY REPORT — ${dateLabel}\n${"─".repeat(50)}`);
 
   try {
-    // ── Fetch all Africa profiles with city to split into cohorts ────────────
+    // ── Fetch cohort profiles — Africa continent OR vAI/Solardero org ─────────
+    // Broadened from continent-only so Solardero (Ibiade) users without
+    // continent='Africa' set are still included in the report.
+    const VAI_ORG_ID       = 'c0b48eae-67af-449d-8c04-cc6950bf0982'; // 100 Black Girls / vAI
+    const SOLARDERO_ORG_ID = 'a1b2c3d4-0002-0002-0002-000000000002'; // Solardero / Ibiade
+
     const { data: africaProfiles } = await supabase
       .from("profiles")
-      .select("id, city")
-      .eq("continent", "Africa");
+      .select("id, city, organization_id, continent")
+      .or(`continent.eq.Africa,organization_id.eq.${VAI_ORG_ID},organization_id.eq.${SOLARDERO_ORG_ID}`);
 
     const allProfiles = (africaProfiles || []).filter((p) => !EXCLUDED_USER_IDS.has(p.id));
-    const oloibiriIds = allProfiles.filter((p) => p.city !== "Ibiade").map((p) => p.id);
-    const ibiadeIds   = allProfiles.filter((p) => p.city === "Ibiade").map((p) => p.id);
+    // Ibiade = Solardero org OR city explicitly set to Ibiade
+    const oloibiriIds = allProfiles
+      .filter((p) => p.city !== "Ibiade" && p.organization_id !== SOLARDERO_ORG_ID)
+      .map((p) => p.id);
+    const ibiadeIds = allProfiles
+      .filter((p) => p.city === "Ibiade" || p.organization_id === SOLARDERO_ORG_ID)
+      .map((p) => p.id);
 
     console.log(`  Oloibiri cohort: ${oloibiriIds.length} users`);
     console.log(`  Ibiade cohort:   ${ibiadeIds.length} users`);
