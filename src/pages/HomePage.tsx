@@ -39,9 +39,12 @@ const aiReadySkills = [
   },
 ];
 
+const NPOWER_ORG_ID = 'cd0fc311-2194-485f-b8f4-e3d69022fcde';
+
 const HomePage: React.FC = () => {
   const { user } = useAuth();
   const [continent, setContinent] = useState<string | null>(null);
+  const [userOrgId, setUserOrgId] = useState<string | null>(null);
   const [loadingContinent, setLoadingContinent] = useState(true);
   const [communicationLevel, setCommunicationLevel] = useState<number | null>(null);
   const [mousePosition, setMousePosition] = useState({ x: 50, y: 50 });
@@ -207,11 +210,12 @@ const HomePage: React.FC = () => {
     setLoadingContinent(true);
 
     Promise.all([
-      supabase.from('profiles').select('continent').eq('id', user.id).single(),
+      supabase.from('profiles').select('continent, organization_id').eq('id', user.id).single(),
       supabase.from('user_personality_baseline').select('communication_level').eq('user_id', user.id).maybeSingle(),
     ]).then(([profileRes, baselineRes]) => {
       if (profileRes.error) console.error('Error fetching continent:', profileRes.error);
       setContinent(profileRes.data?.continent ?? null);
+      setUserOrgId(profileRes.data?.organization_id ?? null);
 
       if (!baselineRes.error && baselineRes.data) {
         // Row exists — use the stored level
@@ -228,6 +232,7 @@ const HomePage: React.FC = () => {
   // 2) Determine theme
   const isAfrica       = continent === 'Africa';
   const isNorthAmerica = continent === 'North America';
+  const isNpower       = userOrgId === NPOWER_ORG_ID;
   const backgroundUrl  = isAfrica       ? AFRICA_BACKGROUND
                        : isNorthAmerica ? NORTH_AMERICA_BACKGROUND
                        : US_BACKGROUND;
@@ -466,10 +471,20 @@ const HomePage: React.FC = () => {
           {/* Content */}
           <div className="relative z-10 flex flex-col justify-center items-center min-h-screen px-6 py-20 text-center">
 
-            <div className="mb-8">
-              <Award
-                className="h-12 w-12 mx-auto text-pink-300 mb-4 animate-pulse"
-              />
+            <div className="mb-8 flex flex-col items-center">
+              {/* Platform logo — org-aware */}
+              {isNpower ? (
+                <img src="/npower-logo.svg" alt="NPower" className="h-16 mb-4 object-contain drop-shadow-lg" />
+              ) : isAfrica ? (
+                <img src="/vai-logo.svg" alt="vAI" className="h-16 mb-4 object-contain drop-shadow-lg" />
+              ) : (
+                <div className="flex items-center gap-2 mb-4">
+                  <Award className="h-12 w-12 text-pink-300 animate-pulse" />
+                  <span className="text-3xl font-extrabold bg-gradient-to-r from-pink-300 via-purple-300 to-blue-300 bg-clip-text text-transparent tracking-tight">
+                    AIing &amp; Vibing
+                  </span>
+                </div>
+              )}
               <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold bg-gradient-to-r from-pink-300 via-purple-300 to-blue-300 bg-clip-text text-transparent mb-4">
                 {loadingContinent ? 'Loading…' : content.headline1}
               </h1>
