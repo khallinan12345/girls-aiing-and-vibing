@@ -19,6 +19,7 @@ import { chatJSON } from '../../lib/chatClient';
 import { useAuth } from '../../hooks/useAuth';
 import { useVoice } from '../../hooks/useVoice';
 import { VoiceFallback } from '../../components/VoiceFallback';
+import { useBranding, addBrandingToPDF } from '../../lib/useBranding';
 import {
   PenLine, Award, Trophy, Loader2, Download,
   AlertCircle, Volume2, VolumeX, ChevronDown, ChevronUp,
@@ -255,21 +256,14 @@ const AIContentCreationCertificationPage: React.FC = () => {
 
   // ── Voice ─────────────────────────────────────────────────────────────
   const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin'); // Africa default
+  const branding = useBranding();
 
   useEffect(() => {
-    if (!user?.id) return;
-    supabase.from('profiles').select('continent').eq('id', user.id).single()
-      .then(({ data }) => setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english'));
-  }, [user?.id]);
+    if (!branding.isReady) return;
+    setVoiceMode(branding.variant === 'vai' ? 'pidgin' : 'english');
+  }, [branding.isReady, branding.variant]);
 
-  const {
-    speak: hookSpeak,
-    cancel: cancelSpeech,
-    speaking: isSpeaking,
-    fallbackText,
-    clearFallback,
-    selectedVoice,
-  } = useVoice(voiceMode === 'pidgin');
+    } = useVoice(voiceMode === 'pidgin');
 
   // ── Session ───────────────────────────────────────────────────────────
   const [sessionId,  setSessionId]  = useState<string | null>(null);
@@ -413,7 +407,7 @@ const AIContentCreationCertificationPage: React.FC = () => {
     const contentTypeMeta = CONTENT_TYPES.find(t => t.id === portfolio.contentType);
     const currentValue = portfolio[activeKey] as string;
 
-    const systemPrompt = `You are an expert content creation coach at the Davidson AI Innovation Center in Oloibiri, Nigeria.
+    const systemPrompt = `You are an expert content creation coach at the ${branding.institutionName}.
 You help students create professional, audience-centred content using AI. Your feedback is specific, encouraging, and actionable.
 Respond in clear, simple English suitable for a learner with communication level ${lvl} out of 3.`;
 
@@ -568,8 +562,8 @@ Respond ONLY in this JSON format:
       doc.text('Certificate of Achievement', W / 2, 30, { align: 'center' });
       doc.setFontSize(20); doc.setTextColor(167, 139, 250);
       doc.text(`AI Content Creation Certification — ${certLevel}`, W / 2, 43, { align: 'center' });
+      await addBrandingToPDF({ doc, pageWidth: W, pageHeight: H, footerY: 53, branding, fontSize: 13, textColor: [80, 80, 80] });
       doc.setFontSize(13); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
-      doc.text('Davidson AI Innovation Center · Oloibiri, Nigeria', W / 2, 53, { align: 'center' });
       doc.text('This certificate is proudly presented to', W / 2, 64, { align: 'center' });
 
       doc.setFontSize(36); doc.setFont('helvetica', 'bold'); doc.setTextColor(20, 20, 20);
@@ -612,13 +606,13 @@ Respond ONLY in this JSON format:
       const footerY = H - 22;
       doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(130, 130, 130);
       doc.text(`Awarded: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`, 20, footerY);
-      doc.text('Girls AIing and Vibing Programme', W / 2, footerY, { align: 'center' });
+      doc.text(`${branding.institutionName} Programme`, W / 2, footerY, { align: 'center' });
       doc.text(`Certification ID: CONTENT-${makeId().toUpperCase()}`, W - 20, footerY, { align: 'right' });
 
       doc.save(`${certName.trim().replace(/\s+/g, '-')}-AIContent-Certificate.pdf`);
     } catch (err) { console.error(err); }
     finally { setIsGenCert(false); }
-  }, [certName, assessmentScores, filledCount, portfolio]);
+  }, [certName, assessmentScores, filledCount, portfolio, branding]);
 
   // ─────────────────────────────────────────────────────────────────────
   // RENDER
@@ -1094,7 +1088,7 @@ Respond ONLY in this JSON format:
                         : <><Download size={18} /> Download Certificate</>}
                     </button>
                     <p className="text-center text-xs text-gray-500">
-                      Violet-themed PDF · Davidson AI Innovation Center · Oloibiri, Nigeria
+                      {`Violet-themed PDF · ${branding.institutionName}`}
                     </p>
                   </div>
                 </>

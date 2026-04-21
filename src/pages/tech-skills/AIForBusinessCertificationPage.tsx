@@ -19,6 +19,7 @@ import { chatJSON } from '../../lib/chatClient';
 import { useAuth } from '../../hooks/useAuth';
 import { useVoice } from '../../hooks/useVoice';
 import { VoiceFallback } from '../../components/VoiceFallback';
+import { useBranding, addBrandingToPDF } from '../../lib/useBranding';
 import {
   Briefcase, Award, Trophy, XCircle, Loader2,
   Download, AlertCircle, Volume2, VolumeX,
@@ -181,23 +182,15 @@ const AIForBusinessCertificationPage: React.FC = () => {
   const [communicationLevel, setCommunicationLevel] = useState(1);
 
   // ── Page narration voice ──────────────────────────────────────────────
-  const [voiceMode,     setVoiceMode]     = useState<'english' | 'pidgin'>('pidgin'); // Africa default
+  const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin'); // Africa default
+  const branding = useBranding();
 
-  // Set voiceMode from profiles.continent once user loads
   useEffect(() => {
-    if (!user?.id) return;
-    supabase.from('profiles').select('continent').eq('id', user.id).single()
-      .then(({ data }) => setVoiceMode(data?.continent === 'Africa' ? 'pidgin' : 'english'));
-  }, [user?.id]);
+    if (!branding.isReady) return;
+    setVoiceMode(branding.variant === 'vai' ? 'pidgin' : 'english');
+  }, [branding.isReady, branding.variant]);
 
-  const {
-    speak: hookSpeak,
-    cancel: cancelSpeech,
-    speaking: isSpeaking,
-    fallbackText,
-    clearFallback,
-    selectedVoice,
-  } = useVoice(voiceMode === 'pidgin');
+    } = useVoice(voiceMode === 'pidgin');
 
   // ── Session ───────────────────────────────────────────────────────────
   const [sessionId,   setSessionId]   = useState<string | null>(null);
@@ -501,8 +494,8 @@ Respond ONLY in this JSON format:
       doc.text('Certificate of Achievement', W / 2, 30, { align: 'center' });
       doc.setFontSize(20); doc.setTextColor(245, 158, 11);
       doc.text(`AI for Business Certification — ${certLevel}`, W / 2, 43, { align: 'center' });
+      await addBrandingToPDF({ doc, pageWidth: W, pageHeight: H, footerY: 53, branding, fontSize: 13, textColor: [80, 80, 80] });
       doc.setFontSize(13); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
-      doc.text('Davidson AI Innovation Center · Oloibiri, Nigeria', W / 2, 53, { align: 'center' });
       doc.text('This certificate is proudly presented to', W / 2, 64, { align: 'center' });
 
       doc.setFontSize(36); doc.setFont('helvetica', 'bold'); doc.setTextColor(20, 20, 20);
@@ -545,13 +538,13 @@ Respond ONLY in this JSON format:
       const footerY = H - 22;
       doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(130, 130, 130);
       doc.text(`Awarded: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`, 20, footerY);
-      doc.text('Girls AIing and Vibing Programme', W / 2, footerY, { align: 'center' });
+      doc.text(`${branding.institutionName} Programme`, W / 2, footerY, { align: 'center' });
       doc.text(`Certification ID: BIZ-${makeId().toUpperCase()}`, W - 20, footerY, { align: 'right' });
 
       doc.save(`${certName.trim().replace(/\s+/g, '-')}-AIBusiness-Certificate.pdf`);
     } catch (err) { console.error(err); }
     finally { setIsGenCert(false); }
-  }, [certName, assessmentScores, filledCount, canvas.offer]);
+  }, [certName, assessmentScores, filledCount, canvas.offer, branding]);
 
   // ─────────────────────────────────────────────────────────────────────
   // RENDER
@@ -1053,7 +1046,7 @@ Respond ONLY in this JSON format:
                     <div className="my-4 h-px bg-amber-500/30" />
                     <p className="text-gray-400 text-xs">Awarded to</p>
                     <p className="text-2xl font-bold text-white mt-1">{certName || '[ Your Name ]'}</p>
-                    <p className="text-gray-400 text-xs mt-1">Davidson AI Innovation Center · Oloibiri, Nigeria</p>
+                    <p className="text-gray-400 text-xs mt-1">{branding.institutionName}</p>
                     {canvas.offer.trim() && (
                       <p className="text-amber-200/70 text-xs mt-1 italic">"{canvas.offer.trim().slice(0, 80)}{canvas.offer.length > 80 ? '…' : ''}"</p>
                     )}
