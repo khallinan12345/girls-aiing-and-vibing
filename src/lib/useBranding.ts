@@ -5,19 +5,20 @@
  * based on the signed-in user's profiles.organization_id and profiles.continent.
  *
  * Priority:
- *   1. NPower org                  → NPower branding
- *   2. 100 Black Girls in STEM org → Girls AI-ing branding
- *   3. Africa continent            → vAI branding
- *   4. Everyone else               → AIing & Vibing branding (default)
+ * 1. NPower org                  → NPower branding
+ * 2. 100 Black Girls in STEM org → Girls AI-ing branding
+ * 3. Solardero org               → Solardero branding
+ * 4. Africa continent            → vAI branding
+ * 5. Everyone else               → AIing & Vibing branding (default)
  *
  * Usage (in any certification page):
  *
- *   import { useBranding, addBrandingToPDF } from '../../lib/useBranding';
+ * import { useBranding, addBrandingToPDF } from '../../lib/useBranding';
  *
- *   const { institutionName, logoPath, isReady } = useBranding();
+ * const { institutionName, logoPath, isReady } = useBranding();
  *
- *   // Inside generateCertificate():
- *   await addBrandingToPDF(doc, { pageWidth, pageHeight, footerY, branding });
+ * // Inside generateCertificate():
+ * await addBrandingToPDF(doc, { pageWidth, pageHeight, footerY, branding });
  */
 
 import { useState, useEffect } from 'react';
@@ -26,12 +27,13 @@ import { useAuth } from '../hooks/useAuth';
 
 // ─── Organisation constants ────────────────────────────────────────────────────
 
-export const NPOWER_ORG_ID  = 'cd0fc311-2194-485f-b8f4-e3d69022fcde';
-export const BGS100_ORG_ID  = 'c0b48eae-67af-449d-8c04-cc6950bf0982';
+export const NPOWER_ORG_ID    = 'cd0fc311-2194-485f-b8f4-e3d69022fcde';
+export const BGS100_ORG_ID    = 'c0b48eae-67af-449d-8c04-cc6950bf0982';
+export const SOLARDERO_ORG_ID = 'a1b2c3d4-0002-0002-0002-000000000002';
 
 // ─── Branding types ────────────────────────────────────────────────────────────
 
-export type BrandingVariant = 'npower' | 'girls-ai-ing' | 'vai' | 'default';
+export type BrandingVariant = 'npower' | 'girls-ai-ing' | 'solardero' | 'vai' | 'default';
 
 export interface Branding {
   /** Which variant is active — useful for conditional UI */
@@ -41,7 +43,7 @@ export interface Branding {
   institutionName: string;
 
   /**
-   * Path to the organisation logo SVG served from /public.
+   * Path to the organisation logo SVG/JPG/PNG served from /public.
    * Null for text-only variants (girls-ai-ing and default).
    */
   logoPath: string | null;
@@ -71,6 +73,12 @@ const BRANDING_MAP: Record<BrandingVariant, Omit<Branding, 'isReady'>> = {
     logoPath: null,
     textColor: 'text-pink-600',
   },
+  solardero: {
+    variant: 'solardero',
+    institutionName: 'Solardero',
+    logoPath: '/solardero_logo.jpg',
+    textColor: 'text-yellow-600',
+  },
   vai: {
     variant: 'vai',
     institutionName: 'vAI — Davidson AI Innovation Center',
@@ -91,9 +99,10 @@ export const resolveVariant = (
   organizationId: string | null,
   continent: string | null,
 ): BrandingVariant => {
-  if (organizationId === NPOWER_ORG_ID)  return 'npower';
-  if (organizationId === BGS100_ORG_ID)  return 'girls-ai-ing';
-  if (continent === 'Africa')            return 'vai';
+  if (organizationId === NPOWER_ORG_ID)    return 'npower';
+  if (organizationId === BGS100_ORG_ID)    return 'girls-ai-ing';
+  if (organizationId === SOLARDERO_ORG_ID) return 'solardero';
+  if (continent === 'Africa')              return 'vai';
   return 'default';
 };
 
@@ -158,11 +167,11 @@ interface PDFBrandingOptions {
  * Call this inside generateCertificate() in place of the hardcoded Davidson text.
  *
  * Example:
- *   await addBrandingToPDF(doc, {
- *     pageWidth, pageHeight,
- *     footerY: pageHeight - 34.35,
- *     branding,
- *   });
+ * await addBrandingToPDF(doc, {
+ * pageWidth, pageHeight,
+ * footerY: pageHeight - 34.35,
+ * branding,
+ * });
  */
 export const addBrandingToPDF = async (options: PDFBrandingOptions): Promise<void> => {
   const {
@@ -193,7 +202,12 @@ export const addBrandingToPDF = async (options: PDFBrandingOptions): Promise<voi
         const logoX = (pageWidth - logoW) / 2;
         const logoY = footerY - logoH - 2; // 2 mm gap above text
 
-        const ext = branding.logoPath.endsWith('.svg') ? 'SVG' : 'PNG';
+        // Check for extension type to support JPG and SVG
+        let ext = 'PNG';
+        const lowerPath = branding.logoPath.toLowerCase();
+        if (lowerPath.endsWith('.svg')) ext = 'SVG';
+        else if (lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')) ext = 'JPEG';
+
         doc.addImage(base64, ext, logoX, logoY, logoW, logoH);
       }
     } catch (err) {
