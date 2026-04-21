@@ -263,7 +263,14 @@ const AIContentCreationCertificationPage: React.FC = () => {
     setVoiceMode(branding.variant === 'vai' ? 'pidgin' : 'english');
   }, [branding.isReady, branding.variant]);
 
-    } = useVoice(voiceMode === 'pidgin');
+  const {
+    speak: hookSpeak,
+    cancel: cancelSpeech,
+    speaking: isSpeaking,
+    fallbackText,
+    clearFallback,
+    selectedVoice,
+  } = useVoice(voiceMode === 'pidgin');
 
   // ── Session ───────────────────────────────────────────────────────────
   const [sessionId,  setSessionId]  = useState<string | null>(null);
