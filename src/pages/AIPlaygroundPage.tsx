@@ -557,7 +557,7 @@ const AIPlaygroundPage: React.FC = () => {
     if (!user?.id) return;
     supabase
       .from('profiles')
-      .select('continent, ai_playground_model, full_name')
+      .select('continent, full_name')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
@@ -710,7 +710,7 @@ No explanation before or after — just the fenced block. Preserve all logic not
             role: 'user',
             content: `Here is the current code (${artifact.title}):\n\`\`\`${artifact.type === 'code' ? 'tsx' : 'text'}\n${artifact.content}\n\`\`\`\n\nEdit instruction: ${instruction}`,
           }],
-          max_tokens:  64000,
+          max_tokens:  16000,
           temperature: 0.2,
         }),
       });
@@ -779,7 +779,7 @@ No explanation before or after — just the fenced block. Preserve all logic not
           playgroundModel: playgroundModel,
           messages:        apiMessages,
           system:          SYSTEM_PROMPT,
-          max_tokens:      64000,
+          max_tokens:      16000,
           temperature:     0.3,
         }),
       });
@@ -1033,22 +1033,10 @@ No explanation before or after — just the fenced block. Preserve all logic not
           )}
 
           {/* Header */}
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-              <Bot size={13} className="text-white" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-800 leading-tight">
-                {activeChat?.title ?? 'AI Playground'}
-              </p>
-              {profileName && (
-                <p className="text-xs text-purple-500 leading-tight">
-                  Welcome back, {profileName.split(' ')[0]} 👋
-                </p>
-              )}
-            </div>
-          </div>
-
+          <div className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center"><Bot size={13} className="text-white" /></div>
+              <p className="text-sm font-semibold text-gray-800">{activeChat?.title ?? 'AI Playground'}</p>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => navigate('/')} className="flex items-center gap-1.5 text-sm font-bold text-purple-700 px-3 py-1.5 rounded-lg bg-purple-100 hover:bg-purple-200 transition-colors border border-purple-200">
