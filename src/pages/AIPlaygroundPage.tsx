@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabaseClient';
 import { useVoice } from '../hooks/useVoice';
 import { VoiceFallback } from '../components/VoiceFallback';
+import { useBranding } from '../lib/useBranding';
 import {
   Plus, Search, Trash2, Download, Send, Paperclip,
   ChevronLeft, ChevronRight, Edit3, Check, X,
@@ -267,7 +268,11 @@ const ArtifactPanelView: React.FC<{
   sessionHistory: HistoryBlock[];
   onSelectHistory: (block: HistoryBlock) => void;
   onClose: () => void;
-}> = ({ artifact, sessionHistory, onSelectHistory, onClose }) => {
+  onEdit: () => void;
+  editInput: string;
+  setEditInput: (v: string) => void;
+  isEditing: boolean;
+}> = ({ artifact, sessionHistory, onSelectHistory, onClose, onEdit, editInput, setEditInput, isEditing }) => {
   const [copied, setCopied]       = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -421,6 +426,30 @@ const ArtifactPanelView: React.FC<{
           </div>
         )}
       </div>
+
+      {/* ── Artifact edit bar ──────────────────────────────────────────────── */}
+      <div className="flex-shrink-0 border-t border-gray-700 bg-gray-900 px-3 py-2">
+        <div className="flex items-center gap-2 bg-gray-800 border border-gray-600 rounded-xl px-3 py-2 focus-within:border-purple-500 transition-colors">
+          <Edit3 size={13} className="text-purple-400 flex-shrink-0" />
+          <input
+            value={editInput}
+            onChange={e => setEditInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEdit(); } }}
+            placeholder="Edit this code… (e.g. add error handling, rename function)"
+            disabled={isEditing}
+            className="flex-1 bg-transparent text-xs text-gray-200 placeholder-gray-500 outline-none"
+          />
+          <button
+            onClick={onEdit}
+            disabled={!editInput.trim() || isEditing}
+            className="flex-shrink-0 w-7 h-7 rounded-lg bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-white disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+            title="Apply edit"
+          >
+            {isEditing ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
+          </button>
+        </div>
+        <p className="text-xs text-gray-600 mt-1 text-center">Enter to apply · Claude rewrites the full code with your change</p>
+      </div>
     </div>
   );
 };
@@ -474,6 +503,7 @@ Be warm, precise, and encouraging. The user is capable — help them get there.`
 const AIPlaygroundPage: React.FC = () => {
   const { user }  = useAuth();
   const navigate  = useNavigate();
+  const branding  = useBranding();
 
   const [sidebarOpen, setSidebarOpen]             = useState(true);
   const [searchQuery, setSearchQuery]             = useState('');
@@ -486,6 +516,8 @@ const AIPlaygroundPage: React.FC = () => {
   const [sending, setSending]                     = useState(false);
   const [attachment, setAttachment]               = useState<{ name: string; content: string; type: string } | null>(null);
   const [artifact, setArtifact]                   = useState<ArtifactPanel | null>(null);
+  const [artifactEditInput, setArtifactEditInput] = useState('');
+  const [artifactEditing, setArtifactEditing]     = useState(false);
   const [playgroundModel, setPlaygroundModel]     = useState<string>('claude-haiku-4-5-20251001');
   const [modelLoaded, setModelLoaded]             = useState(false);
   const [showReflection, setShowReflection]       = useState(false);
@@ -525,11 +557,12 @@ const AIPlaygroundPage: React.FC = () => {
     if (!user?.id) return;
     supabase
       .from('profiles')
-      .select('continent, ai_playground_model')
+      .select('continent, ai_playground_model, full_name')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
         if (data?.continent) setContinent(data.continent);
+        if (data?.full_name) setProfileName(data.full_name);
         setPlaygroundModel(data?.ai_playground_model || 'claude-haiku-4-5-20251001');
         setModelLoaded(true);
         console.log('[Playground] model loaded:', data?.ai_playground_model ?? 'haiku (default)');
@@ -657,7 +690,63 @@ const AIPlaygroundPage: React.FC = () => {
     });
   }, []);
 
-  // ── Send message ──────────────────────────────────────────────────────────────
+  // ── Edit code in artifact panel ───────────────────────────────────────────────
+  const handleArtifactEdit = async () => {
+    if (!artifactEditInput.trim() || !artifact || artifactEditing) return;
+    setArtifactEditing(true);
+    const instruction = artifactEditInput.trim();
+    setArtifactEditInput('');
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page:            'AIPlaygroundPage',
+          playgroundModel: playgroundModel,
+          system: `You are a precise code editor. The user will give you code and an edit instruction.
+Return ONLY the complete updated code inside a single fenced code block with the correct language tag.
+No explanation before or after — just the fenced block. Preserve all logic not explicitly changed.`,
+          messages: [{
+            role: 'user',
+            content: `Here is the current code (${artifact.title}):\n\`\`\`${artifact.type === 'code' ? 'tsx' : 'text'}\n${artifact.content}\n\`\`\`\n\nEdit instruction: ${instruction}`,
+          }],
+          max_tokens:  64000,
+          temperature: 0.2,
+        }),
+      });
+      const rawText = await res.text();
+      let data: any;
+      try { data = JSON.parse(rawText); } catch { throw new Error(`API error: ${rawText.slice(0, 200)}`); }
+      if (!res.ok) throw new Error(data?.error ?? `API error ${res.status}`);
+      const responseText: string = data?.content?.[0]?.text ?? data?.choices?.[0]?.message?.content ?? '';
+      const parsed = parseCodeBlocks(responseText);
+      if (parsed.length > 0) {
+        const updated = parsed[0];
+        const newId = `edit-${Date.now()}`;
+        const historyBlock: HistoryBlock = {
+          id: newId,
+          language: updated.language,
+          content: updated.content,
+          label: `Edited: ${instruction.slice(0, 60)}`,
+          messageIndex: -1,
+          blockIndex: 0,
+        };
+        setSessionCodeHistory(prev => [...prev, historyBlock]);
+        setArtifact({
+          type: 'code',
+          content: updated.content,
+          title: artifact.title,
+          historyId: newId,
+        });
+      }
+    } catch (err) {
+      console.error('[Playground] artifact edit error:', err);
+    } finally {
+      setArtifactEditing(false);
+    }
+  };
+
+
   const handleSend = async () => {
     if ((!userInput.trim() && !attachment) || sending || !user?.id) return;
     const userMsg: ChatMessage = {
@@ -690,7 +779,7 @@ const AIPlaygroundPage: React.FC = () => {
           playgroundModel: playgroundModel,
           messages:        apiMessages,
           system:          SYSTEM_PROMPT,
-          max_tokens:      8000,
+          max_tokens:      64000,
           temperature:     0.3,
         }),
       });
@@ -973,11 +1062,18 @@ const AIPlaygroundPage: React.FC = () => {
             {messages.length === 0 && !sending && (
               <div className="flex flex-col items-center justify-center h-full text-center pb-20">
                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center mb-4 shadow-lg"><Bot size={28} className="text-white" /></div>
-                <h2 className="text-2xl font-bold text-gray-800 mb-2">AI Playground</h2>
+                <h2 className="text-2xl font-bold text-gray-800 mb-2">
+                  {profileName ? `Welcome, ${profileName.split(' ')[0]}!` : 'AI Playground'}
+                </h2>
                 <p className="text-gray-500 text-sm max-w-sm leading-relaxed">
                   Ask a question, explore an idea, or get help with your code.<br />
                   I'll help you think it through — not just give you the answer.
                 </p>
+                {branding.isReady && (
+                  <p className="mt-3 text-xs italic text-purple-600 max-w-xs">
+                    Built for the young people using {branding.institutionName}.
+                  </p>
+                )}
               </div>
             )}
 
@@ -1103,6 +1199,10 @@ const AIPlaygroundPage: React.FC = () => {
               sessionHistory={sessionCodeHistory}
               onSelectHistory={selectFromHistory}
               onClose={() => setArtifact(null)}
+              onEdit={handleArtifactEdit}
+              editInput={artifactEditInput}
+              setEditInput={setArtifactEditInput}
+              isEditing={artifactEditing}
             />
           </div>
         )}
