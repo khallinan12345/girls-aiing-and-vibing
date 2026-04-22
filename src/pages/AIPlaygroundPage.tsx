@@ -518,7 +518,7 @@ const AIPlaygroundPage: React.FC = () => {
   const [artifact, setArtifact]                   = useState<ArtifactPanel | null>(null);
   const [artifactEditInput, setArtifactEditInput] = useState('');
   const [artifactEditing, setArtifactEditing]     = useState(false);
-  const [playgroundModel, setPlaygroundModel]     = useState<string>('claude-haiku-4-5-20251001');
+  const [playgroundModel, setPlaygroundModel]     = useState<string>('claude-sonnet-4-6');
   const [modelLoaded, setModelLoaded]             = useState(false);
   const [showReflection, setShowReflection]       = useState(false);
   const [isDragging, setIsDragging]               = useState(false);
@@ -563,7 +563,7 @@ const AIPlaygroundPage: React.FC = () => {
       .then(({ data }) => {
         if (data?.continent) setContinent(data.continent);
         if (data?.full_name) setProfileName(data.full_name);
-        setPlaygroundModel(data?.ai_playground_model || 'claude-haiku-4-5-20251001');
+        setPlaygroundModel('claude-sonnet-4-6');
         setModelLoaded(true);
         console.log('[Playground] model loaded:', data?.ai_playground_model ?? 'haiku (default)');
       })
