@@ -39,7 +39,6 @@ export default async function handler(req) {
     model       = 'claude-sonnet-4-6',
     max_tokens  = 16000,
     temperature = 0.3,
-    userId      = null,
   } = body;
 
   if (!messages || !Array.isArray(messages)) {
@@ -95,34 +94,12 @@ export default async function handler(req) {
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
 
-  // Send a keep-alive ping every 5 seconds while waiting for Anthropic to respond.
-  // Vercel Edge has a 30s wall-clock limit — pinging prevents premature 504s.
-  let keepAliveInterval = null;
-  const startKeepAlive = () => {
-    keepAliveInterval = setInterval(async () => {
-      try {
-        await writer.write(encoder.encode(': keep-alive\n\n'));
-      } catch { /* writer may be closed */ }
-    }, 5000);
-  };
-  const stopKeepAlive = () => {
-    if (keepAliveInterval) { clearInterval(keepAliveInterval); keepAliveInterval = null; }
-  };
-
   // Process the upstream stream in the background
   (async () => {
-    startKeepAlive();
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder();
     let sseBuffer = '';
     let fullText = '';
-    let pendingChunk = ''; // batch tokens before flushing to client
-
-    const flush = async () => {
-      if (!pendingChunk) return;
-      await writer.write(encoder.encode(`data: ${JSON.stringify({ chunk: pendingChunk })}\n\n`));
-      pendingChunk = '';
-    };
 
     try {
       while (true) {
@@ -142,49 +119,14 @@ export default async function handler(req) {
             if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
               const chunk = evt.delta.text;
               fullText += chunk;
-              pendingChunk += chunk;
-              // Flush every ~200 chars instead of every token
-              if (pendingChunk.length >= 200) await flush();
+              await writer.write(encoder.encode(`data: ${JSON.stringify({ chunk })}\n\n`));
             }
           } catch { /* skip malformed lines */ }
         }
       }
-      // Flush any remaining buffered content
-      await flush();
     } finally {
-      stopKeepAlive();
-      // Always send done event with complete fullText so client can use it
+      // Always send done event and close
       await writer.write(encoder.encode(`data: ${JSON.stringify({ done: true, fullText })}\n\n`));
-
-      // Log cost to Supabase (fire-and-forget)
-      const supabaseUrl = process.env.SUPABASE_URL;
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (supabaseUrl && supabaseKey && fullText) {
-        // Rough token estimate: 1 token ≈ 4 chars
-        const estimatedOutputTokens = Math.ceil(fullText.length / 4);
-        fetch(`${supabaseUrl}/rest/v1/api_cost_log`, {
-          method: 'POST',
-          headers: {
-            'Content-Type':  'application/json',
-            'apikey':        supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Prefer':        'return=minimal',
-          },
-          body: JSON.stringify({
-            page:               'AIPlaygroundPage',
-            provider:           'anthropic',
-            model,
-            input_tokens:       0, // not tracked in edge stream
-            output_tokens:      estimatedOutputTokens,
-            cache_hit_tokens:   0,
-            cache_write_tokens: 0,
-            estimated_cost_usd: (estimatedOutputTokens / 1_000_000) * 15.0,
-            user_id:            userId || null,
-            city:               null,
-          }),
-        }).catch(() => {});
-      }
-
       await writer.close();
     }
   })();

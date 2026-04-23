@@ -280,6 +280,20 @@ const MessageContent: React.FC<{
         if (seg.type === 'text') return <React.Fragment key={i}>{renderTextSegment(seg.content)}</React.Fragment>;
         const block = parsedBlocks[seg.index];
         if (!block) return null;
+        // Large blocks (full files) show a compact link — they're in the artifact panel
+        const lineCount = block.content.split('\n').length;
+        if (lineCount > 50) {
+          return (
+            <div key={i} className="my-2 flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-600">
+              <Code2 size={13} className="text-purple-400 flex-shrink-0" />
+              <span className="font-medium truncate">{block.label || `${block.language} file`}</span>
+              <span className="text-gray-400">· {lineCount} lines</span>
+              <button onClick={() => onOpenBlock(seg.index)} className="ml-auto text-purple-600 hover:text-purple-800 font-semibold whitespace-nowrap">
+                View in panel →
+              </button>
+            </div>
+          );
+        }
         return (
           <InChatCodeBlock
             key={i}
@@ -825,7 +839,7 @@ const AIPlaygroundPage: React.FC = () => {
         }],
         `You are a precise code editor. Return ONLY the complete updated code inside a single fenced code block with the correct language tag. No explanation before or after — just the fenced block. Preserve all logic not explicitly changed.`,
         playgroundModel,
-        16000,
+        32000,
         0.2,
         user?.id,
       );
@@ -922,7 +936,7 @@ const AIPlaygroundPage: React.FC = () => {
         apiMessages,
         SYSTEM_PROMPT,
         playgroundModel,
-        16000,
+        32000,
         0.3,
         user?.id,
       );
@@ -997,7 +1011,7 @@ const AIPlaygroundPage: React.FC = () => {
       estTokensOut = Math.ceil(assistantText.length / 4);
       const assistantMsg: ChatMessage = {
         role: 'assistant',
-        content: assistantText.replace(/\u0000/g, ''),  // full text including code — needed for history rendering
+        content: sanitize(assistantText),  // full text including code — needed for history rendering
         timestamp: new Date().toISOString(),
         tokensIn:  estTokensIn,
         tokensOut: estTokensOut,
