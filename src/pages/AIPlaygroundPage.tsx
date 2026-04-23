@@ -825,89 +825,100 @@ No explanation before or after — just the fenced block. Preserve all logic not
       // ── Consume SSE stream ──────────────────────────────────────────────────
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
-      let buffer = '';
-      let fullText = '';       // complete raw response (prose + code)
-      let chatText = '';       // prose only — shown in chat bubble
-      let codeText = '';       // code inside fences — streamed to artifact
+      let sseBuffer = '';     // SSE framing buffer
+      let lineBuffer = '';    // accumulates partial lines across chunks
+      let fullText = '';      // complete raw response
+      let chatText = '';      // prose only → chat bubble
+      let codeText = '';      // code inside fences → artifact panel
       let inCodeFence = false;
-      let streamFlushBuffer = '';
-      let artifactId = `streaming-${Date.now()}`;
+      let fenceOpened = false;
+      const artifactId = `streaming-${Date.now()}`;
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop()!;
+        sseBuffer += decoder.decode(value, { stream: true });
+        const sseLines = sseBuffer.split('\n');
+        sseBuffer = sseLines.pop()!; // keep incomplete SSE line
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const raw = line.slice(6).trim();
+        for (const sseLine of sseLines) {
+          if (!sseLine.startsWith('data: ')) continue;
+          const raw = sseLine.slice(6).trim();
           try {
             const evt = JSON.parse(raw);
             if (evt.done) {
-              fullText = evt.fullText ?? (fullText + streamFlushBuffer);
-              streamFlushBuffer = '';
+              fullText = evt.fullText ?? fullText;
               break;
             }
             if (!evt.chunk) continue;
 
-            const chunk: string = evt.chunk;
-            fullText += chunk;
-            streamFlushBuffer += chunk;
+            // Accumulate into fullText and process line-by-line
+            const incoming = evt.chunk as string;
+            fullText += incoming;
+            lineBuffer += incoming;
 
-            // Detect fence transitions character-by-character within this chunk
-            for (let i = 0; i < chunk.length; i++) {
-              if (!inCodeFence) {
-                // Check for opening fence (``` at start of a line)
-                const remaining = fullText;
-                const lastNewline = remaining.lastIndexOf('\n', remaining.length - (chunk.length - i) - 1);
-                const lineStart = remaining.slice(lastNewline + 1);
-                if (lineStart.startsWith('```') && !lineStart.startsWith('````')) {
-                  inCodeFence = true;
-                  setArtifactStreaming(true);
-                  // Open artifact panel with empty content so it appears immediately
-                  setArtifact(prev => ({
-                    type: 'code',
-                    content: '',
-                    title: 'Generating…',
-                    historyId: artifactId,
-                    ...(prev ? { title: prev.title } : {}),
-                  }));
-                }
-              }
-            }
+            // Split on newlines — process complete lines, keep partial last line
+            const contentLines = lineBuffer.split('\n');
+            lineBuffer = contentLines.pop()!; // incomplete last line stays buffered
 
-            if (inCodeFence) {
-              // Check if closing fence arrived in this chunk
-              if (fullText.includes('\n```', fullText.indexOf('```') + 3)) {
+            for (const contentLine of contentLines) {
+              const trimmed = contentLine.trim();
+
+              if (!inCodeFence && trimmed.startsWith('```') && trimmed.length > 3) {
+                // Opening fence detected (e.g. ```tsx)
+                inCodeFence = true;
+                fenceOpened = true;
+                setArtifactStreaming(true);
+                setArtifact(prev => ({
+                  type: 'code',
+                  content: '',
+                  title: 'Generating…',
+                  historyId: artifactId,
+                  ...(prev && prev.historyId !== artifactId ? { title: prev.title } : {}),
+                }));
+              } else if (inCodeFence && trimmed === '```') {
+                // Closing fence
                 inCodeFence = false;
                 setArtifactStreaming(false);
-              }
-              codeText += chunk;
-              // Stream code live to artifact panel every ~150 chars
-              if (codeText.length % 150 < chunk.length) {
+                // Flush final code to artifact
                 setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
-              }
-            } else {
-              chatText += chunk;
-              // Stream prose to chat bubble every ~200 chars
-              if (streamFlushBuffer.length > 200) {
-                streamFlushBuffer = '';
-                const streamMsg: ChatMessage = { role: 'assistant', content: chatText + '▌', timestamp: new Date().toISOString() };
+              } else if (inCodeFence) {
+                codeText += contentLine + '\n';
+                // Live-stream code to artifact every line
+                setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
+              } else {
+                chatText += contentLine + '\n';
+                // Live-stream prose to chat bubble
+                const streamMsg: ChatMessage = {
+                  role: 'assistant',
+                  content: chatText + '▌',
+                  timestamp: new Date().toISOString(),
+                };
                 setChats(prev => {
-                  const target = prev.find(c => c.id === (activeChatId ?? '__streaming__'));
+                  const target = prev.find(c => c.id === activeChatId);
                   if (!target) return prev;
-                  return prev.map(c => c.id === target.id ? { ...c, messages: [...updatedMessages, streamMsg] } : c);
+                  return prev.map(c =>
+                    c.id === target.id
+                      ? { ...c, messages: [...updatedMessages, streamMsg] }
+                      : c
+                  );
                 });
               }
             }
-          } catch { /* skip malformed lines */ }
+          } catch { /* skip malformed SSE lines */ }
         }
       }
       // ── Stream complete ─────────────────────────────────────────────────────
       setArtifactStreaming(false);
-      // Use fullText for parsing (authoritative), chatText for chat bubble display
+      // Flush any remaining lineBuffer content
+      if (lineBuffer.trim()) {
+        if (inCodeFence) {
+          codeText += lineBuffer;
+          setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
+        } else {
+          chatText += lineBuffer;
+        }
+      }
       const assistantText = fullText;
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: chatText || assistantText, timestamp: new Date().toISOString() };
@@ -1186,7 +1197,9 @@ No explanation before or after — just the fenced block. Preserve all logic not
               <div className="flex flex-col items-center justify-center h-full text-center pb-20">
                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center mb-4 shadow-lg"><Bot size={28} className="text-white" /></div>
                 <h2 className="text-2xl font-bold text-gray-800 mb-2">
-                  {profileName ? `Welcome, ${profileName.split(' ')[0]}!` : 'AI Playground'}
+                  {profileName
+                    ? `Welcome, ${profileName.split(' ')[0]} to the AI Playground`
+                    : 'Welcome to the AI Playground'}
                 </h2>
                 <p className="text-gray-500 text-sm max-w-sm leading-relaxed">
                   Ask a question, explore an idea, or get help with your code.<br />
