@@ -272,7 +272,8 @@ const ArtifactPanelView: React.FC<{
   editInput: string;
   setEditInput: (v: string) => void;
   isEditing: boolean;
-}> = ({ artifact, sessionHistory, onSelectHistory, onClose, onEdit, editInput, setEditInput, isEditing }) => {
+  isStreaming: boolean;
+}> = ({ artifact, sessionHistory, onSelectHistory, onClose, onEdit, editInput, setEditInput, isEditing, isStreaming }) => {
   const [copied, setCopied]       = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -307,6 +308,12 @@ const ArtifactPanelView: React.FC<{
             ? <Code2 size={15} className="text-purple-400 flex-shrink-0" />
             : <FileText size={15} className="text-blue-400 flex-shrink-0" />}
           <span className="text-sm font-medium text-gray-200 truncate">{artifact.title}</span>
+          {isEditing || isStreaming ? (
+            <span className="flex items-center gap-1 text-xs text-purple-400 flex-shrink-0">
+              <Loader2 size={11} className="animate-spin" />
+              {isStreaming ? 'Writing…' : 'Applying…'}
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
@@ -485,16 +492,18 @@ APPROPRIATE USE
 - No content for other platforms or in someone else's name unless clearly a learning exercise.
 - If conversation drifts, redirect: "Let's bring this back to what you're working on."
 
-CODE FORMAT — follow exactly:
+RESPONSE STRUCTURE — follow exactly every time you return code:
 
-1. LABEL (bold, own line): **In src/pages/Foo.tsx, replace lines 42–55 with:**
-2. CODE BLOCK: fenced with correct language tag (\`\`\`tsx, \`\`\`bash, etc.) — self-contained, no explanation inside
-3. CURSOR HINT (line immediately after closing fence): <!-- CURSOR: search for "unique line near the change" -->
-   - Replacement: use a distinctive line from the replaced code
-   - Insertion: use a distinctive line just before the insertion point
-   - New file: omit hint
-4. FOLLOW-UP: plain-English next steps after the block (e.g. "Then run \`npm install\`")
-5. UNDERSTANDING CHECK: ask the user what they think the code does before moving on
+1. EXPLANATION FIRST (plain English, no code): Describe what you are about to change and why — 2 to 5 sentences. This text appears in the chat.
+2. THEN THE CODE BLOCK — ALL code goes inside a single fenced block. No code outside the fence, ever.
+   - LABEL (bold, own line before the fence): **In src/pages/Foo.tsx, replace lines 42–55 with:**
+   - CODE FENCE: opened with correct language tag (\`\`\`tsx, \`\`\`bash, etc.), closed with \`\`\`
+   - CURSOR HINT (line immediately after closing fence): <!-- CURSOR: search for "unique line near the change" -->
+3. FOLLOW-UP after the block: plain-English next steps (e.g. "Then run \`npm install\`")
+4. UNDERSTANDING CHECK: ask the user what they think the code does before moving on
+
+If the user asks for an entire file, return the complete file in one fenced block with no truncation.
+Never split code across multiple fenced blocks unless the user explicitly asks for separate files.
 
 Be warm, precise, and encouraging. The user is capable — help them get there.`;
 // ══════════════════════════════════════════════════════════════════════════════
@@ -518,6 +527,7 @@ const AIPlaygroundPage: React.FC = () => {
   const [artifact, setArtifact]                   = useState<ArtifactPanel | null>(null);
   const [artifactEditInput, setArtifactEditInput] = useState('');
   const [artifactEditing, setArtifactEditing]     = useState(false);
+  const [artifactStreaming, setArtifactStreaming]  = useState(false);
   const [playgroundModel, setPlaygroundModel]     = useState<string>('claude-sonnet-4-6');
   const [modelLoaded, setModelLoaded]             = useState(false);
   const [showReflection, setShowReflection]       = useState(false);
@@ -816,8 +826,12 @@ No explanation before or after — just the fenced block. Preserve all logic not
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let assistantText = '';
-      let streamBuffer = '';
+      let fullText = '';       // complete raw response (prose + code)
+      let chatText = '';       // prose only — shown in chat bubble
+      let codeText = '';       // code inside fences — streamed to artifact
+      let inCodeFence = false;
+      let streamFlushBuffer = '';
+      let artifactId = `streaming-${Date.now()}`;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -831,14 +845,56 @@ No explanation before or after — just the fenced block. Preserve all logic not
           const raw = line.slice(6).trim();
           try {
             const evt = JSON.parse(raw);
-            if (evt.chunk) {
-              streamBuffer += evt.chunk;
-              // Throttle state updates — only flush every ~200 chars to avoid
-              // thrashing React renders on every token
-              if (streamBuffer.length > 200) {
-                assistantText += streamBuffer;
-                streamBuffer = '';
-                const streamMsg: ChatMessage = { role: 'assistant', content: assistantText + '▌', timestamp: new Date().toISOString() };
+            if (evt.done) {
+              fullText = evt.fullText ?? (fullText + streamFlushBuffer);
+              streamFlushBuffer = '';
+              break;
+            }
+            if (!evt.chunk) continue;
+
+            const chunk: string = evt.chunk;
+            fullText += chunk;
+            streamFlushBuffer += chunk;
+
+            // Detect fence transitions character-by-character within this chunk
+            for (let i = 0; i < chunk.length; i++) {
+              if (!inCodeFence) {
+                // Check for opening fence (``` at start of a line)
+                const remaining = fullText;
+                const lastNewline = remaining.lastIndexOf('\n', remaining.length - (chunk.length - i) - 1);
+                const lineStart = remaining.slice(lastNewline + 1);
+                if (lineStart.startsWith('```') && !lineStart.startsWith('````')) {
+                  inCodeFence = true;
+                  setArtifactStreaming(true);
+                  // Open artifact panel with empty content so it appears immediately
+                  setArtifact(prev => ({
+                    type: 'code',
+                    content: '',
+                    title: 'Generating…',
+                    historyId: artifactId,
+                    ...(prev ? { title: prev.title } : {}),
+                  }));
+                }
+              }
+            }
+
+            if (inCodeFence) {
+              // Check if closing fence arrived in this chunk
+              if (fullText.includes('\n```', fullText.indexOf('```') + 3)) {
+                inCodeFence = false;
+                setArtifactStreaming(false);
+              }
+              codeText += chunk;
+              // Stream code live to artifact panel every ~150 chars
+              if (codeText.length % 150 < chunk.length) {
+                setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
+              }
+            } else {
+              chatText += chunk;
+              // Stream prose to chat bubble every ~200 chars
+              if (streamFlushBuffer.length > 200) {
+                streamFlushBuffer = '';
+                const streamMsg: ChatMessage = { role: 'assistant', content: chatText + '▌', timestamp: new Date().toISOString() };
                 setChats(prev => {
                   const target = prev.find(c => c.id === (activeChatId ?? '__streaming__'));
                   if (!target) return prev;
@@ -846,19 +902,18 @@ No explanation before or after — just the fenced block. Preserve all logic not
                 });
               }
             }
-            if (evt.done) {
-              assistantText = evt.fullText ?? (assistantText + streamBuffer);
-              streamBuffer = '';
-            }
           } catch { /* skip malformed lines */ }
         }
       }
       // ── Stream complete ─────────────────────────────────────────────────────
+      setArtifactStreaming(false);
+      // Use fullText for parsing (authoritative), chatText for chat bubble display
+      const assistantText = fullText;
 
-      const assistantMsg: ChatMessage = { role: 'assistant', content: assistantText, timestamp: new Date().toISOString() };
+      const assistantMsg: ChatMessage = { role: 'assistant', content: chatText || assistantText, timestamp: new Date().toISOString() };
       const finalMessages = [...updatedMessages, assistantMsg];
 
-      // Parse code blocks from new response and add to session history
+      // Parse code blocks from full response, update artifact with final content + title
       const newMsgIndex = finalMessages.length - 1;
       const parsedBlocks = parseCodeBlocks(assistantText);
       if (parsedBlocks.length > 0) {
@@ -876,16 +931,14 @@ No explanation before or after — just the fenced block. Preserve all logic not
           const toAdd = newHistoryBlocks.filter(b => !existingIds.has(b.id));
           return [...prev, ...toAdd];
         });
-        // Auto-open first block if panel is closed
-        if (!artifact) {
-          const first = newHistoryBlocks[0];
-          setArtifact({
-            type: 'code',
-            content: first.content,
-            title: first.label || `${first.language} snippet`,
-            historyId: first.id,
-          });
-        }
+        // Update artifact with final parsed content (clean, no fence markers) + real title
+        const first = newHistoryBlocks[0];
+        setArtifact({
+          type: 'code',
+          content: first.content,
+          title: first.label || `${first.language} snippet`,
+          historyId: first.id,
+        });
       }
 
       if (voiceOutputEnabled) speak(assistantText);
@@ -1097,7 +1150,16 @@ No explanation before or after — just the fenced block. Preserve all logic not
           <div className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 flex-shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center"><Bot size={13} className="text-white" /></div>
-              <p className="text-sm font-semibold text-gray-800">{activeChat?.title ?? 'AI Playground'}</p>
+              <div>
+                <p className="text-sm font-semibold text-gray-800 leading-tight">
+                  {activeChat?.title ?? (profileName
+                    ? `Welcome, ${profileName.split(' ')[0]} to the AI Playground`
+                    : 'AI Playground')}
+                </p>
+                {!activeChat && profileName && (
+                  <p className="text-xs text-purple-500 leading-tight">Ask a question or paste your code</p>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => navigate('/')} className="flex items-center gap-1.5 text-sm font-bold text-purple-700 px-3 py-1.5 rounded-lg bg-purple-100 hover:bg-purple-200 transition-colors border border-purple-200">
@@ -1264,6 +1326,7 @@ No explanation before or after — just the fenced block. Preserve all logic not
               editInput={artifactEditInput}
               setEditInput={setArtifactEditInput}
               isEditing={artifactEditing}
+              isStreaming={artifactStreaming}
             />
           </div>
         )}
