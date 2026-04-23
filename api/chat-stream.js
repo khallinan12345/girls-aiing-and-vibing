@@ -95,8 +95,23 @@ export default async function handler(req) {
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
 
+  // Send a keep-alive ping every 5 seconds while waiting for Anthropic to respond.
+  // Vercel Edge has a 30s wall-clock limit — pinging prevents premature 504s.
+  let keepAliveInterval = null;
+  const startKeepAlive = () => {
+    keepAliveInterval = setInterval(async () => {
+      try {
+        await writer.write(encoder.encode(': keep-alive\n\n'));
+      } catch { /* writer may be closed */ }
+    }, 5000);
+  };
+  const stopKeepAlive = () => {
+    if (keepAliveInterval) { clearInterval(keepAliveInterval); keepAliveInterval = null; }
+  };
+
   // Process the upstream stream in the background
   (async () => {
+    startKeepAlive();
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder();
     let sseBuffer = '';
@@ -137,6 +152,7 @@ export default async function handler(req) {
       // Flush any remaining buffered content
       await flush();
     } finally {
+      stopKeepAlive();
       // Always send done event with complete fullText so client can use it
       await writer.write(encoder.encode(`data: ${JSON.stringify({ done: true, fullText })}\n\n`));
 
