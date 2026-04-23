@@ -682,19 +682,23 @@ const AIPlaygroundPage: React.FC = () => {
     try {
       const { data, error } = await supabase
         .from('api_cost_log')
-        .select('input_tokens, output_tokens, created_at')
+        .select('input_tokens, output_tokens, timestamp')
         .eq('user_id', user.id)
         .eq('page', 'AIPlaygroundPage')
-        .gte('created_at', windowStart.toISOString())
-        .order('created_at', { ascending: true });
-      if (error) return;
+        .gte('timestamp', windowStart.toISOString())
+        .order('timestamp', { ascending: true });
+      if (error) {
+        console.warn('[Playground] quota fetch error:', error.message);
+        return;
+      }
       const total = (data ?? []).reduce(
         (sum, row) => sum + (row.input_tokens ?? 0) + (row.output_tokens ?? 0), 0
       );
       setQuotaUsed(total);
-      // Window start = earliest log entry in range, or now if none
-      setQuotaWindowStart(data?.[0]?.created_at ? new Date(data[0].created_at) : null);
-    } catch { /* non-blocking */ }
+      setQuotaWindowStart(data?.[0]?.timestamp ? new Date(data[0].timestamp) : null);
+    } catch (e) {
+      console.warn('[Playground] quota fetch failed:', e);
+    }
   }, [user?.id]);
 
   useEffect(() => { fetchQuota(); }, [fetchQuota]);
@@ -1371,20 +1375,19 @@ const AIPlaygroundPage: React.FC = () => {
               return (
                 <div className="mt-2 px-1">
                   <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                    <div className={`h-1.5 rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${pct}%` }} />
+                    <div className={`h-1.5 rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${Math.max(pct, 1)}%` }} />
                   </div>
-                  <p className="text-center text-xs mt-1" style={{ color: isOver ? '#ef4444' : '#9ca3af' }}>
+                  <p className="text-center text-xs mt-1 text-gray-400">
                     {isOver
-                      ? `You've reached your session quota 💛 — your session resets at ${resetStr ?? '…'}`
+                      ? `You've reached your session quota 💛 — resets at ${resetStr ?? '…'}`
                       : pct > 0
                         ? `You've used ${pct}% of your 3-hour session quota${resetStr ? ` · resets at ${resetStr}` : ''}`
-                        : 'Enter to send · Shift+Enter for new line'}
+                        : `Enter to send · Shift+Enter for new line${voiceOutputEnabled && selectedVoice ? ` · 🔊 ${selectedVoice.name.split(' ').slice(0, 3).join(' ')}${selectedVoice.localService ? ' (offline)' : ''}` : ''}`}
                   </p>
                 </div>
               );
             })()}
-
-            <p className="text-center text-xs text-gray-300 mt-1">Claude is AI and can make mistakes. Please double-check cited sources.</p>
+            <p className="text-center text-xs text-gray-400 mt-1">Claude is AI and can make mistakes. Please double-check cited sources.</p>
           </div>
         </div>
 
