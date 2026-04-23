@@ -39,6 +39,7 @@ export default async function handler(req) {
     model       = 'claude-sonnet-4-6',
     max_tokens  = 16000,
     temperature = 0.3,
+    userId      = null,
   } = body;
 
   if (!messages || !Array.isArray(messages)) {
@@ -127,6 +128,36 @@ export default async function handler(req) {
     } finally {
       // Always send done event and close
       await writer.write(encoder.encode(`data: ${JSON.stringify({ done: true, fullText })}\n\n`));
+
+      // Log cost to Supabase (fire-and-forget)
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (supabaseUrl && supabaseKey && fullText) {
+        // Rough token estimate: 1 token ≈ 4 chars
+        const estimatedOutputTokens = Math.ceil(fullText.length / 4);
+        fetch(`${supabaseUrl}/rest/v1/api_cost_log`, {
+          method: 'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'apikey':        supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Prefer':        'return=minimal',
+          },
+          body: JSON.stringify({
+            page:               'AIPlaygroundPage',
+            provider:           'anthropic',
+            model,
+            input_tokens:       0, // not tracked in edge stream
+            output_tokens:      estimatedOutputTokens,
+            cache_hit_tokens:   0,
+            cache_write_tokens: 0,
+            estimated_cost_usd: (estimatedOutputTokens / 1_000_000) * 15.0,
+            user_id:            userId || null,
+            city:               null,
+          }),
+        }).catch(() => {});
+      }
+
       await writer.close();
     }
   })();

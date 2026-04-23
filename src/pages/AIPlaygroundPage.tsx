@@ -469,11 +469,12 @@ async function* streamPlayground(
   model: string,
   maxTokens: number,
   temperature: number,
+  userId?: string,
 ): AsyncGenerator<{ chunk?: string; done?: boolean; fullText?: string }> {
   const res = await fetch('/api/chat-stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, system, model, max_tokens: maxTokens, temperature }),
+    body: JSON.stringify({ messages, system, model, max_tokens: maxTokens, temperature, userId }),
   });
 
   if (!res.ok) {
@@ -572,6 +573,12 @@ const AIPlaygroundPage: React.FC = () => {
   const [artifactEditInput, setArtifactEditInput] = useState('');
   const [artifactEditing, setArtifactEditing]     = useState(false);
   const [artifactStreaming, setArtifactStreaming]  = useState(false);
+
+  // ── Quota tracking ────────────────────────────────────────────────────────────
+  const QUOTA_TOKENS    = 25000;
+  const QUOTA_WINDOW_MS = 3 * 60 * 60 * 1000; // 3 hours
+  const [quotaUsed, setQuotaUsed]         = useState(0);
+  const [quotaWindowStart, setQuotaWindowStart] = useState<Date | null>(null);
   const [playgroundModel, setPlaygroundModel]     = useState<string>('claude-sonnet-4-6');
   const [modelLoaded, setModelLoaded]             = useState(false);
   const [showReflection, setShowReflection]       = useState(false);
@@ -667,6 +674,30 @@ const AIPlaygroundPage: React.FC = () => {
   }, [user?.id]);
 
   useEffect(() => { fetchChats(); }, [fetchChats]);
+
+  // ── Fetch quota usage for last 3 hours ───────────────────────────────────────
+  const fetchQuota = useCallback(async () => {
+    if (!user?.id) return;
+    const windowStart = new Date(Date.now() - QUOTA_WINDOW_MS);
+    try {
+      const { data, error } = await supabase
+        .from('api_cost_log')
+        .select('input_tokens, output_tokens, created_at')
+        .eq('user_id', user.id)
+        .eq('page', 'AIPlaygroundPage')
+        .gte('created_at', windowStart.toISOString())
+        .order('created_at', { ascending: true });
+      if (error) return;
+      const total = (data ?? []).reduce(
+        (sum, row) => sum + (row.input_tokens ?? 0) + (row.output_tokens ?? 0), 0
+      );
+      setQuotaUsed(total);
+      // Window start = earliest log entry in range, or now if none
+      setQuotaWindowStart(data?.[0]?.created_at ? new Date(data[0].created_at) : null);
+    } catch { /* non-blocking */ }
+  }, [user?.id]);
+
+  useEffect(() => { fetchQuota(); }, [fetchQuota]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length, sending]);
   useEffect(() => {
     if (textareaRef.current) {
@@ -759,6 +790,7 @@ const AIPlaygroundPage: React.FC = () => {
         playgroundModel,
         16000,
         0.2,
+        user?.id,
       );
 
       let lineBuffer = '';
@@ -849,6 +881,7 @@ const AIPlaygroundPage: React.FC = () => {
         playgroundModel,
         16000,
         0.3,
+        user?.id,
       );
 
       // ── Consume stream: prose → chat bubble, code → artifact panel ────────────
@@ -912,31 +945,46 @@ const AIPlaygroundPage: React.FC = () => {
       const assistantMsg: ChatMessage = { role: 'assistant', content: chatText || assistantText, timestamp: new Date().toISOString() };
       const finalMessages = [...updatedMessages, assistantMsg];
 
-      // Parse code blocks from full response, update artifact with final content + title
+      // Parse code blocks for metadata (label, language, cursorHint) only.
+      // Use codeText (what actually streamed) as the authoritative content —
+      // the regex can truncate on very large files.
       const newMsgIndex = finalMessages.length - 1;
       const parsedBlocks = parseCodeBlocks(assistantText);
-      if (parsedBlocks.length > 0) {
-        const newHistoryBlocks: HistoryBlock[] = parsedBlocks.map((b, idx) => ({
-          id: `msg${newMsgIndex}-block${idx}`,
+      const meta = parsedBlocks[0]; // may be undefined for prose-only responses
+      const finalCodeContent = codeText.trim() || meta?.content || '';
+
+      if (finalCodeContent) {
+        const blockId = `msg${newMsgIndex}-block0`;
+        const historyBlock: HistoryBlock = {
+          id: blockId,
+          language: meta?.language || 'tsx',
+          content: finalCodeContent,
+          label: meta?.label || 'Updated code',
+          cursorHint: meta?.cursorHint,
+          messageIndex: newMsgIndex,
+          blockIndex: 0,
+        };
+        // Add remaining parsed blocks (if any) to history too
+        const extraBlocks: HistoryBlock[] = (parsedBlocks.slice(1) ?? []).map((b, idx) => ({
+          id: `msg${newMsgIndex}-block${idx + 1}`,
           language: b.language,
           content: b.content,
           label: b.label,
           cursorHint: b.cursorHint,
           messageIndex: newMsgIndex,
-          blockIndex: idx,
+          blockIndex: idx + 1,
         }));
         setSessionCodeHistory(prev => {
           const existingIds = new Set(prev.map(b => b.id));
-          const toAdd = newHistoryBlocks.filter(b => !existingIds.has(b.id));
+          const toAdd = [historyBlock, ...extraBlocks].filter(b => !existingIds.has(b.id));
           return [...prev, ...toAdd];
         });
-        // Update artifact with final parsed content (clean, no fence markers) + real title
-        const first = newHistoryBlocks[0];
+        // Set artifact with full streamed content + parsed title
         setArtifact({
           type: 'code',
-          content: first.content,
-          title: first.label || `${first.language} snippet`,
-          historyId: first.id,
+          content: finalCodeContent,
+          title: meta?.label || 'Updated code',
+          historyId: blockId,
         });
       }
 
@@ -968,7 +1016,10 @@ const AIPlaygroundPage: React.FC = () => {
       console.error('[Playground] send error:', err);
       const errorMsg: ChatMessage = { role: 'assistant', content: 'Sorry, something went wrong. Please try again.', timestamp: new Date().toISOString() };
       if (activeChatId) setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...updatedMessages, errorMsg] } : c));
-    } finally { setSending(false); }
+    } finally {
+      setSending(false);
+      fetchQuota(); // refresh quota display after each response
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1291,7 +1342,7 @@ const AIPlaygroundPage: React.FC = () => {
               <button onClick={() => fileInputRef.current?.click()} className="flex-shrink-0 p-1 text-gray-400 hover:text-purple-600 transition-colors mb-0.5" title="Attach file"><Paperclip size={17} /></button>
               <input ref={fileInputRef} type="file" onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css" />
               <textarea ref={textareaRef} value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={handleKeyDown}
-                placeholder="Message Claude..." rows={1} disabled={sending || !modelLoaded}
+                placeholder={quotaUsed >= QUOTA_TOKENS ? 'Quota reached — please wait for reset' : 'Message Claude...'} rows={1} disabled={sending || !modelLoaded || quotaUsed >= QUOTA_TOKENS}
                 className="flex-1 resize-none outline-none text-base text-gray-800 placeholder-gray-400 bg-transparent min-h-[24px] max-h-[200px] leading-6" />
               <span className="flex-shrink-0 text-xs mb-0.5 pr-1" style={{ color: '#4b5563', fontWeight: 500 }} title={`model: ${playgroundModel} | loaded: ${modelLoaded}`}>
                 {modelLoaded ? getModelDisplayName(playgroundModel) : '…'}
@@ -1300,17 +1351,39 @@ const AIPlaygroundPage: React.FC = () => {
                 className={`flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all mb-0.5 ${isListening ? 'bg-red-500 text-white animate-pulse' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}>
                 {isListening ? <MicOff size={13} /> : <Mic size={13} />}
               </button>
-              <button onClick={handleSend} disabled={(!userInput.trim() && !attachment) || sending || !modelLoaded}
+              <button onClick={handleSend} disabled={(!userInput.trim() && !attachment) || sending || !modelLoaded || quotaUsed >= QUOTA_TOKENS}
                 className="flex-shrink-0 w-8 h-8 rounded-xl bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-white disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity mb-0.5">
                 {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
               </button>
             </div>
-            <p className="text-center text-xs text-gray-400 mt-2">
-              Enter to send · Shift+Enter for new line
-              {voiceOutputEnabled && selectedVoice && (
-                <span className="ml-2 text-purple-500">· 🔊 {selectedVoice.name.split(' ').slice(0, 3).join(' ')}{selectedVoice.localService ? ' (offline)' : ''}</span>
-              )}
-            </p>
+
+            {/* ── Quota bar ──────────────────────────────────────────────────────── */}
+            {(() => {
+              const pct = Math.min(100, Math.round((quotaUsed / QUOTA_TOKENS) * 100));
+              const isOver = quotaUsed >= QUOTA_TOKENS;
+              const resetTime = quotaWindowStart
+                ? new Date(quotaWindowStart.getTime() + QUOTA_WINDOW_MS)
+                : null;
+              const resetStr = resetTime
+                ? resetTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : null;
+              const barColor = pct >= 100 ? 'bg-red-400' : pct >= 75 ? 'bg-amber-400' : 'bg-purple-400';
+              return (
+                <div className="mt-2 px-1">
+                  <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                    <div className={`h-1.5 rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <p className="text-center text-xs mt-1" style={{ color: isOver ? '#ef4444' : '#9ca3af' }}>
+                    {isOver
+                      ? `You've reached your session quota 💛 — your session resets at ${resetStr ?? '…'}`
+                      : pct > 0
+                        ? `You've used ${pct}% of your 3-hour session quota${resetStr ? ` · resets at ${resetStr}` : ''}`
+                        : 'Enter to send · Shift+Enter for new line'}
+                  </p>
+                </div>
+              );
+            })()}
+
             <p className="text-center text-xs text-gray-300 mt-1">Claude is AI and can make mistakes. Please double-check cited sources.</p>
           </div>
         </div>
