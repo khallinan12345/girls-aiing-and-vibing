@@ -2,17 +2,22 @@
  * useBranding — shared branding hook for all certification pages.
  *
  * Resolves the correct organisation name, logo path, and PDF helpers
- * based on the signed-in user's profiles.organization_id.
+ * based on the signed-in user's profiles.organization_id and profiles.continent.
  *
- * Priority (org-id match wins; vai is the default for all unaffiliated users):
- * 1. NPower org                  → NPower branding
- * 2. 100 Black Girls in STEM org → Girls AI-ing branding
- * 3. Solardero org               → Solardero branding
- * 4. Oloibiri (Davidson) org     → Oloibiri/vAI branding
- * 5. Everyone else               → vAI branding (default)
+ * Priority:
+ *   1. NPower org                  → NPower branding
+ *   2. 100 Black Girls in STEM org → Girls AI-ing branding
+ *   3. Africa continent            → vAI branding
+ *   4. Everyone else               → AIing & Vibing branding (default)
  *
- * isAfrica (continent === 'Africa') is kept separate for UI logic
- * such as showing English steps — it is NOT tied to branding variant.
+ * Usage (in any certification page):
+ *
+ *   import { useBranding, addBrandingToPDF } from '../../lib/useBranding';
+ *
+ *   const { institutionName, logoPath, isReady } = useBranding();
+ *
+ *   // Inside generateCertificate():
+ *   await addBrandingToPDF(doc, { pageWidth, pageHeight, footerY, branding });
  */
 
 import { useState, useEffect } from 'react';
@@ -21,35 +26,33 @@ import { useAuth } from '../hooks/useAuth';
 
 // ─── Organisation constants ────────────────────────────────────────────────────
 
-export const NPOWER_ORG_ID    = 'cd0fc311-2194-485f-b8f4-e3d69022fcde';
-export const BGS100_ORG_ID    = 'c0b48eae-67af-449d-8c04-cc6950bf0982';
-export const SOLARDERO_ORG_ID = 'a1b2c3d4-0002-0002-0002-000000000002';
-export const OLOIBIRI_ORG_ID  = 'a1b2c3d4-0001-0001-0001-000000000001';
+export const NPOWER_ORG_ID  = 'cd0fc311-2194-485f-b8f4-e3d69022fcde';
+export const BGS100_ORG_ID  = 'c0b48eae-67af-449d-8c04-cc6950bf0982';
 
 // ─── Branding types ────────────────────────────────────────────────────────────
 
-export type BrandingVariant = 'npower' | 'girls-ai-ing' | 'solardero' | 'oloibiri' | 'vai';
+export type BrandingVariant = 'npower' | 'girls-ai-ing' | 'vai' | 'default';
 
 export interface Branding {
   /** Which variant is active — useful for conditional UI */
   variant: BrandingVariant;
 
-  /** Human-readable organisation name for certificates and UI */
+  /** Human-readable organisation name for text on certificates and UI */
   institutionName: string;
 
-  /** Short name for compact UI contexts like the Navbar logo */
-  shortName: string;
-
   /**
-   * Path to the organisation logo served from /public.
-   * Null means render shortName as text instead.
+   * Path to the organisation logo SVG served from /public.
+   * Null for text-only variants (girls-ai-ing and default).
    */
   logoPath: string | null;
 
-  /** Tailwind colour for the brand name text */
+  /**
+   * Tailwind colour for the brand name text (used in UI, e.g. Navbar).
+   * e.g. 'text-purple-700', 'text-pink-600'
+   */
   textColor: string;
 
-  /** Whether branding data has finished loading from Supabase */
+  /** Whether the branding data has finished loading from Supabase */
   isReady: boolean;
 }
 
@@ -59,37 +62,26 @@ const BRANDING_MAP: Record<BrandingVariant, Omit<Branding, 'isReady'>> = {
   npower: {
     variant: 'npower',
     institutionName: 'NPower',
-    shortName: 'NPower',
     logoPath: '/npower-logo.svg',
     textColor: 'text-blue-700',
   },
   'girls-ai-ing': {
     variant: 'girls-ai-ing',
     institutionName: 'Girls AI-ing',
-    shortName: 'Girls AI-ing',
     logoPath: null,
     textColor: 'text-pink-600',
-  },
-  solardero: {
-    variant: 'solardero',
-    institutionName: 'Solardero',
-    shortName: 'Solardero',
-    logoPath: '/solardero_logo.jpg',
-    textColor: 'text-yellow-600',
-  },
-  oloibiri: {
-    variant: 'oloibiri',
-    institutionName: 'vAI — Davidson AI Innovation Center',
-    shortName: 'vAI',
-    logoPath: '/vAILOGO.webp',
-    textColor: 'text-teal-600',
   },
   vai: {
     variant: 'vai',
     institutionName: 'vAI — Davidson AI Innovation Center',
-    shortName: 'vAI',
-    logoPath: '/vAILOGO.webp',
+    logoPath: '/vai-logo.svg',
     textColor: 'text-teal-600',
+  },
+  default: {
+    variant: 'default',
+    institutionName: 'AIing & Vibing',
+    logoPath: null,
+    textColor: 'text-purple-700',
   },
 };
 
@@ -97,19 +89,19 @@ const BRANDING_MAP: Record<BrandingVariant, Omit<Branding, 'isReady'>> = {
 
 export const resolveVariant = (
   organizationId: string | null,
+  continent: string | null,
 ): BrandingVariant => {
-  if (organizationId === NPOWER_ORG_ID)    return 'npower';
-  if (organizationId === BGS100_ORG_ID)    return 'girls-ai-ing';
-  if (organizationId === SOLARDERO_ORG_ID) return 'solardero';
-  if (organizationId === OLOIBIRI_ORG_ID)  return 'oloibiri';
-  return 'vai'; // default for all unaffiliated users
+  if (organizationId === NPOWER_ORG_ID)  return 'npower';
+  if (organizationId === BGS100_ORG_ID)  return 'girls-ai-ing';
+  if (continent === 'Africa')            return 'vai';
+  return 'default';
 };
 
 // ─── React hook ───────────────────────────────────────────────────────────────
 
 export const useBranding = (): Branding => {
   const { user } = useAuth();
-  const [variant, setVariant] = useState<BrandingVariant>('vai');
+  const [variant, setVariant] = useState<BrandingVariant>('default');
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
@@ -117,14 +109,17 @@ export const useBranding = (): Branding => {
 
     supabase
       .from('profiles')
-      .select('organization_id')
+      .select('organization_id, continent')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
-        setVariant(resolveVariant(data?.organization_id ?? null));
+        setVariant(resolveVariant(
+          data?.organization_id ?? null,
+          data?.continent ?? null,
+        ));
         setIsReady(true);
       })
-      .catch(() => setIsReady(true));
+      .catch(() => setIsReady(true)); // fall back to default on error
   }, [user?.id]);
 
   return { ...BRANDING_MAP[variant], isReady };
@@ -163,11 +158,11 @@ interface PDFBrandingOptions {
  * Call this inside generateCertificate() in place of the hardcoded Davidson text.
  *
  * Example:
- * await addBrandingToPDF(doc, {
- * pageWidth, pageHeight,
- * footerY: pageHeight - 34.35,
- * branding,
- * });
+ *   await addBrandingToPDF(doc, {
+ *     pageWidth, pageHeight,
+ *     footerY: pageHeight - 34.35,
+ *     branding,
+ *   });
  */
 export const addBrandingToPDF = async (options: PDFBrandingOptions): Promise<void> => {
   const {
@@ -198,13 +193,7 @@ export const addBrandingToPDF = async (options: PDFBrandingOptions): Promise<voi
         const logoX = (pageWidth - logoW) / 2;
         const logoY = footerY - logoH - 2; // 2 mm gap above text
 
-        // Check for extension type to support JPG and SVG
-        let ext = 'PNG';
-        const lowerPath = branding.logoPath.toLowerCase();
-        if (lowerPath.endsWith('.svg'))  ext = 'SVG';
-        else if (lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')) ext = 'JPEG';
-        else if (lowerPath.endsWith('.webp')) ext = 'WEBP';
-
+        const ext = branding.logoPath.endsWith('.svg') ? 'SVG' : 'PNG';
         doc.addImage(base64, ext, logoX, logoY, logoW, logoH);
       }
     } catch (err) {

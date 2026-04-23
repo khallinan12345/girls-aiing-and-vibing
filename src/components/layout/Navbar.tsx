@@ -4,7 +4,6 @@ import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../hooks/useAuth';
 import { Menu, X, Sparkles, LogOut, ShieldCheck } from 'lucide-react';
 import classNames from 'classnames';
-import { useBranding } from '../../lib/useBranding';
 
 const Navbar: React.FC = () => {
   const navigate = useNavigate();
@@ -18,7 +17,6 @@ const Navbar: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const branding = useBranding();
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -51,7 +49,6 @@ const Navbar: React.FC = () => {
         { name: 'AI Workflow Development', path: '/tech-skills/ai-workflow-development' },
         { name: 'AI for Business', path: '/tech-skills/ai-for-business' },
         { name: 'Microsoft AI-900 Prep', path: '/tech-skills/microsoft-ai900' },
-        { name: 'Microsoft DP-900 Prep', path: '/tech-skills/microsoft-dp900' },
         { name: 'Microsoft AB-730 Prep', path: '/tech-skills/microsoft-ab730' },
       ],
     },
@@ -112,19 +109,16 @@ const Navbar: React.FC = () => {
       <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14 gap-4">
 
-          {/* Brand — driven by useBranding */}
+          {/* Brand */}
           <div className="flex-shrink-0">
             <Link to="/home" className="flex items-center gap-1.5 group">
-              {branding.logoPath ? (
-                <img src={branding.logoPath} alt={branding.institutionName} className="h-7 object-contain" />
-              ) : (
-                <>
-                  <Sparkles size={20} className={`${branding.textColor.replace('text-', 'text-')} group-hover:opacity-80 transition-opacity`} />
-                  <span className={`text-sm font-bold tracking-tight hidden lg:inline ${branding.textColor}`}>
-                    {branding.institutionName}
-                  </span>
-                </>
-              )}
+              <Sparkles
+                size={20}
+                className="text-purple-600 group-hover:text-purple-700 transition-colors"
+              />
+              <span className="text-sm font-bold text-purple-700 tracking-tight hidden lg:inline">
+                Girls AIing
+              </span>
             </Link>
           </div>
 
