@@ -84,7 +84,7 @@ interface ParsedBlock {
 
 const parseCodeBlocks = (text: string): ParsedBlock[] => {
   const result: ParsedBlock[] = [];
-  const blockRegex = /(?:(?:^|\n)\*\*([^\n*]+)\*\*\n)?```(\w*)\n([\s\S]*?)```((?:\n<!--[^>]+-->)*)/g;
+  const blockRegex = /(?:(?:^|\n)\*\*([^\n*]+)\*\*\n)?```(\w*)\n([\s\S]*?)```((?:\n<!--[\s\S]*?-->)*)/g;
   let match;
   while ((match = blockRegex.exec(text)) !== null) {
     const label   = match[1]?.trim() ?? '';
@@ -92,8 +92,8 @@ const parseCodeBlocks = (text: string): ParsedBlock[] => {
     const content = match[3] ?? '';
     const meta    = match[4] ?? '';
     if (content.trim().length > 10) {
-      const cursorHint        = meta.match(/<!-- CURSOR: ([^\n>]+) -->/)?.[1]?.trim();
-      const replaceSnippet    = meta.match(/<!-- REPLACE: ([\s\S]+?) -->/)?.[1]?.trim();
+      const cursorHint         = meta.match(/<!-- CURSOR: ([\s\S]+?) -->/)?.[1]?.trim();
+      const replaceSnippet     = meta.match(/<!-- REPLACE: ([\s\S]+?) -->/)?.[1]?.trim();
       const insertAfterSnippet = meta.match(/<!-- INSERT_AFTER: ([\s\S]+?) -->/)?.[1]?.trim();
       result.push({ language: lang, content, label, cursorHint, replaceSnippet, insertAfterSnippet });
     }
@@ -224,9 +224,8 @@ const MessageContent: React.FC<{
   onOpenBlock: (idx: number) => void;
 }> = ({ text, parsedBlocks, onOpenBlock }) => {
 
-  // Strip code fences + cursor hints from display text, replace with InChatCodeBlock
-  // We render line-by-line, but inject code blocks at the right positions
-  const blockRegex = /(?:(?:^|\n)\*\*([^\n*]+)\*\*\n)?```(\w*)\n[\s\S]*?```((?:\n<!--[^>]+-->)*)/g;
+  // Strip code fences + all meta comment markers from display text
+  const blockRegex = /(?:(?:^|\n)\*\*([^\n*]+)\*\*\n)?```(\w*)\n[\s\S]*?```((?:\n<!--[\s\S]*?-->)*)/g;
   const segments: Array<{ type: 'text'; content: string } | { type: 'block'; index: number }> = [];
   let lastIndex = 0;
   let blockIdx = 0;
@@ -244,7 +243,9 @@ const MessageContent: React.FC<{
   }
 
   const renderTextSegment = (content: string) => {
-    const lines = content.split('\n');
+    // Remove any stray HTML comment lines (<!-- ... -->) that leaked past the regex
+    const cleaned = content.replace(/<!--[\s\S]*?-->/g, '').replace(/\n{3,}/g, '\n\n');
+    const lines = cleaned.split('\n');
     return lines.map((line, i) => {
       if (line.startsWith('### ')) return <h3 key={i} className="font-bold text-base mt-2">{renderInlineText(line.slice(4))}</h3>;
       if (line.startsWith('## '))  return <h2 key={i} className="font-bold text-lg mt-3">{renderInlineText(line.slice(3))}</h2>;
@@ -265,8 +266,8 @@ const MessageContent: React.FC<{
         );
       }
       if (line.startsWith('```')) return null;
+      if (line.startsWith('<!--')) return null;  // strip any remaining comment lines
       if (line.trim() === '')     return <div key={i} className="h-1" />;
-      // Skip bold label lines that are consumed by code block headers
       if (/^\*\*[^*]+\*\*$/.test(line.trim())) return null;
       return <p key={i}>{renderInlineText(line)}</p>;
     });
