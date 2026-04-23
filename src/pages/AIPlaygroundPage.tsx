@@ -910,6 +910,12 @@ const AIPlaygroundPage: React.FC = () => {
         : m.content,
     }));
 
+    // Hoist token estimates so finally block can update quota optimistically
+    const estTokensIn = Math.ceil(
+      (SYSTEM_PROMPT.length + apiMessages.reduce((s, m) => s + m.content.length, 0)) / 4
+    );
+    let estTokensOut = 0; // updated after stream completes
+
     try {
       // ── Stream via Edge function → Anthropic (no Vercel timeout) ─────────────
       const streamGen = streamPlayground(
@@ -933,12 +939,13 @@ const AIPlaygroundPage: React.FC = () => {
         const trimmed = contentLine.trim();
         if (!inCodeFence && trimmed.startsWith('```') && trimmed.length > 3) {
           inCodeFence = true;
-          // Don't open artifact panel during streaming — wait until done
-          // to decide based on line count whether it's a full file
           setArtifactStreaming(true);
+          // Open artifact panel immediately so user sees code arriving live
+          setArtifact({ type: 'code', content: '', title: 'Generating…', historyId: artifactId });
         } else if (inCodeFence && trimmed === '```') {
           inCodeFence = false;
           setArtifactStreaming(false);
+          setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
         } else if (inCodeFence) {
           codeText += contentLine + '\n';
           setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
@@ -987,10 +994,7 @@ const AIPlaygroundPage: React.FC = () => {
       // ── Stream complete ──────────────────────────────────────────────────────
       const assistantText = fullText;
       // Estimate tokens: ~4 chars per token
-      const estTokensOut = Math.ceil(assistantText.length / 4);
-      const estTokensIn  = Math.ceil(
-        (SYSTEM_PROMPT.length + apiMessages.reduce((s, m) => s + m.content.length, 0)) / 4
-      );
+      estTokensOut = Math.ceil(assistantText.length / 4);
       const assistantMsg: ChatMessage = {
         role: 'assistant',
         content: sanitize(assistantText),  // full text including code — needed for history rendering
@@ -1076,7 +1080,9 @@ const AIPlaygroundPage: React.FC = () => {
       if (activeChatId) setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...updatedMessages, errorMsg] } : c));
     } finally {
       setSending(false);
-      fetchQuota(); // refresh quota display after each response
+      // Update quota optimistically from local estimates, then sync from DB after a delay
+      setQuotaUsed(prev => prev + estTokensIn + estTokensOut);
+      setTimeout(() => fetchQuota(), 3000); // DB write may lag — sync after 3s
     }
   };
 
