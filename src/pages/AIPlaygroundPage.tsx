@@ -712,14 +712,35 @@ No explanation before or after — just the fenced block. Preserve all logic not
           }],
           max_tokens:  16000,
           temperature: 0.2,
+          stream:      true,
         }),
       });
-      const rawText = await res.text();
-      let data: any;
-      try { data = JSON.parse(rawText); } catch { throw new Error(`API error: ${rawText.slice(0, 200)}`); }
-      if (!res.ok) throw new Error(data?.error ?? `API error ${res.status}`);
-      const responseText: string = data?.content?.[0]?.text ?? data?.choices?.[0]?.message?.content ?? '';
-      const parsed = parseCodeBlocks(responseText);
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText.slice(0, 200));
+      }
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(line.slice(6).trim());
+            if (evt.done) fullText = evt.fullText ?? fullText;
+            else if (evt.chunk) fullText += evt.chunk;
+          } catch { /* skip */ }
+        }
+      }
+      const parsed = parseCodeBlocks(fullText);
       if (parsed.length > 0) {
         const updated = parsed[0];
         const newId = `edit-${Date.now()}`;
@@ -781,18 +802,58 @@ No explanation before or after — just the fenced block. Preserve all logic not
           system:          SYSTEM_PROMPT,
           max_tokens:      16000,
           temperature:     0.3,
+          stream:          true,
         }),
       });
-      let data: any;
-      const rawText = await res.text();
-      try { data = JSON.parse(rawText); }
-      catch { throw new Error(`API error (${res.status}): ${rawText.slice(0, 200)}`); }
-      if (!res.ok) throw new Error(data?.error ?? `API error ${res.status}`);
+      if (!res.ok) {
+        const errText = await res.text();
+        let errData: any;
+        try { errData = JSON.parse(errText); } catch { errData = { error: errText }; }
+        throw new Error(errData?.error ?? `API error ${res.status}`);
+      }
 
-      const assistantText: string =
-        data?.content?.[0]?.text ??
-        data?.choices?.[0]?.message?.content ??
-        'Sorry, I could not generate a response.';
+      // ── Consume SSE stream ──────────────────────────────────────────────────
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let assistantText = '';
+      let streamBuffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          try {
+            const evt = JSON.parse(raw);
+            if (evt.chunk) {
+              streamBuffer += evt.chunk;
+              // Throttle state updates — only flush every ~200 chars to avoid
+              // thrashing React renders on every token
+              if (streamBuffer.length > 200) {
+                assistantText += streamBuffer;
+                streamBuffer = '';
+                const streamMsg: ChatMessage = { role: 'assistant', content: assistantText + '▌', timestamp: new Date().toISOString() };
+                setChats(prev => {
+                  const target = prev.find(c => c.id === (activeChatId ?? '__streaming__'));
+                  if (!target) return prev;
+                  return prev.map(c => c.id === target.id ? { ...c, messages: [...updatedMessages, streamMsg] } : c);
+                });
+              }
+            }
+            if (evt.done) {
+              assistantText = evt.fullText ?? (assistantText + streamBuffer);
+              streamBuffer = '';
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      }
+      // ── Stream complete ─────────────────────────────────────────────────────
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: assistantText, timestamp: new Date().toISOString() };
       const finalMessages = [...updatedMessages, assistantMsg];

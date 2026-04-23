@@ -275,17 +275,106 @@ async function callGroqWithFallback(model, messages, system, max_tokens, tempera
   return { ...data, _route: { provider: 'groq', model } };
 }
 
+// ── Streaming Anthropic call (for AIPlaygroundPage) ───────────────────────────
+// Pipes Anthropic's SSE stream directly to the client so Vercel never has to
+// buffer the full response — keeps the function alive for long code outputs.
+
+async function callAnthropicStreaming(model, messages, system, max_tokens, temperature, res) {
+  const systemPayload = system
+    ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+    : undefined;
+
+  const upstream = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key':          process.env.ANTHROPIC_API_KEY,
+      'anthropic-version':  '2023-06-01',
+      'anthropic-beta':     'prompt-caching-2024-07-31',
+      'Content-Type':       'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens,
+      temperature,
+      messages,
+      stream: true,
+      ...(systemPayload ? { system: systemPayload } : {}),
+    }),
+  });
+
+  if (!upstream.ok) {
+    const errData = await upstream.json();
+    throw Object.assign(
+      new Error(errData.error?.message || 'Anthropic API error'),
+      { status: upstream.status, anthropic_error: errData }
+    );
+  }
+
+  // Set SSE headers before we start writing
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+  let inputTokens = 0, outputTokens = 0, cacheHitTokens = 0, cacheWriteTokens = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // keep incomplete line in buffer
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (raw === '[DONE]') continue;
+      try {
+        const evt = JSON.parse(raw);
+
+        if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
+          const chunk = evt.delta.text;
+          fullText += chunk;
+          // Forward as SSE so the client can render tokens as they arrive
+          res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+        }
+
+        if (evt.type === 'message_delta' && evt.usage) {
+          outputTokens = evt.usage.output_tokens ?? 0;
+        }
+
+        if (evt.type === 'message_start' && evt.message?.usage) {
+          inputTokens      = evt.message.usage.input_tokens                   ?? 0;
+          cacheHitTokens   = evt.message.usage.cache_read_input_tokens        ?? 0;
+          cacheWriteTokens = evt.message.usage.cache_creation_input_tokens    ?? 0;
+        }
+      } catch { /* skip malformed SSE lines */ }
+    }
+  }
+
+  // Send a final event with the complete text and usage so the client can
+  // parse code blocks and update state in one shot
+  res.write(`data: ${JSON.stringify({ done: true, fullText, usage: { inputTokens, outputTokens, cacheHitTokens, cacheWriteTokens } })}\n\n`);
+  res.end();
+
+  return { inputTokens, outputTokens, cacheHitTokens, cacheWriteTokens };
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method === 'GET') {
+    res.setHeader('Content-Type', 'application/json');
     return res.status(200).json({
       message:   'Chat API is working (model routing enabled)',
       providers: ['anthropic/haiku', 'anthropic/sonnet', 'groq/llama-3.3-70b'],
@@ -295,6 +384,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== 'POST') {
+    res.setHeader('Content-Type', 'application/json');
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
@@ -304,30 +394,48 @@ export default async function handler(req, res) {
       system,
       max_tokens      = 500,
       temperature     = 0.7,
-      page            = '',    // e.g. 'AILearningPage', 'SkillsDevelopmentPage-code'
-      playgroundModel = null,  // e.g. 'claude-sonnet-4-6' or null
-      userId          = null,  // optional — for per-learner cost tracking
-      city            = null,  // optional — 'Oloibiri' | 'Ibiade'
+      page            = '',
+      playgroundModel = null,
+      userId          = null,
+      city            = null,
+      stream          = false,  // client opts in to streaming
     } = req.body || {};
 
     if (!messages || !Array.isArray(messages)) {
+      res.setHeader('Content-Type', 'application/json');
       return res.status(400).json({ error: 'Messages array is required' });
     }
 
     if (!process.env.ANTHROPIC_API_KEY) {
+      res.setHeader('Content-Type', 'application/json');
       return res.status(500).json({ error: 'Anthropic API key not configured' });
     }
 
     const { provider, model } = resolveRoute(page, playgroundModel);
 
-    console.log(`[chat.js] page="${page}" → provider=${provider} model=${model}`);
+    console.log(`[chat.js] page="${page}" stream=${stream} → provider=${provider} model=${model}`);
+
+    // ── Streaming path (AIPlaygroundPage opts in) ──────────────────────────────
+    if (stream && provider === 'anthropic') {
+      const usage = await callAnthropicStreaming(model, messages, system, max_tokens, temperature, res);
+      logCost({
+        page, provider: 'anthropic', model,
+        inputTokens:       usage.inputTokens,
+        outputTokens:      usage.outputTokens,
+        cacheHitTokens:    usage.cacheHitTokens,
+        cacheWriteTokens:  usage.cacheWriteTokens,
+        userId, city,
+      });
+      return; // res already ended by callAnthropicStreaming
+    }
+
+    // ── Non-streaming path (all other pages, unchanged) ────────────────────────
+    res.setHeader('Content-Type', 'application/json');
 
     if (provider === 'groq') {
       if (!process.env.GROQ_API_KEY) {
-        // Graceful fallback to Haiku if Groq key is missing
         console.warn('[chat.js] GROQ_API_KEY not set — falling back to Haiku');
         const result = await callAnthropic(ANTHROPIC_HAIKU, messages, system, max_tokens, temperature);
-        // Log cost (fire-and-forget)
         logCost({
           page, provider: 'anthropic', model: ANTHROPIC_HAIKU,
           inputTokens:       result.usage?.prompt_tokens     ?? 0,
@@ -339,7 +447,6 @@ export default async function handler(req, res) {
         return res.status(200).json(result);
       }
       const result = await callGroqWithFallback(model, messages, system, max_tokens, temperature);
-      // Log cost — if we fell back to Haiku, charge correctly; otherwise Groq = $0
       const wasFallback = result._fallback === true;
       logCost({
         page,
@@ -354,9 +461,8 @@ export default async function handler(req, res) {
       return res.status(200).json(result);
     }
 
-    // provider === 'anthropic' (haiku or sonnet)
+    // provider === 'anthropic' non-streaming
     const result = await callAnthropic(model, messages, system, max_tokens, temperature);
-    // Log cost (fire-and-forget)
     logCost({
       page, provider: 'anthropic', model,
       inputTokens:       result.usage?.prompt_tokens     ?? 0,
@@ -370,12 +476,17 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('[chat.js] Error:', error);
     const status = error.status || 500;
-    return res.status(status).json({
-      error:           `Server error: ${error.message}`,
-      anthropic_error: error.anthropic_error,
-      groq_error:      error.groq_error,
-      type:            error.constructor?.name,
-      stack:           process.env.NODE_ENV === 'development' ? error.stack : undefined,
-    });
+    // If headers already sent (streaming started), we can't send JSON error
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(status).json({
+        error:           `Server error: ${error.message}`,
+        anthropic_error: error.anthropic_error,
+        groq_error:      error.groq_error,
+        type:            error.constructor?.name,
+        stack:           process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      });
+    }
+    res.end();
   }
 }
