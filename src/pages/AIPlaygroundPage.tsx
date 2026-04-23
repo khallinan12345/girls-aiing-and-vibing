@@ -656,11 +656,11 @@ const AIPlaygroundPage: React.FC = () => {
     if (!user?.id) return;
     supabase
       .from('profiles')
-      .select('full_name')
+      .select('name')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
-        if (data?.full_name) setProfileName(data.full_name);
+        if (data?.name) setProfileName(data.name);
         setPlaygroundModel('claude-sonnet-4-6');
         setModelLoaded(true);
         console.log('[Playground] model loaded: sonnet (fixed)');
@@ -1001,6 +1001,12 @@ const AIPlaygroundPage: React.FC = () => {
         tokensOut: estTokensOut,
       };
       const finalMessages = [...updatedMessages, assistantMsg];
+
+      // Parse blocks for metadata; use streamed codeText as authoritative content
+      const newMsgIndex      = finalMessages.length - 1;
+      const parsedBlocks     = parseCodeBlocks(assistantText);
+      const meta             = parsedBlocks[0];
+      const finalCodeContent = codeText.trim() || meta?.content || '';
 
       // Only open artifact panel for large full-file responses (>100 lines).
       // Snippets stay in the chat bubble — the artifact panel is for full files only.
