@@ -997,7 +997,7 @@ const AIPlaygroundPage: React.FC = () => {
       estTokensOut = Math.ceil(assistantText.length / 4);
       const assistantMsg: ChatMessage = {
         role: 'assistant',
-        content: assistantText.replace(/\u0000/g, ""),  // full text including code — needed for history rendering
+        content: assistantText.replace(/\u0000/g, ''),  // full text including code — needed for history rendering
         timestamp: new Date().toISOString(),
         tokensIn:  estTokensIn,
         tokensOut: estTokensOut,
