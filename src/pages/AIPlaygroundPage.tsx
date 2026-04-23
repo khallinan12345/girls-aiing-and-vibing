@@ -461,7 +461,77 @@ const ArtifactPanelView: React.FC<{
   );
 };
 
-// ── Model options ──────────────────────────────────────────────────────────────
+// ── Direct Anthropic streaming (bypasses Vercel timeout for long code output) ──
+// Streams directly from the browser to api.anthropic.com.
+// This avoids the Vercel 10-60s function timeout on large file generation.
+const ANTHROPIC_STREAM_URL = 'https://api.anthropic.com/v1/messages';
+
+async function* streamAnthropic(
+  messages: { role: string; content: string }[],
+  system: string,
+  model: string,
+  maxTokens: number,
+  temperature: number,
+): AsyncGenerator<{ chunk?: string; done?: boolean; fullText?: string }> {
+  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('VITE_ANTHROPIC_API_KEY not set');
+
+  const res = await fetch(ANTHROPIC_STREAM_URL, {
+    method: 'POST',
+    headers: {
+      'x-api-key':         apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta':    'prompt-caching-2024-07-31',
+      'content-type':      'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      stream: true,
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      messages,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err?.error?.message ?? `Anthropic error ${res.status}`);
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let sseBuffer = '';
+  let fullText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    sseBuffer += decoder.decode(value, { stream: true });
+    const lines = sseBuffer.split('\n');
+    sseBuffer = lines.pop()!;
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      try {
+        const evt = JSON.parse(raw);
+        if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
+          const chunk: string = evt.delta.text;
+          fullText += chunk;
+          yield { chunk };
+        }
+        if (evt.type === 'message_stop') {
+          yield { done: true, fullText };
+        }
+      } catch { /* skip malformed lines */ }
+    }
+  }
+  // Ensure done is emitted even if message_stop wasn't received
+  yield { done: true, fullText };
+}
+
+
 const MODEL_OPTIONS = [
   { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku' },
   { value: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6' },
@@ -707,48 +777,45 @@ const AIPlaygroundPage: React.FC = () => {
     const instruction = artifactEditInput.trim();
     setArtifactEditInput('');
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          page:            'AIPlaygroundPage',
-          playgroundModel: playgroundModel,
-          system: `You are a precise code editor. The user will give you code and an edit instruction.
-Return ONLY the complete updated code inside a single fenced code block with the correct language tag.
-No explanation before or after — just the fenced block. Preserve all logic not explicitly changed.`,
-          messages: [{
-            role: 'user',
-            content: `Here is the current code (${artifact.title}):\n\`\`\`${artifact.type === 'code' ? 'tsx' : 'text'}\n${artifact.content}\n\`\`\`\n\nEdit instruction: ${instruction}`,
-          }],
-          max_tokens:  16000,
-          temperature: 0.2,
-          stream:      true,
-        }),
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(errText.slice(0, 200));
-      }
+      const streamGen = streamAnthropic(
+        [{
+          role: 'user',
+          content: `Here is the current code (${artifact.title}):\n\`\`\`${artifact.type === 'code' ? 'tsx' : 'text'}\n${artifact.content}\n\`\`\`\n\nEdit instruction: ${instruction}`,
+        }],
+        `You are a precise code editor. Return ONLY the complete updated code inside a single fenced code block with the correct language tag. No explanation before or after — just the fenced block. Preserve all logic not explicitly changed.`,
+        playgroundModel,
+        16000,
+        0.2,
+      );
 
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+      let lineBuffer = '';
       let fullText = '';
+      let inCodeFence = false;
+      let codeText = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop()!;
+      for await (const evt of streamGen) {
+        if (evt.done) { fullText = evt.fullText ?? fullText; break; }
+        if (!evt.chunk) continue;
+        fullText += evt.chunk;
+        lineBuffer += evt.chunk;
+        const lines = lineBuffer.split('\n');
+        lineBuffer = lines.pop()!;
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(line.slice(6).trim());
-            if (evt.done) fullText = evt.fullText ?? fullText;
-            else if (evt.chunk) fullText += evt.chunk;
-          } catch { /* skip */ }
+          const trimmed = line.trim();
+          if (!inCodeFence && trimmed.startsWith('```') && trimmed.length > 3) {
+            inCodeFence = true;
+          } else if (inCodeFence && trimmed === '```') {
+            inCodeFence = false;
+            setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
+          } else if (inCodeFence) {
+            codeText += line + '\n';
+            setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
+          }
         }
+      }
+      if (lineBuffer.trim() && inCodeFence) {
+        codeText += lineBuffer;
+        setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
       }
       const parsed = parseCodeBlocks(fullText);
       if (parsed.length > 0) {
@@ -802,123 +869,71 @@ No explanation before or after — just the fenced block. Preserve all logic not
     }));
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          page:            'AIPlaygroundPage',
-          playgroundModel: playgroundModel,
-          messages:        apiMessages,
-          system:          SYSTEM_PROMPT,
-          max_tokens:      16000,
-          temperature:     0.3,
-          stream:          true,
-        }),
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        let errData: any;
-        try { errData = JSON.parse(errText); } catch { errData = { error: errText }; }
-        throw new Error(errData?.error ?? `API error ${res.status}`);
-      }
+      // ── Stream directly from browser → Anthropic (no Vercel timeout) ─────────
+      const streamGen = streamAnthropic(
+        apiMessages,
+        SYSTEM_PROMPT,
+        playgroundModel,
+        16000,
+        0.3,
+      );
 
-      // ── Consume SSE stream ──────────────────────────────────────────────────
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let sseBuffer = '';     // SSE framing buffer
-      let lineBuffer = '';    // accumulates partial lines across chunks
-      let fullText = '';      // complete raw response
-      let chatText = '';      // prose only → chat bubble
-      let codeText = '';      // code inside fences → artifact panel
+      // ── Consume stream: prose → chat bubble, code → artifact panel ────────────
+      let lineBuffer = '';
+      let fullText = '';
+      let chatText = '';
+      let codeText = '';
       let inCodeFence = false;
-      let fenceOpened = false;
       const artifactId = `streaming-${Date.now()}`;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        sseBuffer += decoder.decode(value, { stream: true });
-        const sseLines = sseBuffer.split('\n');
-        sseBuffer = sseLines.pop()!; // keep incomplete SSE line
-
-        for (const sseLine of sseLines) {
-          if (!sseLine.startsWith('data: ')) continue;
-          const raw = sseLine.slice(6).trim();
-          try {
-            const evt = JSON.parse(raw);
-            if (evt.done) {
-              fullText = evt.fullText ?? fullText;
-              break;
-            }
-            if (!evt.chunk) continue;
-
-            // Accumulate into fullText and process line-by-line
-            const incoming = evt.chunk as string;
-            fullText += incoming;
-            lineBuffer += incoming;
-
-            // Split on newlines — process complete lines, keep partial last line
-            const contentLines = lineBuffer.split('\n');
-            lineBuffer = contentLines.pop()!; // incomplete last line stays buffered
-
-            for (const contentLine of contentLines) {
-              const trimmed = contentLine.trim();
-
-              if (!inCodeFence && trimmed.startsWith('```') && trimmed.length > 3) {
-                // Opening fence detected (e.g. ```tsx)
-                inCodeFence = true;
-                fenceOpened = true;
-                setArtifactStreaming(true);
-                setArtifact(prev => ({
-                  type: 'code',
-                  content: '',
-                  title: 'Generating…',
-                  historyId: artifactId,
-                  ...(prev && prev.historyId !== artifactId ? { title: prev.title } : {}),
-                }));
-              } else if (inCodeFence && trimmed === '```') {
-                // Closing fence
-                inCodeFence = false;
-                setArtifactStreaming(false);
-                // Flush final code to artifact
-                setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
-              } else if (inCodeFence) {
-                codeText += contentLine + '\n';
-                // Live-stream code to artifact every line
-                setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
-              } else {
-                chatText += contentLine + '\n';
-                // Live-stream prose to chat bubble
-                const streamMsg: ChatMessage = {
-                  role: 'assistant',
-                  content: chatText + '▌',
-                  timestamp: new Date().toISOString(),
-                };
-                setChats(prev => {
-                  const target = prev.find(c => c.id === activeChatId);
-                  if (!target) return prev;
-                  return prev.map(c =>
-                    c.id === target.id
-                      ? { ...c, messages: [...updatedMessages, streamMsg] }
-                      : c
-                  );
-                });
-              }
-            }
-          } catch { /* skip malformed SSE lines */ }
-        }
-      }
-      // ── Stream complete ─────────────────────────────────────────────────────
-      setArtifactStreaming(false);
-      // Flush any remaining lineBuffer content
-      if (lineBuffer.trim()) {
-        if (inCodeFence) {
-          codeText += lineBuffer;
+      const processLine = (contentLine: string) => {
+        const trimmed = contentLine.trim();
+        if (!inCodeFence && trimmed.startsWith('```') && trimmed.length > 3) {
+          inCodeFence = true;
+          setArtifactStreaming(true);
+          setArtifact({ type: 'code', content: '', title: 'Generating…', historyId: artifactId });
+        } else if (inCodeFence && trimmed === '```') {
+          inCodeFence = false;
+          setArtifactStreaming(false);
+          setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
+        } else if (inCodeFence) {
+          codeText += contentLine + '\n';
           setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
         } else {
-          chatText += lineBuffer;
+          chatText += contentLine + '\n';
+          const streamMsg: ChatMessage = {
+            role: 'assistant',
+            content: chatText + '▌',
+            timestamp: new Date().toISOString(),
+          };
+          setChats(prev => {
+            const target = prev.find(c => c.id === activeChatId);
+            if (!target) return prev;
+            return prev.map(c =>
+              c.id === target.id ? { ...c, messages: [...updatedMessages, streamMsg] } : c
+            );
+          });
         }
+      };
+
+      for await (const evt of streamGen) {
+        if (evt.done) {
+          fullText = evt.fullText ?? fullText;
+          break;
+        }
+        if (!evt.chunk) continue;
+        fullText += evt.chunk;
+        lineBuffer += evt.chunk;
+
+        const contentLines = lineBuffer.split('\n');
+        lineBuffer = contentLines.pop()!;
+        for (const line of contentLines) processLine(line);
       }
+
+      // Flush remaining buffer
+      if (lineBuffer.trim()) processLine(lineBuffer);
+      setArtifactStreaming(false);
+      // ── Stream complete ──────────────────────────────────────────────────────
       const assistantText = fullText;
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: chatText || assistantText, timestamp: new Date().toISOString() };
