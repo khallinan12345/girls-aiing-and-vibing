@@ -461,42 +461,24 @@ const ArtifactPanelView: React.FC<{
   );
 };
 
-// ── Direct Anthropic streaming (bypasses Vercel timeout for long code output) ──
-// Streams directly from the browser to api.anthropic.com.
-// This avoids the Vercel 10-60s function timeout on large file generation.
-const ANTHROPIC_STREAM_URL = 'https://api.anthropic.com/v1/messages';
-
-async function* streamAnthropic(
+// ── Playground streaming via Edge function (no timeout, no CORS issues) ────────
+// Calls /api/chat-stream which proxies to Anthropic server-side.
+async function* streamPlayground(
   messages: { role: string; content: string }[],
   system: string,
   model: string,
   maxTokens: number,
   temperature: number,
 ): AsyncGenerator<{ chunk?: string; done?: boolean; fullText?: string }> {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('VITE_ANTHROPIC_API_KEY not set');
-
-  const res = await fetch(ANTHROPIC_STREAM_URL, {
+  const res = await fetch('/api/chat-stream', {
     method: 'POST',
-    headers: {
-      'x-api-key':         apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-beta':    'prompt-caching-2024-07-31',
-      'content-type':      'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      temperature,
-      stream: true,
-      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-      messages,
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, system, model, max_tokens: maxTokens, temperature }),
   });
 
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err?.error?.message ?? `Anthropic error ${res.status}`);
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err?.error ?? `Stream error ${res.status}`);
   }
 
   const reader = res.body!.getReader();
@@ -513,21 +495,13 @@ async function* streamAnthropic(
 
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
-      const raw = line.slice(6).trim();
       try {
-        const evt = JSON.parse(raw);
-        if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-          const chunk: string = evt.delta.text;
-          fullText += chunk;
-          yield { chunk };
-        }
-        if (evt.type === 'message_stop') {
-          yield { done: true, fullText };
-        }
+        const evt = JSON.parse(line.slice(6).trim());
+        if (evt.chunk) { fullText += evt.chunk; yield { chunk: evt.chunk }; }
+        if (evt.done)  { yield { done: true, fullText: evt.fullText ?? fullText }; return; }
       } catch { /* skip malformed lines */ }
     }
   }
-  // Ensure done is emitted even if message_stop wasn't received
   yield { done: true, fullText };
 }
 
@@ -637,15 +611,14 @@ const AIPlaygroundPage: React.FC = () => {
     if (!user?.id) return;
     supabase
       .from('profiles')
-      .select('continent, full_name')
+      .select('full_name')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
-        if (data?.continent) setContinent(data.continent);
         if (data?.full_name) setProfileName(data.full_name);
         setPlaygroundModel('claude-sonnet-4-6');
         setModelLoaded(true);
-        console.log('[Playground] model loaded:', data?.ai_playground_model ?? 'haiku (default)');
+        console.log('[Playground] model loaded: sonnet (fixed)');
       })
       .catch(() => setModelLoaded(true));
   }, [user?.id]);
@@ -777,7 +750,7 @@ const AIPlaygroundPage: React.FC = () => {
     const instruction = artifactEditInput.trim();
     setArtifactEditInput('');
     try {
-      const streamGen = streamAnthropic(
+      const streamGen = streamPlayground(
         [{
           role: 'user',
           content: `Here is the current code (${artifact.title}):\n\`\`\`${artifact.type === 'code' ? 'tsx' : 'text'}\n${artifact.content}\n\`\`\`\n\nEdit instruction: ${instruction}`,
@@ -870,10 +843,7 @@ const AIPlaygroundPage: React.FC = () => {
 
     try {
       // ── Stream directly from browser → Anthropic (no Vercel timeout) ─────────
-      const streamGen = streamAnthropic(
-        apiMessages,
-        SYSTEM_PROMPT,
-        playgroundModel,
+      const streamGen = streamPlayground(
         16000,
         0.3,
       );
