@@ -228,7 +228,7 @@ const HomePage: React.FC = () => {
   }, [user?.id]);
 
   // 2) Determine theme
-  const isAfrica       = branding.variant === 'vai';   // Africa users get vAI branding
+  const isAfrica       = branding.variant === 'vai' || branding.variant === 'oloibiri' || continent === 'Africa';
   const isNorthAmerica = continent === 'North America';
   const backgroundUrl  = isAfrica       ? AFRICA_BACKGROUND
                        : isNorthAmerica ? NORTH_AMERICA_BACKGROUND
@@ -471,12 +471,22 @@ const HomePage: React.FC = () => {
             <div className="mb-8 flex flex-col items-center">
               {/* Platform logo — driven by useBranding */}
               {branding.logoPath ? (
-                <img src={branding.logoPath} alt={branding.institutionName} className="h-16 mb-4 object-contain drop-shadow-lg" />
+                <div className="flex flex-col items-center gap-3 mb-4">
+                  <img
+                    src={branding.logoPath}
+                    alt={branding.shortName}
+                    className="h-20 object-contain drop-shadow-lg"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                  <span className="text-2xl font-bold text-white drop-shadow-md tracking-wide">
+                    {branding.shortName}
+                  </span>
+                </div>
               ) : (
-                <div className="flex items-center gap-2 mb-4">
-                  <Award className={`h-12 w-12 animate-pulse ${branding.variant === 'girls-ai-ing' ? 'text-pink-300' : 'text-pink-300'}`} />
-                  <span className={`text-3xl font-extrabold bg-gradient-to-r from-pink-300 via-purple-300 to-blue-300 bg-clip-text text-transparent tracking-tight`}>
-                    {branding.institutionName}
+                <div className="flex items-center gap-3 mb-4">
+                  <Sparkles className="h-10 w-10 text-pink-300 drop-shadow" />
+                  <span className="text-3xl font-extrabold text-white drop-shadow-md tracking-tight">
+                    {branding.shortName}
                   </span>
                 </div>
               )}
