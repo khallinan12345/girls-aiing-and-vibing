@@ -44,6 +44,7 @@ const HomePage: React.FC = () => {
   const { user } = useAuth();
   const branding = useBranding();
   const [continent, setContinent] = useState<string | null>(null);
+  const [orgName, setOrgName] = useState<string | null>(null);
   const [loadingContinent, setLoadingContinent] = useState(true);
   const [communicationLevel, setCommunicationLevel] = useState<number | null>(null);
   const [mousePosition, setMousePosition] = useState({ x: 50, y: 50 });
@@ -209,11 +210,17 @@ const HomePage: React.FC = () => {
     setLoadingContinent(true);
 
     Promise.all([
-      supabase.from('profiles').select('continent').eq('id', user.id).single(),
+      supabase.from('profiles').select('continent, organization_id').eq('id', user.id).single(),
       supabase.from('user_personality_baseline').select('communication_level').eq('user_id', user.id).maybeSingle(),
     ]).then(([profileRes, baselineRes]) => {
       if (profileRes.error) console.error('Error fetching continent:', profileRes.error);
       setContinent(profileRes.data?.continent ?? null);
+
+      const orgId = profileRes.data?.organization_id;
+      if (orgId) {
+        supabase.from('organizations').select('name').eq('id', orgId).single()
+          .then(({ data }) => { if (data?.name) setOrgName(data.name); });
+      }
 
       if (!baselineRes.error && baselineRes.data) {
         // Row exists — use the stored level
@@ -479,14 +486,14 @@ const HomePage: React.FC = () => {
                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
                   <span className="text-2xl font-bold text-white drop-shadow-md tracking-wide">
-                    {branding.shortName}
+                    {orgName ?? branding.shortName}
                   </span>
                 </div>
               ) : (
                 <div className="flex items-center gap-3 mb-4">
                   <Sparkles className="h-10 w-10 text-pink-300 drop-shadow" />
                   <span className="text-3xl font-extrabold text-white drop-shadow-md tracking-tight">
-                    {branding.shortName}
+                    {orgName ?? branding.shortName}
                   </span>
                 </div>
               )}
