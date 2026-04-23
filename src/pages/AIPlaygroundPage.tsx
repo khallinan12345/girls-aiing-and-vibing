@@ -146,8 +146,11 @@ const InChatCodeBlock: React.FC<{
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+  const hasContext = !!(block.replaceSnippet || block.insertAfterSnippet);
+
   return (
     <div className="my-3 rounded-xl overflow-hidden border border-gray-700 shadow-md">
+
       {/* Label bar */}
       <div className="bg-gray-800 px-4 py-2 flex items-center justify-between gap-2">
         <span className="text-xs font-bold text-purple-300 leading-snug">
@@ -164,43 +167,41 @@ const InChatCodeBlock: React.FC<{
         </div>
       </div>
 
-      {/* Replace this section */}
+      {/* Code to Replace */}
       {block.replaceSnippet && (
-        <div className="border-t border-gray-700">
-          <div className="bg-red-950 px-4 py-1.5">
-            <span className="text-xs font-bold text-red-300">🔴 Replace this:</span>
+        <>
+          <div className="bg-red-950 px-4 py-2 border-t border-gray-700">
+            <span className="text-sm font-bold text-red-300">Code to Replace:</span>
           </div>
-          <pre className="bg-red-950/40 text-red-200 font-mono text-xs px-4 py-2 overflow-x-auto leading-relaxed whitespace-pre-wrap line-through opacity-70">
+          <pre className="bg-red-950/40 text-red-200 font-mono text-xs px-4 py-3 overflow-x-auto leading-relaxed whitespace-pre-wrap line-through opacity-75">
             {block.replaceSnippet}
           </pre>
-        </div>
+        </>
       )}
 
-      {/* Insert after section */}
+      {/* Code Preceding Code to Add */}
       {block.insertAfterSnippet && (
-        <div className="border-t border-gray-700">
-          <div className="bg-blue-950 px-4 py-1.5">
-            <span className="text-xs font-bold text-blue-300">📍 Insert after this line:</span>
+        <>
+          <div className="bg-blue-950 px-4 py-2 border-t border-gray-700">
+            <span className="text-sm font-bold text-blue-300">Code Preceding Code to Add:</span>
           </div>
-          <pre className="bg-blue-950/40 text-blue-200 font-mono text-xs px-4 py-2 overflow-x-auto leading-relaxed whitespace-pre-wrap opacity-80">
+          <pre className="bg-blue-950/40 text-blue-200 font-mono text-xs px-4 py-3 overflow-x-auto leading-relaxed whitespace-pre-wrap opacity-80">
             {block.insertAfterSnippet}
           </pre>
-        </div>
+        </>
       )}
 
-      {/* New code label when context is shown */}
-      {(block.replaceSnippet || block.insertAfterSnippet) && (
-        <div className="bg-gray-800 px-4 py-1.5 border-t border-gray-700">
-          <span className="text-xs font-bold text-green-400">✅ New code:</span>
-        </div>
-      )}
-
-      {/* Code area */}
+      {/* Code to Add */}
+      <div className={`px-4 py-2 border-t border-gray-700 ${hasContext ? 'bg-green-950' : 'bg-gray-800'}`}>
+        <span className={`text-sm font-bold ${hasContext ? 'text-green-300' : 'text-purple-300'}`}>
+          Code to Add:
+        </span>
+      </div>
       <pre className="bg-gray-950 text-green-300 font-mono text-xs px-4 py-3 overflow-x-auto leading-relaxed whitespace-pre-wrap">
         {block.content}
       </pre>
 
-      {/* Cursor search hint */}
+      {/* Cursor hint */}
       {block.cursorHint && (
         <div className="bg-gray-900 border-t border-gray-700 px-4 py-2 flex items-center gap-2">
           <Search size={11} className="text-yellow-400 flex-shrink-0" />
@@ -937,12 +938,12 @@ const AIPlaygroundPage: React.FC = () => {
         const trimmed = contentLine.trim();
         if (!inCodeFence && trimmed.startsWith('```') && trimmed.length > 3) {
           inCodeFence = true;
+          // Don't open artifact panel during streaming — wait until done
+          // to decide based on line count whether it's a full file
           setArtifactStreaming(true);
-          setArtifact({ type: 'code', content: '', title: 'Generating…', historyId: artifactId });
         } else if (inCodeFence && trimmed === '```') {
           inCodeFence = false;
           setArtifactStreaming(false);
-          setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
         } else if (inCodeFence) {
           codeText += contentLine + '\n';
           setArtifact(prev => prev ? { ...prev, content: codeText } : prev);
@@ -1004,14 +1005,9 @@ const AIPlaygroundPage: React.FC = () => {
       };
       const finalMessages = [...updatedMessages, assistantMsg];
 
-      // Parse code blocks for metadata (label, language, cursorHint) only.
-      // Use codeText (what actually streamed) as the authoritative content —
-      // the regex can truncate on very large files.
-      const newMsgIndex = finalMessages.length - 1;
-      const parsedBlocks = parseCodeBlocks(assistantText);
-      const meta = parsedBlocks[0]; // may be undefined for prose-only responses
-      const finalCodeContent = codeText.trim() || meta?.content || '';
-
+      // Only open artifact panel for large full-file responses (>100 lines).
+      // Snippets stay in the chat bubble — the artifact panel is for full files only.
+      const FULL_FILE_LINE_THRESHOLD = 100;
       if (finalCodeContent) {
         const blockId = `msg${newMsgIndex}-block0`;
         const historyBlock: HistoryBlock = {
@@ -1023,7 +1019,6 @@ const AIPlaygroundPage: React.FC = () => {
           messageIndex: newMsgIndex,
           blockIndex: 0,
         };
-        // Add remaining parsed blocks (if any) to history too
         const extraBlocks: HistoryBlock[] = (parsedBlocks.slice(1) ?? []).map((b, idx) => ({
           id: `msg${newMsgIndex}-block${idx + 1}`,
           language: b.language,
@@ -1038,13 +1033,16 @@ const AIPlaygroundPage: React.FC = () => {
           const toAdd = [historyBlock, ...extraBlocks].filter(b => !existingIds.has(b.id));
           return [...prev, ...toAdd];
         });
-        // Set artifact with full streamed content + parsed title
-        setArtifact({
-          type: 'code',
-          content: finalCodeContent,
-          title: meta?.label || 'Updated code',
-          historyId: blockId,
-        });
+        // Only open artifact panel for full files, not snippets
+        const lineCount = finalCodeContent.split('\n').length;
+        if (lineCount >= FULL_FILE_LINE_THRESHOLD) {
+          setArtifact({
+            type: 'code',
+            content: finalCodeContent,
+            title: meta?.label || 'Updated code',
+            historyId: blockId,
+          });
+        }
       }
 
       if (voiceOutputEnabled) speak(assistantText);
