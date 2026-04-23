@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../hooks/useAuth';
 import { Menu, X, Sparkles, LogOut, ShieldCheck } from 'lucide-react';
 import classNames from 'classnames';
+import { useBranding } from '../../lib/useBranding';
 
 const Navbar: React.FC = () => {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ const Navbar: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const branding = useBranding();
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -109,7 +111,7 @@ const Navbar: React.FC = () => {
       <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14 gap-4">
 
-          {/* Brand */}
+          {/* Brand — driven by useBranding */}
           <div className="flex-shrink-0">
             <Link to="/home" className="flex items-center gap-1.5 group">
               <Sparkles
