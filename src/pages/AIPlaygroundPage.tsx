@@ -993,7 +993,7 @@ const AIPlaygroundPage: React.FC = () => {
       );
       const assistantMsg: ChatMessage = {
         role: 'assistant',
-        content: chatText || assistantText,
+        content: sanitize(assistantText),  // full text including code — needed for history rendering
         timestamp: new Date().toISOString(),
         tokensIn:  estTokensIn,
         tokensOut: estTokensOut,
