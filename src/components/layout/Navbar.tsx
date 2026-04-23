@@ -114,13 +114,16 @@ const Navbar: React.FC = () => {
           {/* Brand — driven by useBranding */}
           <div className="flex-shrink-0">
             <Link to="/home" className="flex items-center gap-1.5 group">
-              <Sparkles
-                size={20}
-                className="text-purple-600 group-hover:text-purple-700 transition-colors"
-              />
-              <span className="text-sm font-bold text-purple-700 tracking-tight hidden lg:inline">
-                Girls AIing
-              </span>
+              {branding.logoPathLight ? (
+                <img src={branding.logoPathLight} alt={branding.shortName} className="h-7 object-contain" />
+              ) : (
+                <>
+                  <Sparkles size={20} className={`${branding.textColor} group-hover:opacity-80 transition-opacity`} />
+                  <span className={`text-sm font-bold tracking-tight hidden lg:inline ${branding.textColor}`}>
+                    {branding.shortName}
+                  </span>
+                </>
+              )}
             </Link>
           </div>
 
