@@ -23,7 +23,7 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
-  attachment?: { name: string; content: string; type: string };
+  attachment?: { name: string; content: string; type: string }[];
   tokensIn?:  number;   // estimated input tokens for this exchange
   tokensOut?: number;   // estimated output tokens for this exchange
 }
@@ -606,7 +606,7 @@ const AIPlaygroundPage: React.FC = () => {
   const [editingTitleValue, setEditingTitleValue] = useState('');
   const [userInput, setUserInput]                 = useState('');
   const [sending, setSending]                     = useState(false);
-  const [attachment, setAttachment]               = useState<{ name: string; content: string; type: string } | null>(null);
+  const [attachments, setAttachments] = useState<{ name: string; content: string; type: string }[]>([]);
   const [artifact, setArtifact]                   = useState<ArtifactPanel | null>(null);
   const [artifactEditInput, setArtifactEditInput] = useState('');
   const [artifactEditing, setArtifactEditing]     = useState(false);
@@ -751,7 +751,7 @@ const AIPlaygroundPage: React.FC = () => {
   const handleNewChat = () => {
     setActiveChatId(null);
     setUserInput('');
-    setAttachment(null);
+    setAttachments([]);
     setArtifact(null);
     setShowReflection(false);
     setSessionCodeHistory([]);
@@ -893,16 +893,16 @@ const AIPlaygroundPage: React.FC = () => {
 
 
   const handleSend = async () => {
-    if ((!userInput.trim() && !attachment) || sending || !user?.id) return;
+    if ((!userInput.trim() && !attachments.length) || sending || !user?.id) return;
     const userMsg: ChatMessage = {
       role: 'user',
       content: userInput.trim(),
       timestamp: new Date().toISOString(),
-      ...(attachment ? { attachment } : {}),
+      ...(attachments.length ? { attachment: attachments } : {}),
     };
     const currentInput = userInput.trim();
     setUserInput('');
-    setAttachment(null);
+    setAttachments([]);
     setSending(true);
     setShowReflection(false);
 
@@ -910,8 +910,8 @@ const AIPlaygroundPage: React.FC = () => {
     const recentMessages  = updatedMessages.slice(-MAX_API_MESSAGES);
     const apiMessages = recentMessages.map(m => ({
       role: m.role,
-      content: m.attachment
-        ? `[Attached file: ${m.attachment.name}]\n\n${m.attachment.content}\n\n${m.content}`
+      content: m.attachment && m.attachment.length
+        ? m.attachment.map(a => `[Attached file: ${a.name}]\n\n${a.content}`).join('\n\n---\n\n') + (m.content ? `\n\n${m.content}` : '')
         : m.content,
     }));
 
@@ -1085,21 +1085,24 @@ const AIPlaygroundPage: React.FC = () => {
 
   // ── File handling ─────────────────────────────────────────────────────────────
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setAttachment({ name: file.name, content: reader.result as string, type: file.type });
-    reader.readAsText(file); e.target.value = '';
+    const files = Array.from(e.target.files ?? []);
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => setAttachments(prev => [...prev, { name: file.name, content: reader.result as string, type: file.type }]);
+      reader.readAsText(file);
+    });
+    e.target.value = '';
   };
   const readFileAsText = (file: File) => {
     const reader = new FileReader();
-    reader.onload = () => setAttachment({ name: file.name, content: reader.result as string, type: file.type });
+    reader.onload = () => setAttachments(prev => [...prev, { name: file.name, content: reader.result as string, type: file.type }]);
     reader.readAsText(file);
   };
   const handleDragOver  = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
   const handleDragLeave = (e: React.DragEvent) => { if (!dropZoneRef.current?.contains(e.relatedTarget as Node)) setIsDragging(false); };
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault(); setIsDragging(false);
-    const file = e.dataTransfer.files?.[0]; if (file) readFileAsText(file);
+    Array.from(e.dataTransfer.files).forEach(file => readFileAsText(file));
   };
 
   // ── Chat management ───────────────────────────────────────────────────────────
@@ -1317,9 +1320,13 @@ const AIPlaygroundPage: React.FC = () => {
                     <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0 mt-1"><Bot size={13} className="text-white" /></div>
                   )}
                   <div className={`${artifact ? 'max-w-md' : 'max-w-2xl'}`}>
-                    {msg.attachment && (
-                      <div className="mb-2 flex items-center gap-2 text-xs bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-purple-700">
-                        <Paperclip size={12} /><span className="font-medium">{msg.attachment.name}</span>
+                    {msg.attachment && msg.attachment.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-1.5">
+                        {msg.attachment.map((att, i) => (
+                          <div key={i} className="flex items-center gap-1.5 text-xs bg-purple-50 border border-purple-100 rounded-lg px-2.5 py-1.5 text-purple-700">
+                            <Paperclip size={11} /><span className="font-medium">{att.name}</span>
+                          </div>
+                        ))}
                       </div>
                     )}
                     <div className={`rounded-2xl px-4 py-3 ${msg.role === 'user' ? 'bg-gradient-to-br from-purple-600 to-pink-600 text-white rounded-tr-sm' : 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm shadow-sm'}`}>
@@ -1384,10 +1391,15 @@ const AIPlaygroundPage: React.FC = () => {
 
           {/* Input area */}
           <div className="px-6 py-4 bg-white border-t border-gray-200 flex-shrink-0">
-            {attachment && (
-              <div className="mb-2 flex items-center gap-2 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-purple-700 text-xs">
-                <Paperclip size={12} /><span className="font-medium flex-1 truncate">{attachment.name}</span>
-                <button onClick={() => setAttachment(null)} className="hover:text-purple-900"><X size={12} /></button>
+            {attachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {attachments.map((att, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5 bg-purple-50 border border-purple-100 rounded-lg px-2.5 py-1.5 text-purple-700 text-xs">
+                    <Paperclip size={11} />
+                    <span className="font-medium max-w-[140px] truncate">{att.name}</span>
+                    <button onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))} className="hover:text-purple-900 ml-0.5"><X size={11} /></button>
+                  </div>
+                ))}
               </div>
             )}
             {charWarning && (
@@ -1404,7 +1416,7 @@ const AIPlaygroundPage: React.FC = () => {
             )}
             <div className="flex items-end gap-2 bg-white border border-gray-300 rounded-2xl px-4 py-3 shadow-sm focus-within:border-purple-400 focus-within:ring-2 focus-within:ring-purple-100 transition-all">
               <button onClick={() => fileInputRef.current?.click()} className="flex-shrink-0 p-1 text-gray-400 hover:text-purple-600 transition-colors mb-0.5" title="Attach file"><Paperclip size={17} /></button>
-              <input ref={fileInputRef} type="file" onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css" />
+              <input ref={fileInputRef} type="file" onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css" multiple />
               <textarea ref={textareaRef} value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={handleKeyDown}
                 placeholder={quotaUsed >= QUOTA_TOKENS ? 'Quota reached — please wait for reset' : 'Message Claude...'} rows={1} disabled={sending || !modelLoaded || quotaUsed >= QUOTA_TOKENS}
                 className="flex-1 resize-none outline-none text-base text-gray-800 placeholder-gray-400 bg-transparent min-h-[24px] max-h-[200px] leading-6" />
@@ -1415,7 +1427,7 @@ const AIPlaygroundPage: React.FC = () => {
                 className={`flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all mb-0.5 ${isListening ? 'bg-red-500 text-white animate-pulse' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}>
                 {isListening ? <MicOff size={13} /> : <Mic size={13} />}
               </button>
-              <button onClick={handleSend} disabled={(!userInput.trim() && !attachment) || sending || !modelLoaded || quotaUsed >= QUOTA_TOKENS}
+              <button onClick={handleSend} disabled={(!userInput.trim() && !attachments.length) || sending || !modelLoaded || quotaUsed >= QUOTA_TOKENS}
                 className="flex-shrink-0 w-8 h-8 rounded-xl bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-white disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity mb-0.5">
                 {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
               </button>
