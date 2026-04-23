@@ -929,6 +929,14 @@ const AIPlaygroundPage: React.FC = () => {
       for await (const evt of streamGen) {
         if (evt.done) {
           fullText = evt.fullText ?? fullText;
+          // Re-extract codeText from fullText as authoritative source
+          // (streaming line-by-line can miss content if stream was batched)
+          const fenceOpen  = fullText.indexOf('\n```');
+          const fenceClose = fullText.lastIndexOf('\n```');
+          if (fenceOpen !== -1 && fenceClose !== -1 && fenceClose > fenceOpen) {
+            const afterOpen = fullText.indexOf('\n', fenceOpen + 1); // skip the opening ``` line
+            codeText = fullText.slice(afterOpen + 1, fenceClose);
+          }
           break;
         }
         if (!evt.chunk) continue;

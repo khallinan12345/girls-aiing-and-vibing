@@ -101,6 +101,13 @@ export default async function handler(req) {
     const decoder = new TextDecoder();
     let sseBuffer = '';
     let fullText = '';
+    let pendingChunk = ''; // batch tokens before flushing to client
+
+    const flush = async () => {
+      if (!pendingChunk) return;
+      await writer.write(encoder.encode(`data: ${JSON.stringify({ chunk: pendingChunk })}\n\n`));
+      pendingChunk = '';
+    };
 
     try {
       while (true) {
@@ -120,13 +127,17 @@ export default async function handler(req) {
             if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
               const chunk = evt.delta.text;
               fullText += chunk;
-              await writer.write(encoder.encode(`data: ${JSON.stringify({ chunk })}\n\n`));
+              pendingChunk += chunk;
+              // Flush every ~200 chars instead of every token
+              if (pendingChunk.length >= 200) await flush();
             }
           } catch { /* skip malformed lines */ }
         }
       }
+      // Flush any remaining buffered content
+      await flush();
     } finally {
-      // Always send done event and close
+      // Always send done event with complete fullText so client can use it
       await writer.write(encoder.encode(`data: ${JSON.stringify({ done: true, fullText })}\n\n`));
 
       // Log cost to Supabase (fire-and-forget)
