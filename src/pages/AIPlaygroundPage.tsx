@@ -24,6 +24,8 @@ interface ChatMessage {
   content: string;
   timestamp: string;
   attachment?: { name: string; content: string; type: string };
+  tokensIn?:  number;   // estimated input tokens for this exchange
+  tokensOut?: number;   // estimated output tokens for this exchange
 }
 interface PlaygroundChat {
   id: string;
@@ -76,20 +78,24 @@ interface ParsedBlock {
   content: string;
   label: string;
   cursorHint?: string;
+  replaceSnippet?: string;      // code that the new snippet replaces
+  insertAfterSnippet?: string;  // code after which the new snippet is inserted
 }
 
 const parseCodeBlocks = (text: string): ParsedBlock[] => {
   const result: ParsedBlock[] = [];
-  // Match: optional bold label line, then code fence, then optional cursor hint
-  const blockRegex = /(?:(?:^|\n)\*\*([^\n*]+)\*\*\n)?```(\w*)\n([\s\S]*?)```(?:\n<!-- CURSOR: ([^\n>]+) -->)?/g;
+  const blockRegex = /(?:(?:^|\n)\*\*([^\n*]+)\*\*\n)?```(\w*)\n([\s\S]*?)```((?:\n<!--[^>]+-->)*)/g;
   let match;
   while ((match = blockRegex.exec(text)) !== null) {
     const label   = match[1]?.trim() ?? '';
     const lang    = match[2] || 'code';
     const content = match[3] ?? '';
-    const hint    = match[4]?.trim();
+    const meta    = match[4] ?? '';
     if (content.trim().length > 10) {
-      result.push({ language: lang, content, label, cursorHint: hint });
+      const cursorHint        = meta.match(/<!-- CURSOR: ([^\n>]+) -->/)?.[1]?.trim();
+      const replaceSnippet    = meta.match(/<!-- REPLACE: ([\s\S]+?) -->/)?.[1]?.trim();
+      const insertAfterSnippet = meta.match(/<!-- INSERT_AFTER: ([\s\S]+?) -->/)?.[1]?.trim();
+      result.push({ language: lang, content, label, cursorHint, replaceSnippet, insertAfterSnippet });
     }
   }
   return result;
@@ -149,25 +155,51 @@ const InChatCodeBlock: React.FC<{
         </span>
         <div className="flex items-center gap-1 flex-shrink-0">
           <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded font-mono">{block.language}</span>
-          <button
-            onClick={handleCopy}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 transition-colors"
-          >
+          <button onClick={handleCopy} className="flex items-center gap-1 text-xs text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 transition-colors">
             <Copy size={11} />{copied ? 'Copied!' : 'Copy'}
           </button>
-          <button
-            onClick={onOpenPanel}
-            className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-200 px-2 py-1 rounded hover:bg-gray-700 transition-colors"
-            title="Open in code panel"
-          >
+          <button onClick={onOpenPanel} className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-200 px-2 py-1 rounded hover:bg-gray-700 transition-colors" title="Open in code panel">
             <Code2 size={11} />Panel
           </button>
         </div>
       </div>
+
+      {/* Replace this section */}
+      {block.replaceSnippet && (
+        <div className="border-t border-gray-700">
+          <div className="bg-red-950 px-4 py-1.5">
+            <span className="text-xs font-bold text-red-300">🔴 Replace this:</span>
+          </div>
+          <pre className="bg-red-950/40 text-red-200 font-mono text-xs px-4 py-2 overflow-x-auto leading-relaxed whitespace-pre-wrap line-through opacity-70">
+            {block.replaceSnippet}
+          </pre>
+        </div>
+      )}
+
+      {/* Insert after section */}
+      {block.insertAfterSnippet && (
+        <div className="border-t border-gray-700">
+          <div className="bg-blue-950 px-4 py-1.5">
+            <span className="text-xs font-bold text-blue-300">📍 Insert after this line:</span>
+          </div>
+          <pre className="bg-blue-950/40 text-blue-200 font-mono text-xs px-4 py-2 overflow-x-auto leading-relaxed whitespace-pre-wrap opacity-80">
+            {block.insertAfterSnippet}
+          </pre>
+        </div>
+      )}
+
+      {/* New code label when context is shown */}
+      {(block.replaceSnippet || block.insertAfterSnippet) && (
+        <div className="bg-gray-800 px-4 py-1.5 border-t border-gray-700">
+          <span className="text-xs font-bold text-green-400">✅ New code:</span>
+        </div>
+      )}
+
       {/* Code area */}
       <pre className="bg-gray-950 text-green-300 font-mono text-xs px-4 py-3 overflow-x-auto leading-relaxed whitespace-pre-wrap">
         {block.content}
       </pre>
+
       {/* Cursor search hint */}
       {block.cursorHint && (
         <div className="bg-gray-900 border-t border-gray-700 px-4 py-2 flex items-center gap-2">
@@ -176,11 +208,7 @@ const InChatCodeBlock: React.FC<{
             <span className="font-semibold">Cursor search: </span>
             <span className="font-mono bg-gray-800 px-1.5 py-0.5 rounded">{block.cursorHint}</span>
           </span>
-          <button
-            onClick={() => navigator.clipboard.writeText(block.cursorHint!)}
-            className="ml-auto text-xs text-gray-500 hover:text-yellow-300 transition-colors"
-            title="Copy search term"
-          >
+          <button onClick={() => navigator.clipboard.writeText(block.cursorHint!)} className="ml-auto text-xs text-gray-500 hover:text-yellow-300 transition-colors" title="Copy search term">
             <Copy size={10} />
           </button>
         </div>
@@ -198,7 +226,7 @@ const MessageContent: React.FC<{
 
   // Strip code fences + cursor hints from display text, replace with InChatCodeBlock
   // We render line-by-line, but inject code blocks at the right positions
-  const blockRegex = /(?:(?:^|\n)\*\*([^\n*]+)\*\*\n)?```(\w*)\n[\s\S]*?```(?:\n<!-- CURSOR: [^\n>]+ -->)?/g;
+  const blockRegex = /(?:(?:^|\n)\*\*([^\n*]+)\*\*\n)?```(\w*)\n[\s\S]*?```((?:\n<!--[^>]+-->)*)/g;
   const segments: Array<{ type: 'text'; content: string } | { type: 'block'; index: number }> = [];
   let lastIndex = 0;
   let blockIdx = 0;
@@ -529,26 +557,34 @@ SAFETY
 - No content that deceives, exploits, sexualizes, or demeans anyone.
 - Do not engage with community conflicts, land disputes, or political tensions — these need human judgment.
 
-HELP USERS UNDERSTAND YOUR RESPONSES
-- While you may provide answers or script changes, explain everything.
-
 APPROPRIATE USE
 - Stay on learning: coding, writing, English, digital skills, problem-solving.
-- No content for other platforms or in someone else's name unless clearly a learning exercise.
 - If conversation drifts, redirect: "Let's bring this back to what you're working on."
 
-RESPONSE STRUCTURE — follow exactly every time you return code:
+CODE RESPONSE RULES — follow exactly every time:
 
-1. EXPLANATION FIRST (plain English, no code): Describe what you are about to change and why — 2 to 5 sentences. This text appears in the chat.
-2. THEN THE CODE BLOCK — ALL code goes inside a single fenced block. No code outside the fence, ever.
-   - LABEL (bold, own line before the fence): **In src/pages/Foo.tsx, replace lines 42–55 with:**
-   - CODE FENCE: opened with correct language tag (\`\`\`tsx, \`\`\`bash, etc.), closed with \`\`\`
-   - CURSOR HINT (line immediately after closing fence): <!-- CURSOR: search for "unique line near the change" -->
-3. FOLLOW-UP after the block: plain-English next steps (e.g. "Then run \`npm install\`")
-4. UNDERSTANDING CHECK: ask the user what they think the code does before moving on
+DEFAULT: Always give the smallest possible snippet that solves the problem. Never return a full file unless the user explicitly asks for one (e.g. "give me the full file" or "complete script").
 
-If the user asks for an entire file, return the complete file in one fenced block with no truncation.
-Never split code across multiple fenced blocks unless the user explicitly asks for separate files.
+RESPONSE STRUCTURE for code changes:
+
+1. RATIONALE (2–4 sentences, plain English): What are you changing and why? What will this fix or improve?
+
+2. CODE BLOCK — one fenced block containing only the new/changed code:
+   - LABEL (bold line before fence): **In src/pages/Foo.tsx, replace the handleSend function:**
+   - CODE FENCE: \`\`\`tsx  ...snippet...  \`\`\`
+   - PLACEMENT MARKER (line immediately after closing fence) — pick ONE:
+     a. If replacing existing code:
+        <!-- REPLACE: paste the exact 1–4 lines being replaced here -->
+     b. If inserting new code:
+        <!-- INSERT_AFTER: paste the exact line it goes after here -->
+     c. If adding to end of file or no clear anchor:
+        <!-- CURSOR: search for "distinctive nearby line" -->
+
+3. FOLLOW-UP: one sentence on next step (e.g. "Save the file and run \`npm run dev\`")
+
+4. UNDERSTANDING CHECK: ask what they think the changed code does
+
+FULL FILE EXCEPTION: If the user explicitly asks for the full file or complete script, return the entire file in one fenced block with no truncation. Still include rationale before the block.
 
 Be warm, precise, and encouraging. The user is capable — help them get there.`;
 // ══════════════════════════════════════════════════════════════════════════════
@@ -953,8 +989,18 @@ const AIPlaygroundPage: React.FC = () => {
       setArtifactStreaming(false);
       // ── Stream complete ──────────────────────────────────────────────────────
       const assistantText = fullText;
-
-      const assistantMsg: ChatMessage = { role: 'assistant', content: chatText || assistantText, timestamp: new Date().toISOString() };
+      // Estimate tokens: ~4 chars per token
+      const estTokensOut = Math.ceil(assistantText.length / 4);
+      const estTokensIn  = Math.ceil(
+        (SYSTEM_PROMPT.length + apiMessages.reduce((s, m) => s + m.content.length, 0)) / 4
+      );
+      const assistantMsg: ChatMessage = {
+        role: 'assistant',
+        content: chatText || assistantText,
+        timestamp: new Date().toISOString(),
+        tokensIn:  estTokensIn,
+        tokensOut: estTokensOut,
+      };
       const finalMessages = [...updatedMessages, assistantMsg];
 
       // Parse code blocks for metadata (label, language, cursorHint) only.
@@ -1289,9 +1335,16 @@ const AIPlaygroundPage: React.FC = () => {
                         : <p className="text-base leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                       }
                     </div>
-                    <p className={`text-xs text-gray-400 mt-1 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </p>
+                    <div className={`mt-1 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                      <span className="text-xs text-gray-400">
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      {msg.role === 'assistant' && msg.tokensOut && (
+                        <span className="ml-2 text-xs text-gray-400">
+                          · ↑ {msg.tokensIn?.toLocaleString() ?? '—'} · ↓ {msg.tokensOut.toLocaleString()} tokens
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {msg.role === 'user' && (
                     <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 mt-1"><User size={13} className="text-gray-500" /></div>
