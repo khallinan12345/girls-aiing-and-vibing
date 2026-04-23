@@ -842,8 +842,11 @@ const AIPlaygroundPage: React.FC = () => {
     }));
 
     try {
-      // ── Stream directly from browser → Anthropic (no Vercel timeout) ─────────
+      // ── Stream via Edge function → Anthropic (no Vercel timeout) ─────────────
       const streamGen = streamPlayground(
+        apiMessages,
+        SYSTEM_PROMPT,
+        playgroundModel,
         16000,
         0.3,
       );
