@@ -165,7 +165,6 @@ export default async function handler(req) {
             estimated_cost_usd: (estimatedOutputTokens / 1_000_000) * 15.0,
             user_id:            userId || null,
             city:               null,
-            timestamp:          new Date().toISOString(),
           }),
         }).catch(() => {});
       }

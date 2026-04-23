@@ -720,11 +720,11 @@ const AIPlaygroundPage: React.FC = () => {
     try {
       const { data, error } = await supabase
         .from('api_cost_log')
-        .select('input_tokens, output_tokens, timestamp')
+        .select('input_tokens, output_tokens, created_at')
         .eq('user_id', user.id)
         .eq('page', 'AIPlaygroundPage')
-        .gte('timestamp', windowStart.toISOString())
-        .order('timestamp', { ascending: true });
+        .gte('created_at', windowStart.toISOString())
+        .order('created_at', { ascending: true });
       if (error) {
         console.warn('[Playground] quota fetch error:', error.message);
         return;
@@ -733,7 +733,7 @@ const AIPlaygroundPage: React.FC = () => {
         (sum, row) => sum + (row.input_tokens ?? 0) + (row.output_tokens ?? 0), 0
       );
       setQuotaUsed(total);
-      setQuotaWindowStart(data?.[0]?.timestamp ? new Date(data[0].timestamp) : null);
+      setQuotaWindowStart(data?.[0]?.created_at ? new Date(data[0].created_at) : null);
     } catch (e) {
       console.warn('[Playground] quota fetch failed:', e);
     }
