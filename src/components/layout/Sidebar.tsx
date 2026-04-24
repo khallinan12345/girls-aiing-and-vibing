@@ -6,6 +6,7 @@ import {
   Code, Database, Layers, ImagePlus, Video, Mic, PenLine, Zap,
   Briefcase, Code2, Film, ImagePlus as ImagePlusIcon, Mic as MicIcon,
   Cpu, Wand2, ChevronDown, ChevronUp, ShieldCheck, Users, Sprout, Fish, Heart,
+  GitBranch,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -89,19 +90,20 @@ const Sidebar: React.FC = () => {
       sectionBg: 'bg-emerald-50/40',
       headerText: 'text-emerald-600',
       items: [
-        { name: 'Vibe Coding',         path: '/tech-skills/vibe-coding',            icon: <Wand2 size={20} />     },
-        { name: 'Web Development',     path: '/tech-skills/web-development',         icon: <Code size={20} />      },
-        { name: 'Full-Stack Dev',      path: '/tech-skills/full-stack-development',  icon: <Layers size={20} />    },
-        { name: 'AI Image Creation',   path: '/tech-skills/ai-image-creation',       icon: <ImagePlus size={20} /> },
-        { name: 'AI Voice Creation',   path: '/tech-skills/ai-voice-creation',       icon: <Mic size={20} />       },
-        { name: 'AI Video Creation',   path: '/tech-skills/ai-video-creation',       icon: <Video size={20} />     },
-        { name: 'AI Video Studio',     path: '/tech-skills/ai-video-studio',         icon: <Film size={20} />      },
-        { name: 'AI Content Creation', path: '/tech-skills/ai-content-creation',     icon: <PenLine size={20} />   },
-        { name: 'AI Workflow Dev',     path: '/tech-skills/ai-workflow-development', icon: <Zap size={20} />       },
-        { name: 'AI for Business',     path: '/tech-skills/ai-for-business',         icon: <Briefcase size={20} /> },
+        { name: 'Vibe Coding',         path: '/tech-skills/vibe-coding',            icon: <Wand2 size={20} />         },
+        { name: 'Web Development',     path: '/tech-skills/web-development',         icon: <Code size={20} />          },
+        { name: 'Full-Stack Dev',      path: '/tech-skills/full-stack-development',  icon: <Layers size={20} />        },
+        { name: 'AI Image Creation',   path: '/tech-skills/ai-image-creation',       icon: <ImagePlus size={20} />     },
+        { name: 'AI Voice Creation',   path: '/tech-skills/ai-voice-creation',       icon: <Mic size={20} />           },
+        { name: 'AI Video Creation',   path: '/tech-skills/ai-video-creation',       icon: <Video size={20} />         },
+        { name: 'AI Video Studio',     path: '/tech-skills/ai-video-studio',         icon: <Film size={20} />          },
+        { name: 'AI Content Creation', path: '/tech-skills/ai-content-creation',     icon: <PenLine size={20} />       },
+        { name: 'AI Workflow Dev',     path: '/tech-skills/ai-workflow-development', icon: <Zap size={20} />           },
+        { name: 'AI for Business',     path: '/tech-skills/ai-for-business',         icon: <Briefcase size={20} />     },
         { name: 'Microsoft AI-900',    path: '/tech-skills/microsoft-ai900',         icon: <GraduationCap size={20} /> },
-        { name: 'Microsoft DP-900',    path: '/tech-skills/microsoft-dp900',         icon: <Database size={20} /> },
-        { name: 'Microsoft AB-730',    path: '/tech-skills/microsoft-ab730',         icon: <Briefcase size={20} /> },
+        { name: 'Microsoft DP-900',    path: '/tech-skills/microsoft-dp900',         icon: <Database size={20} />      },
+        { name: 'Microsoft AB-730',    path: '/tech-skills/microsoft-ab730',         icon: <Briefcase size={20} />     },
+        { name: 'GitHub GH-300',       path: '/tech-skills/github-gh300',            icon: <GitBranch size={20} />     },
       ],
     },
     {
@@ -115,16 +117,16 @@ const Sidebar: React.FC = () => {
       sectionBg: 'bg-green-50/40',
       headerText: 'text-green-700',
       items: [
-        { name: 'AI Ambassadors',              path: '/community-impact/ai-ambassadors',              icon: <Users size={20} /> },
-        { name: 'AI Ambassadors Certification', path: '/community-impact/ai-ambassadors/certification', icon: <Award size={20} /> },
-        { name: 'Agriculture Consultant',             path: '/community-impact/agriculture',                 icon: <Sprout size={20} /> },
-        { name: 'Agriculture Certification',         path: '/community-impact/agriculture/certification',   icon: <Award size={20} /> },
-        { name: 'Fishing Consultant',             path: '/community-impact/fishing',                     icon: <Fish size={20} /> },
-        { name: 'Fishing Certification',         path: '/community-impact/fishing/certification',       icon: <Award size={20} /> },
-        { name: 'Healthcare Navigator',         path: '/community-impact/healthcare',                  icon: <Heart size={20} /> },
-        { name: 'Healthcare Certification',         path: '/community-impact/healthcare/certification',        icon: <Award size={20} /> },
-        { name: 'Entrepreneurship Consultant',   path: '/community-impact/entrepreneurship',                icon: <Briefcase size={20} /> },
-        { name: 'Entrepreneurship Certification', path: '/community-impact/entrepreneurship/certification', icon: <Award size={20} /> },
+        { name: 'AI Ambassadors',                  path: '/community-impact/ai-ambassadors',                icon: <Users size={20} />     },
+        { name: 'AI Ambassadors Certification',    path: '/community-impact/ai-ambassadors/certification',  icon: <Award size={20} />     },
+        { name: 'Agriculture Consultant',          path: '/community-impact/agriculture',                   icon: <Sprout size={20} />    },
+        { name: 'Agriculture Certification',       path: '/community-impact/agriculture/certification',     icon: <Award size={20} />     },
+        { name: 'Fishing Consultant',              path: '/community-impact/fishing',                       icon: <Fish size={20} />      },
+        { name: 'Fishing Certification',           path: '/community-impact/fishing/certification',         icon: <Award size={20} />     },
+        { name: 'Healthcare Navigator',            path: '/community-impact/healthcare',                    icon: <Heart size={20} />     },
+        { name: 'Healthcare Certification',        path: '/community-impact/healthcare/certification',      icon: <Award size={20} />     },
+        { name: 'Entrepreneurship Consultant',     path: '/community-impact/entrepreneurship',              icon: <Briefcase size={20} /> },
+        { name: 'Entrepreneurship Certification',  path: '/community-impact/entrepreneurship/certification',icon: <Award size={20} />     },
       ],
     },
   ];
@@ -132,7 +134,6 @@ const Sidebar: React.FC = () => {
   const isActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(path + '/');
 
-  // Auto-expand the section that contains the current route
   const getInitialOpen = (): Record<string, boolean> => {
     const state: Record<string, boolean> = {};
     sections.forEach(s => {
@@ -172,12 +173,10 @@ const Sidebar: React.FC = () => {
       <div className="h-full w-full flex flex-col overflow-y-auto py-4">
         <nav className="px-3 space-y-1 pt-10">
 
-          {/* Main — always visible */}
           {mainNavigation.map(item => renderNavItem(item, 'bg-slate-100', 'text-slate-700'))}
 
           <div className="h-px bg-gray-100 my-3" />
 
-          {/* Accordion sections */}
           <div className="space-y-3">
             {sections.map(section => {
               const isOpen    = openSections[section.id] ?? false;
@@ -185,7 +184,6 @@ const Sidebar: React.FC = () => {
 
               return (
                 <div key={section.id}>
-                  {/* Section header — clickable to expand/collapse */}
                   <button
                     onClick={() => toggle(section.id)}
                     className="w-full flex items-center justify-between gap-1.5 group mb-1 px-1"
@@ -201,7 +199,6 @@ const Sidebar: React.FC = () => {
                       : <ChevronDown size={11} className={classNames('opacity-60', section.headerText)} />}
                   </button>
 
-                  {/* Section body */}
                   {isOpen && (
                     <div className={`space-y-0.5 ${section.sectionBg} rounded-lg p-1.5`}>
                       {section.items.map(item =>
@@ -214,7 +211,6 @@ const Sidebar: React.FC = () => {
             })}
           </div>
 
-          {/* Admin — only visible to admin users */}
           {isLeaderOrAdmin && (
             <>
               <div className="h-px bg-gray-100 my-3" />
