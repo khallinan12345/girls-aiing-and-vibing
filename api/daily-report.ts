@@ -79,6 +79,21 @@ interface DailyCostSummary {
   available: boolean;   // false if api_cost_log table doesn't exist yet
 }
 
+// ─── Chunked query helper ─────────────────────────────────────────────────────
+const CHUNK_SIZE = 50;
+
+async function inChunks<T>(
+  ids: string[],
+  fetcher: (chunk: string[]) => Promise<T[]>
+): Promise<T[]> {
+  const results: T[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    const rows = await fetcher(ids.slice(i, i + CHUNK_SIZE));
+    results.push(...rows);
+  }
+  return results;
+}
+
 // ─── Data Fetching ────────────────────────────────────────────────────────────
 
 /**
@@ -113,23 +128,29 @@ async function fetchMetrics(logDate: string, cohortIds: string[], city: string):
   }
 
   // ── 2. Dashboard sessions started OR updated on this day ────────────────
-  const [{ data: createdRows }, { data: updatedRows }] = await Promise.all([
-    supabase
-      .from("dashboard")
-      .select("id, user_id, category_activity, activity")
-      .in("user_id", cohortIds)
-      .gte("created_at", dayStartUTC)
-      .lte("created_at", dayEndUTC),
-    supabase
-      .from("dashboard")
-      .select("id, user_id, category_activity, activity")
-      .in("user_id", cohortIds)
-      .gte("updated_at", dayStartUTC)
-      .lte("updated_at", dayEndUTC),
+  const [createdRows, updatedRows] = await Promise.all([
+    inChunks(cohortIds, async (chunk) => {
+      const { data } = await supabase
+        .from("dashboard")
+        .select("id, user_id, category_activity, activity")
+        .in("user_id", chunk)
+        .gte("created_at", dayStartUTC)
+        .lte("created_at", dayEndUTC);
+      return data || [];
+    }),
+    inChunks(cohortIds, async (chunk) => {
+      const { data } = await supabase
+        .from("dashboard")
+        .select("id, user_id, category_activity, activity")
+        .in("user_id", chunk)
+        .gte("updated_at", dayStartUTC)
+        .lte("updated_at", dayEndUTC);
+      return data || [];
+    }),
   ]);
 
   const sessionMap = new Map<string, { id: string; user_id: string; category_activity: string; activity: string }>();
-  for (const row of [...(createdRows || []), ...(updatedRows || [])]) {
+  for (const row of [...createdRows, ...updatedRows]) {
     sessionMap.set(row.id, row);
   }
   const sessionRows = [...sessionMap.values()];
@@ -159,25 +180,35 @@ async function fetchMetrics(logDate: string, cohortIds: string[], city: string):
   }
 
   // ── 4. AI Playground ─────────────────────────────────────────────────────
-  const [{ data: pgCreated }, { data: pgUpdated }] = await Promise.all([
-    supabase.from("ai_playground_chats").select("id, user_id")
-      .in("user_id", cohortIds).gte("created_at", dayStartUTC).lte("created_at", dayEndUTC),
-    supabase.from("ai_playground_chats").select("id, user_id")
-      .in("user_id", cohortIds).gte("updated_at", dayStartUTC).lte("updated_at", dayEndUTC),
+  const [pgCreated, pgUpdated] = await Promise.all([
+    inChunks(cohortIds, async (chunk) => {
+      const { data } = await supabase
+        .from("ai_playground_chats").select("id, user_id")
+        .in("user_id", chunk).gte("created_at", dayStartUTC).lte("created_at", dayEndUTC);
+      return data || [];
+    }),
+    inChunks(cohortIds, async (chunk) => {
+      const { data } = await supabase
+        .from("ai_playground_chats").select("id, user_id")
+        .in("user_id", chunk).gte("updated_at", dayStartUTC).lte("updated_at", dayEndUTC);
+      return data || [];
+    }),
   ]);
   const pgMap = new Map<string, string>();
-  for (const row of [...(pgCreated || []), ...(pgUpdated || [])]) pgMap.set(row.id, row.user_id);
+  for (const row of [...pgCreated, ...pgUpdated]) pgMap.set(row.id, row.user_id);
   const pgRowsToday = [...pgMap.entries()].map(([id, user_id]) => ({ id, user_id }));
   const playgroundUsers = new Set(pgRowsToday.map((r) => r.user_id)).size;
   const playgroundChatsTotal = pgRowsToday.length;
 
   // ── 5. Certifications ─────────────────────────────────────────────────────
-  const { data: certRowsAllTime } = await supabase
-    .from("dashboard").select("user_id, created_at, updated_at")
-    .in("user_id", cohortIds)
-    .eq("activity", "AI Proficiency Certification")
-    .not("certification_evaluation_score", "is", null);
-  const certAllTime = certRowsAllTime || [];
+  const certAllTime = await inChunks(cohortIds, async (chunk) => {
+    const { data } = await supabase
+      .from("dashboard").select("user_id, created_at, updated_at")
+      .in("user_id", chunk)
+      .eq("activity", "AI Proficiency Certification")
+      .not("certification_evaluation_score", "is", null);
+    return data || [];
+  });
   const certAttemptedUsers = new Set(certAllTime.map((r) => r.user_id)).size;
   const certAttemptedToday = new Set(
     certAllTime
