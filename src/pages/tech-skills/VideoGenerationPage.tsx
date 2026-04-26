@@ -189,7 +189,7 @@ const VideoGenerationPage: React.FC = () => {
   const [view,        setView]        = useState<ViewMode>('generate');
   const [prompt,      setPrompt]      = useState('');
   const [negPrompt,   setNegPrompt]   = useState('low quality, blurry, distorted, watermark');
-  const [duration,    setDuration]    = useState<5 | 8 | 10>(5);
+  const duration = 5 as const; // locked to 5 s — cost control
   const [isStarting,  setIsStarting]  = useState(false);
   const [activeJob,   setActiveJob]   = useState<VideoJob | null>(null);
   const [videoUrl,    setVideoUrl]    = useState<string | null>(null);
@@ -228,7 +228,7 @@ const VideoGenerationPage: React.FC = () => {
 
   // ── Weekly usage limit ────────────────────────────────────────────────────
   const [weeklyCount,    setWeeklyCount]    = useState<number>(0);
-  const WEEKLY_LIMIT = 15;
+  const WEEKLY_LIMIT = 10;
 
   // ── Critique state ────────────────────────────────────────────────────────
   const [showCritique,   setShowCritique]   = useState(false);
@@ -239,6 +239,16 @@ const VideoGenerationPage: React.FC = () => {
   const [stepInput,      setStepInput]      = useState('');
   const [isStepSending,  setIsStepSending]  = useState(false);
   const [isImprovingStep, setIsImprovingStep] = useState(false);
+
+  // ── Prompt quality gate ───────────────────────────────────────────────────
+  // promptScore is null until the learner runs a full critique.
+  // Generate is blocked until score >= PROMPT_SCORE_THRESHOLD.
+  const PROMPT_SCORE_THRESHOLD = 7;
+  const [promptScore,      setPromptScore]      = useState<number | null>(null);
+  const [promptEvaluated,  setPromptEvaluated]  = useState(false);
+
+  // ── Confirmation dialog ───────────────────────────────────────────────────
+  const [showConfirm,    setShowConfirm]    = useState(false);
 
   // ── Image anchoring state ─────────────────────────────────────────────────
   const [startImage,        setStartImage]        = useState<File | null>(null);
@@ -876,9 +886,10 @@ Return ONLY the improved prompt text. No explanation, no preamble.`
   const handleFullCritique = async () => {
     if (!prompt.trim() || isCritiquing) return;
     setIsCritiquing(true); setCritiqueStep('full'); setShowCritique(true);
+    setPromptScore(null); setPromptEvaluated(false);
 
     const commGuidance = lvl <= 1
-      ? 'Write in short, simple sentences. One idea per sentence. Use familiar examples. Max 60 words.'
+      ? 'Write in short, simple sentences. One idea per sentence. Use familiar examples. Max 80 words.'
       : lvl === 2
       ? 'Write clearly and directly. 2–3 short paragraphs maximum.'
       : 'Write in well-structured English with appropriate detail.';
@@ -891,7 +902,7 @@ Return ONLY the improved prompt text. No explanation, no preamble.`
 
 "${prompt.trim()}"
 
-Evaluate this prompt for AI video generation quality. Assess:
+Evaluate this prompt for AI video generation quality. Assess each of the following 6 elements:
 1. SUBJECT — Is it clear who or what is in the video?
 2. SETTING — Is the place/environment described?
 3. LIGHTING — Is light mentioned (golden, dim, sunlit, etc.)?
@@ -900,16 +911,41 @@ Evaluate this prompt for AI video generation quality. Assess:
 6. MOVEMENT — Is there any action or motion described?
 
 For each area: say what is good, what is missing, and give a one-line example of how to improve it.
-End with an overall score out of 10 and one improved version of the full prompt.
+
+Then give an overall SCORE out of 10. The score must appear on its own line in this exact format:
+SCORE: X/10
+
+A score of 7 or higher means the prompt is strong enough to generate a video.
+A score below 7 means the student must improve their prompt before generating.
+
+End with one improved version of the full prompt if the score is below 7.
 
 ${commGuidance}`
         }],
-        system: 'You are a helpful AI video prompt coach. Give honest, encouraging, specific feedback.',
-        max_tokens: 500,
+        system: 'You are a helpful AI video prompt coach. Give honest, specific feedback. Always include SCORE: X/10 on its own line.',
+        max_tokens: 600,
         temperature: 0.5,
       });
+
+      // Extract score from response
+      const scoreMatch = critique.match(/SCORE:\s*(\d+)\s*\/\s*10/i);
+      const parsedScore = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
+
       setCritiqueText(critique);
-      speakText(lvl <= 1 ? 'Here is my feedback on your prompt.' : 'Here is your prompt critique.');
+      setPromptScore(parsedScore);
+      setPromptEvaluated(true);
+
+      if (parsedScore !== null && parsedScore >= PROMPT_SCORE_THRESHOLD) {
+        speakText(lvl <= 1
+          ? `Great prompt! You scored ${parsedScore} out of 10. You can now make your video.`
+          : `Your prompt scored ${parsedScore}/10 — strong enough to generate. Click Generate when ready.`);
+      } else if (parsedScore !== null) {
+        speakText(lvl <= 1
+          ? `Your prompt scored ${parsedScore} out of 10. Please improve it before making your video. Read the feedback and try again.`
+          : `Your prompt scored ${parsedScore}/10. Please revise it using the feedback below, then re-evaluate before generating.`);
+      } else {
+        speakText(lvl <= 1 ? 'Here is my feedback on your prompt.' : 'Here is your prompt critique.');
+      }
     } catch {
       setCritiqueText('Sorry, I could not critique your prompt right now. Please try again.');
     } finally {
@@ -1136,7 +1172,7 @@ Return ONLY the improved text. No explanation, no preamble.`
               </label>
               <textarea
                 value={prompt}
-                onChange={e => setPrompt(e.target.value)}
+                onChange={e => { setPrompt(e.target.value); setPromptScore(null); setPromptEvaluated(false); }}
                 rows={4} maxLength={500} disabled={isGenerating}
                 placeholder={uiText.promptPlaceholder}
                 className="w-full bg-slate-800/80 border border-slate-600/50 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 text-sm resize-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 outline-none transition disabled:opacity-50"
@@ -1157,13 +1193,13 @@ Return ONLY the improved text. No explanation, no preamble.`
                     : <><Wand2 size={14} /> {uiText.improveBtnLabel}</>}
                 </button>
 
-                {/* Full critique */}
+                {/* Evaluate Prompt — primary quality gate action */}
                 <button onClick={handleFullCritique}
                   disabled={!prompt.trim() || isCritiquing || isGenerating}
-                  className="flex items-center gap-2 bg-amber-700 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
+                  className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full px-5 py-2 text-sm font-semibold transition-colors ring-2 ring-amber-400/30">
                   {isCritiquing && critiqueStep === 'full'
-                    ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" /> {lvl <= 1 ? 'Checking…' : 'Analysing…'}</>
-                    : <><Lightbulb size={14} /> {uiText.critiqueBtnLabel}</>}
+                    ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" /> {lvl <= 1 ? 'Checking…' : 'Evaluating…'}</>
+                    : <><Lightbulb size={14} /> {lvl <= 1 ? '📊 Check My Prompt' : '📊 Evaluate Prompt'}</>}
                 </button>
 
                 {/* Step-by-step builder */}
@@ -1458,21 +1494,14 @@ Return ONLY the improved text. No explanation, no preamble.`
               </div>
             )}
 
-            {/* Duration + advanced */}
+            {/* Duration — locked to 5 s for cost control */}
             <div className="bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 backdrop-blur-sm">
-              <div className="flex items-center gap-4 mb-3">
+              <div className="flex items-center gap-3 mb-3">
                 <span className="text-sm font-semibold text-slate-300">{uiText.durationLabel}</span>
-                <div className="flex gap-1">
-                  {([5, 8, 10] as const).map(d => (
-                    <button key={d} onClick={() => setDuration(d)} disabled={isGenerating}
-                      className={classNames('px-3 py-1 rounded-lg text-sm font-medium transition-all disabled:opacity-40',
-                        duration === d ? 'bg-gradient-to-r from-cyan-600 to-violet-600 text-white'
-                                       : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-600/50')}>
-                      {d}s
-                    </button>
-                  ))}
-                </div>
-                <span className="text-xs text-slate-500">{uiText.durationHint}</span>
+                <span className="px-3 py-1 rounded-lg text-sm font-semibold bg-gradient-to-r from-cyan-600 to-violet-600 text-white">5s</span>
+                <span className="text-xs text-slate-500">
+                  {lvl <= 1 ? 'All videos are 5 seconds long.' : 'Fixed at 5 seconds — generation typically takes 2–5 minutes.'}
+                </span>
               </div>
               <button onClick={() => setShowAdvanced(a => !a)}
                 className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors">
@@ -1622,17 +1651,84 @@ Return ONLY the improved text. No explanation, no preamble.`
             )}
 
             {/* Generate button */}
-            {!activeJob && (
-              <button onClick={handleGenerate} disabled={!prompt.trim() || isStarting}
-                className={classNames('w-full flex items-center justify-center gap-3 rounded-xl py-3.5 font-semibold text-base transition-all',
-                  prompt.trim() && !isStarting
-                    ? 'bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500 text-white shadow-lg hover:shadow-cyan-500/25 hover:scale-[1.01]'
-                    : 'bg-slate-800 text-slate-500 cursor-not-allowed')}>
-                {isStarting
-                  ? <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {lvl <= 1 ? 'Starting…' : 'Starting generation…'}</>
-                  : <><Film size={20} /> {uiText.generateBtn}</>}
-              </button>
-            )}
+            {!activeJob && (() => {
+              const scorePassed  = promptScore !== null && promptScore >= PROMPT_SCORE_THRESHOLD;
+              const needsEval    = !promptEvaluated || promptScore === null;
+              const scoreFailed  = promptEvaluated && promptScore !== null && promptScore < PROMPT_SCORE_THRESHOLD;
+              const limitReached = weeklyCount >= WEEKLY_LIMIT;
+
+              return (
+                <div className="space-y-2">
+                  {/* Quality gate status banner */}
+                  {!limitReached && (
+                    <div className={classNames(
+                      'rounded-xl px-4 py-3 text-sm border flex items-start gap-3',
+                      scorePassed
+                        ? 'bg-green-900/20 border-green-500/30 text-green-300'
+                        : scoreFailed
+                        ? 'bg-red-900/20 border-red-500/30 text-red-300'
+                        : 'bg-amber-900/20 border-amber-500/30 text-amber-300'
+                    )}>
+                      <span className="shrink-0 mt-0.5">
+                        {scorePassed ? '✅' : scoreFailed ? '❌' : '⚠️'}
+                      </span>
+                      <div>
+                        {scorePassed && (
+                          <>
+                            <p className="font-semibold">
+                              {lvl <= 1 ? `Great prompt! Score: ${promptScore}/10` : `Prompt quality: ${promptScore}/10 — ready to generate`}
+                            </p>
+                            <p className="text-xs opacity-80 mt-0.5">
+                              {lvl <= 1
+                                ? 'Your prompt is good enough. You can now make your video.'
+                                : 'Your prompt meets the quality threshold. Click Generate when ready.'}
+                            </p>
+                          </>
+                        )}
+                        {scoreFailed && (
+                          <>
+                            <p className="font-semibold">
+                              {lvl <= 1 ? `Score: ${promptScore}/10 — not ready yet` : `Prompt score: ${promptScore}/10 — below threshold (need ${PROMPT_SCORE_THRESHOLD}+)`}
+                            </p>
+                            <p className="text-xs opacity-80 mt-0.5">
+                              {lvl <= 1
+                                ? 'Please read the feedback and improve your prompt. Then click "Check My Prompt" again.'
+                                : `Revise your prompt using the critique feedback, then re-run the evaluation. A score of ${PROMPT_SCORE_THRESHOLD}+ is required.`}
+                            </p>
+                          </>
+                        )}
+                        {needsEval && !scoreFailed && (
+                          <>
+                            <p className="font-semibold">
+                              {lvl <= 1 ? 'Check your prompt before making a video' : 'Prompt evaluation required before generating'}
+                            </p>
+                            <p className="text-xs opacity-80 mt-0.5">
+                              {lvl <= 1
+                                ? `Click "Check My Prompt" first. You need a score of ${PROMPT_SCORE_THRESHOLD}/10 or more to make a video.`
+                                : `Click "Evaluate Prompt" to score your prompt. A score of ${PROMPT_SCORE_THRESHOLD}/10 or higher is required to generate.`}
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => setShowConfirm(true)}
+                    disabled={!prompt.trim() || isStarting || !scorePassed || limitReached}
+                    className={classNames(
+                      'w-full flex items-center justify-center gap-3 rounded-xl py-3.5 font-semibold text-base transition-all',
+                      prompt.trim() && !isStarting && scorePassed && !limitReached
+                        ? 'bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500 text-white shadow-lg hover:shadow-cyan-500/25 hover:scale-[1.01]'
+                        : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                    )}>
+                    {isStarting
+                      ? <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {lvl <= 1 ? 'Starting…' : 'Starting generation…'}</>
+                      : <><Film size={20} /> {uiText.generateBtn}</>}
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1706,6 +1802,56 @@ Return ONLY the improved text. No explanation, no preamble.`
           <p className="flex items-center gap-2"><Clock size={12} />{uiText.footerText}</p>
         </div>
       </div>
+
+      {/* ── Confirmation dialog ────────────────────────────────────────────── */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-amber-500/20 shrink-0">
+                <AlertTriangle size={22} className="text-amber-400" />
+              </div>
+              <h2 className="text-base font-bold text-white">
+                {lvl <= 1 ? 'Ready to make your video?' : 'Confirm video generation'}
+              </h2>
+            </div>
+
+            <div className="bg-slate-800/80 rounded-xl px-4 py-3 text-sm text-slate-300 space-y-1">
+              <p className="font-semibold text-slate-200 truncate">"{prompt.trim().slice(0, 80)}{prompt.length > 80 ? '…' : ''}"</p>
+              {promptScore !== null && (
+                <p className="text-xs text-green-400">
+                  ✅ {lvl <= 1 ? `Prompt score: ${promptScore}/10` : `Evaluated prompt score: ${promptScore}/10`}
+                </p>
+              )}
+            </div>
+
+            <p className="text-sm text-amber-200 bg-amber-900/20 border border-amber-500/20 rounded-xl px-4 py-3">
+              {lvl <= 1
+                ? 'Making a video uses AI computer power and costs real money. Each video takes 2–5 minutes and cannot be undone. Please make sure your prompt is exactly what you want.'
+                : 'Video generation consumes AI compute and has a real cost. Generation cannot be cancelled once started. Please confirm your prompt is final before proceeding.'}
+            </p>
+
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl py-2.5 text-sm font-semibold transition-colors">
+                {lvl <= 1 ? '← Go back' : 'Cancel'}
+              </button>
+              <button
+                onClick={() => { setShowConfirm(false); handleGenerate(); }}
+                className="flex-1 bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500 text-white rounded-xl py-2.5 text-sm font-semibold transition-colors shadow-lg">
+                {lvl <= 1 ? '🎬 Yes, make my video!' : 'Confirm — Generate Video'}
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 text-center">
+              {lvl <= 1
+                ? `You have used ${weeklyCount} of ${WEEKLY_LIMIT} videos this week.`
+                : `Weekly usage: ${weeklyCount} / ${WEEKLY_LIMIT} videos.`}
+            </p>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 };
