@@ -1,35 +1,37 @@
 // src/pages/community-impact/HealthcareNavigatorPage.tsx
 //
 // Healthcare Navigator — Community Impact Track
+// A professional casebook tool for youth Community Health Navigators
+// (modelled on Nigeria's CHIPS Agents) serving patients in Oloibiri
+// (Bayelsa State) and Ibiade (Ogun State).
 //
-// Trains students to be Community Health Navigators — the same role as
-// Nigeria's CHIPS (Community Health Influencers, Promoters and Services) Agents,
-// who use WHO IMCI (Integrated Management of Childhood Illness) protocols
-// to assess, triage, and refer patients in rural communities.
+// The navigator registers community members, runs structured clinical
+// assessments using WHO IMCI protocols (vitals, danger signs, triage),
+// gets AI-assisted RED/YELLOW/GREEN classification, and maintains a
+// case history per patient — with follow-up tracking and referral notes.
 //
-// THREE modes:
-//  LEARN  — AI tutor on specific clinical topics (instruments, diseases, protocols)
-//  ASSESS — Structured measurement entry → AI-assisted colour-coded triage (RED/YELLOW/GREEN)
-//  CONSULT — Role-play consultations with patient personas from Oloibiri
+// DB tables: health_patients
+//            health_assessments
 //
 // Route: /community-impact/healthcare
 // Activity: healthcare_navigator
 //
-// CLINICAL BASIS: WHO IMCI thresholds, Nigeria CHIPS programme, Nigeria Malaria
-// Treatment Guidelines. All advice is framed as clinical decision SUPPORT for a
-// trained human navigator — not diagnosis or prescription.
+// CLINICAL BASIS: WHO IMCI thresholds, Nigeria CHIPS programme,
+// Nigeria Malaria Treatment Guidelines. All advice is framed as
+// clinical decision SUPPORT for a trained human navigator —
+// NOT diagnosis or prescription.
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '../../components/layout/AppLayout';
 import { supabase } from '../../lib/supabaseClient';
-import { chatText, chatJSON } from '../../lib/chatClient';
+import { chatText } from '../../lib/chatClient';
 import { useAuth } from '../../hooks/useAuth';
 import {
-  Heart, BookOpen, Users, ArrowLeft, Send, Mic, MicOff,
-  Volume2, VolumeX, Save, Star, Loader2, X, ChevronRight,
-  AlertTriangle, ShieldCheck, Lightbulb, Award, ClipboardList,
-  Thermometer, Activity, Scale, Ruler, Wind, Stethoscope,
-  Baby, User, UserCheck, CheckCircle, AlertCircle, XCircle,
+  Heart, ArrowLeft, Send, Save, Loader2, Plus, User,
+  FileText, AlertTriangle, CheckCircle, Clock, ChevronRight,
+  ClipboardList, RefreshCw, Calendar, Mic, MicOff,
+  Volume2, VolumeX, X, Lightbulb, Thermometer, Activity,
+  Baby, Stethoscope, ShieldCheck, AlertCircle, XCircle,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -43,30 +45,35 @@ interface ChatMessage {
 }
 
 type AppMode =
-  | 'select'
-  | 'learn-topics' | 'learn-chat'
-  | 'assess-form'  | 'assess-result'
-  | 'consult-personas' | 'consult-prepare' | 'consult-chat';
+  | 'dashboard'
+  | 'add-patient'
+  | 'patient-detail'
+  | 'new-assessment'
+  | 'followup-chat'
+  | 'case-detail';
 
-interface LearningTopic {
-  id: string; title: string; subtitle: string;
-  icon: React.ReactNode; colour: string; urgency?: string;
+type TriageLevel = 'red' | 'yellow' | 'green' | 'pending';
+type PatientGroup = 'child-under-5' | 'child-5-14' | 'adult' | 'pregnant' | 'elderly';
+
+interface Patient {
+  id: string;
+  youth_user_id: string;
+  patient_name: string;
+  village: string;
+  phone: string | null;
+  age_years: number | null;
+  age_months: number | null;
+  sex: 'male' | 'female' | '';
+  patient_group: PatientGroup;
+  notes: string | null;
+  created_at: string;
+  // from summary view
+  total_assessments?: number;
+  open_cases?: number;
+  last_assessment_at?: string | null;
 }
-
-interface PatientPersona {
-  id: string; name: string; age: string; description: string;
-  emoji: string; colour: string; presentation: string;
-  mainChallenge: string; openingLine: string; systemPrompt: string;
-}
-
-// ─── Clinical Assessment Form State ──────────────────────────────────────────
 
 interface AssessmentData {
-  // Patient basics
-  patientName: string;
-  patientAge: string;
-  ageUnit: 'days' | 'months' | 'years';
-  sex: 'male' | 'female' | '';
   // Vitals
   tempC: string;
   tempMethod: 'axillary' | 'oral' | 'rectal';
@@ -78,7 +85,7 @@ interface AssessmentData {
   weightKg: string;
   heightCm: string;
   muacCm: string;
-  // Chief complaint & symptoms
+  // Chief complaint
   chiefComplaint: string;
   // General danger signs (IMCI)
   convulsions: boolean;
@@ -86,13 +93,10 @@ interface AssessmentData {
   unableToFeed: boolean;
   vomitsEverything: boolean;
   // Main symptoms
-  fever: boolean;
-  feverDays: string;
-  cough: boolean;
-  coughDays: string;
+  fever: boolean; feverDays: string;
+  cough: boolean; coughDays: string;
   chestIndrawing: boolean;
-  diarrhoea: boolean;
-  diarrhoeaDays: string;
+  diarrhoea: boolean; diarrhoeaDays: string;
   bloodInStool: boolean;
   vomiting: boolean;
   // Signs
@@ -100,7 +104,7 @@ interface AssessmentData {
   stiffNeck: boolean;
   eyeJaundice: boolean;
   oedema: boolean;
-  // Context
+  // Malaria
   malariaSuspected: boolean;
   rdt: 'positive' | 'negative' | 'not_done';
   recentBednetUse: boolean;
@@ -109,7 +113,6 @@ interface AssessmentData {
 }
 
 const BLANK_ASSESSMENT: AssessmentData = {
-  patientName: '', patientAge: '', ageUnit: 'years', sex: '',
   tempC: '', tempMethod: 'axillary',
   respiratoryRate: '', pulseRate: '',
   bpSystolic: '', bpDiastolic: '',
@@ -124,6 +127,24 @@ const BLANK_ASSESSMENT: AssessmentData = {
   malariaSuspected: false, rdt: 'not_done', recentBednetUse: false,
   additionalNotes: '',
 };
+
+interface Assessment {
+  id: string;
+  patient_id: string;
+  youth_user_id: string;
+  assessment_data: AssessmentData;
+  triage_level: TriageLevel;
+  ai_triage_summary: string | null;
+  referral_note: string | null;
+  navigator_actions: string | null;
+  conversation_history: ChatMessage[];
+  follow_up_needed: boolean;
+  follow_up_date: string | null;
+  follow_up_notes: string | null;
+  resolved: boolean;
+  resolved_at: string | null;
+  created_at: string;
+}
 
 // ─── Clinical Knowledge Base ──────────────────────────────────────────────────
 
@@ -144,604 +165,197 @@ DISEASE BURDEN IN BAYELSA / OLOIBIRI (always apply this context):
   fever in Bayelsa = malaria until proven otherwise in high-transmission areas
 - TYPHOID FEVER: Common; often confused with malaria; sustained high fever, headache, abdominal pain;
   needs laboratory confirmation ideally; treat empirically with cotrimoxazole or ciprofloxacin
-- ACUTE RESPIRATORY INFECTIONS (ARI): pneumonia = #1 cause of child death under 5;
+- ACUTE RESPIRATORY INFECTIONS: pneumonia = #1 cause of child death under 5;
   presents as cough + fast breathing + chest indrawing; bacterial; needs antibiotics urgently
 - DIARRHOEAL DISEASE: Cholera possible during floods; dehydration kills children fast;
   ORS (Oral Rehydration Solution) saves lives; assess dehydration before everything else
-- MALNUTRITION: high burden; stunting widespread; severe acute malnutrition (SAM) = emergency;
-  MUAC <11.5cm in child 6–59 months = SAM; needs urgent referral + therapeutic feeding
+- MALNUTRITION: high burden; MUAC <11.5cm in child 6–59 months = SAM; urgent referral needed
 - HYPERTENSION: increasingly common in adults; often silent; first presentation can be stroke;
   BP ≥140/90 needs medical review; ≥180/120 = hypertensive crisis, immediate referral
 - MATERNAL COMPLICATIONS: eclampsia (seizures + high BP in pregnancy) = emergency;
   haemorrhage; prolonged labour; fever in pregnancy = malaria, needs urgent treatment
-- OIL-RELATED ILLNESS: Skin conditions, respiratory symptoms, eye irritation in communities
-  near contaminated waterways; benzene exposure risk from oil infrastructure
+- OIL-RELATED ILLNESS: Skin conditions, respiratory symptoms, eye irritation near
+  contaminated waterways; benzene exposure risk from oil infrastructure
 
-WHO IMCI COLOUR CLASSIFICATION (memorise this):
-🔴 RED — URGENT REFERRAL IMMEDIATELY (do not delay; give pre-referral treatment if possible):
+WHO IMCI COLOUR CLASSIFICATION:
+🔴 RED — URGENT REFERRAL IMMEDIATELY (do not delay):
   DANGER SIGNS: convulsions, loss of consciousness, very lethargic/cannot wake,
   unable to drink/breastfeed, vomits everything, severe respiratory distress
-  ALSO RED: chest indrawing + fever = severe malaria or severe pneumonia;
-  MUAC <11.5cm (severe wasting); severe dehydration; stiff neck + fever (meningitis)
+  ALSO RED: chest indrawing + fever; MUAC <11.5cm; severe dehydration;
+  stiff neck + fever (meningitis); BP ≥180/120; any BP ≥140/90 in pregnancy
 
-🟡 YELLOW — TREAT AND MONITOR (may need referral if no improvement in 2 days):
+🟡 YELLOW — TREAT AND MONITOR (refer if no improvement in 2 days):
   Fever without danger signs; fast breathing without chest indrawing;
-  some dehydration; moderate pallor; MUAC 11.5–12.4cm (moderate wasting)
+  some dehydration; moderate pallor; MUAC 11.5–12.4cm; BP 140–179/90–119 in non-pregnant adults
 
-🟢 GREEN — HOME CARE (educate caregiver; give follow-up instructions):
-  Normal vital signs; no danger signs; mild symptoms manageable at home;
-  good nutrition status
+🟢 GREEN — HOME CARE (educate caregiver; follow-up instructions):
+  Normal vital signs; no danger signs; mild symptoms manageable at home; good nutrition
 
-VITAL SIGNS REFERENCE (commit to memory):
+VITAL SIGNS REFERENCE:
+TEMPERATURE (axillary):
+  Normal: 36.0–37.4°C | Low-grade fever: 37.5–37.9°C | Fever: 38.0–38.9°C
+  High fever ≥39.0°C: urgent assessment | ≥39.5°C with danger signs = RED
 
-TEMPERATURE (axillary — subtract 0.5°C if rectal to compare):
-  Normal: 36.0–37.4°C
-  Low-grade fever: 37.5–37.9°C (monitor; treat if uncomfortable)
-  Fever: 38.0–38.9°C (give paracetamol; assess for malaria)
-  High fever: ≥39.0°C (urgent assessment; RDT for malaria if available)
-  Very high/danger: ≥39.5°C with danger signs = RED referral
-
-RESPIRATORY RATE (count for full 60 seconds when child is calm):
+RESPIRATORY RATE:
   0–2 months: Normal <60; Fast ≥60 = refer urgently
-  2–12 months: Normal <50; Fast ≥50 = possible pneumonia (YELLOW); with indrawing = RED
-  1–5 years: Normal <40; Fast ≥40 = possible pneumonia (YELLOW); with indrawing = RED
-  5+ years / adults: Normal <25 at rest; Fast ≥30 = concerning; laboured = urgent
+  2–12 months: Normal <50; Fast ≥50 = YELLOW; with indrawing = RED
+  1–5 years: Normal <40; Fast ≥40 = YELLOW; with indrawing = RED
+  5+ years/adults: Normal <25; ≥30 = concerning; laboured = urgent
 
-PULSE (beats per minute):
-  Infants: 100–160 normal; <80 or >180 = concerning
-  Children 1–5: 80–130 normal
-  Adults: 60–100 normal; >120 at rest in adult = tachycardia, investigate
+PULSE:
+  Infants: 100–160 normal | Children 1–5: 80–130 | Adults: 60–100; >120 at rest = investigate
 
 BLOOD PRESSURE (adults):
-  Normal: <120/80 mmHg
-  Elevated: 120–129/< 80 (lifestyle advice)
-  Stage 1 hypertension: 130–139 / 80–89 (refer for treatment)
-  Stage 2 hypertension: ≥140/90 (refer; start treatment if confirmed)
-  Hypertensive CRISIS: ≥180/120 = EMERGENCY → RED referral immediately
-  BP in pregnancy: ANY reading ≥140/90 in pregnant woman = URGENT referral (pre-eclampsia)
+  Normal: <120/80 | Stage 1 hypertension: 130–139/80–89 → refer
+  Stage 2: ≥140/90 → refer for treatment | Crisis ≥180/120 = RED EMERGENCY
+  Pregnancy: ANY BP ≥140/90 = URGENT referral (pre-eclampsia)
 
-MUAC (Mid-Upper Arm Circumference — measure on LEFT arm, halfway between shoulder and elbow):
-  Children 6–59 months:
-    GREEN ≥12.5 cm = Normal nutrition
-    YELLOW 11.5–12.4 cm = Moderate Acute Malnutrition (MAM) → refer for nutrition support
-    RED < 11.5 cm = Severe Acute Malnutrition (SAM) → URGENT referral + therapeutic feeding
-  MUAC in pregnant women: <23 cm = nutritional risk
+MUAC (children 6–59 months, left arm):
+  GREEN ≥12.5cm = Normal | YELLOW 11.5–12.4cm = Moderate Acute Malnutrition → refer
+  RED <11.5cm = Severe Acute Malnutrition = URGENT referral + therapeutic feeding
+  Pregnant women: MUAC <23cm = nutritional risk
 
-WEIGHT-FOR-AGE (approximate rules without chart):
-  Birth weight <2.5 kg = low birth weight (monitor closely)
-  Child losing weight or not gaining = concerning; measure MUAC
-  Visible severe wasting (very thin limbs + prominent ribs) = SAM even without MUAC
-
-DEHYDRATION ASSESSMENT (for diarrhoea):
+DEHYDRATION (for diarrhoea cases):
   🟢 No dehydration: Alert; drinks normally; normal skin turgor; no sunken eyes
-  🟡 Some dehydration: Restless/irritable; drinks eagerly/thirsty; sunken eyes; slow skin turgor
-  🔴 Severe dehydration: Lethargic/unconscious; unable to drink; very sunken eyes;
-      skin goes back very slowly = EMERGENCY → urgent referral + ORS
+  🟡 Some dehydration: Restless/irritable; drinks eagerly; sunken eyes; slow skin turgor
+  🔴 Severe dehydration: Lethargic; unable to drink; very sunken eyes; very slow turgor = EMERGENCY
 
-STETHOSCOPE — BASIC ASSESSMENT:
-  LUNGS: Normal = clear air entry; Abnormal = crackles/crepitations (fluid/pneumonia);
-    wheeze = bronchospasm (asthma, bronchiolitis); reduced entry = consolidation or effusion
-  HEART: Normal = clear S1, S2; Abnormal = murmur, irregular rhythm, very muffled sounds
-
-MALARIA RAPID DIAGNOSTIC TEST (RDT):
-  Positive = malaria confirmed → treat with ACT (artemisinin-based combination therapy)
-  Negative = malaria unlikely BUT if high fever with danger signs in Bayelsa, still consider
-    and discuss with supervising health worker
-  Test before treating — overuse of antimalarials causes resistance
-
-INSTRUMENTS — HOW TO USE CORRECTLY:
-THERMOMETER (digital axillary):
-  1. Clean with alcohol wipe; switch on
-  2. Place tip in armpit (axilla), press arm flat against body
-  3. Hold still for 60–90 seconds or until beep
-  4. Read result; add 0.5°C for true core temp equivalent
-  5. Clean again before next patient; never use same probe on different patients without cleaning
-
-BLOOD PRESSURE (manual or digital sphygmomanometer):
-  1. Patient seated, arm at heart level, relaxed for 5 min
-  2. Wrap cuff 2cm above elbow, snug but not tight
-  3. For manual: inflate to 180mmHg; slowly deflate; listen with stethoscope
-     First sound heard = systolic; last sound = diastolic
-  4. Take TWO readings at least 1 minute apart; record both
-  5. Use adult cuff for adults; paediatric cuff for children < 10 years
-
-WEIGHT (scale):
-  1. Zero the scale first (tare)
-  2. Infants: use hanging scale or infant tray; undress fully
-  3. Children/adults: remove shoes and heavy clothing; stand still
-  4. Record to nearest 0.1 kg
-
-LENGTH/HEIGHT:
-  Infants 0–24 months: measure lying down (RECUMBENT LENGTH) with length board
-  Children >24 months: stand against height board; feet flat, heels touching board,
-    head, shoulders, buttocks, heels all touching board; read at top of head
-  Note: recumbent length is ~0.5–1 cm more than standing height
-
-MUAC tape:
-  1. Patient relaxed, arm hanging naturally at side
-  2. Locate midpoint of LEFT upper arm (halfway between shoulder and elbow tip)
-  3. Wrap MUAC tape snugly but not tight (no gap, not squeezing)
-  4. Read colour zone: RED/YELLOW/GREEN
-  5. Record to nearest 0.1 cm
-
-RESPIRATORY RATE COUNTING:
-  1. Observe chest/abdomen rising; count each rise as ONE breath
-  2. Count for FULL 60 seconds (30-second count × 2 is less accurate for young children)
-  3. Child must be CALM — count while child is sleeping or quiet if possible
-  4. Crying child has falsely elevated rate — wait until calm
+MALARIA RDT:
+  Positive = malaria confirmed → treat with ACT
+  Negative = malaria unlikely BUT if high fever + danger signs in Bayelsa, still discuss with supervising health worker
+  Always test before treating — overuse causes resistance
 
 KEY REFERRAL FACILITIES FROM OLOIBIRI:
-  Nearest PHC: Oloibiri Primary Health Centre (on-site basic care)
-  Ogbia LGA Hospital, Ogbia town (more advanced care; ~20 min drive)
-  Federal Medical Centre, Yenagoa (full hospital; ~1.5–2 hours by road or boat)
+  Oloibiri Primary Health Centre (on-site basic care)
+  Ogbia LGA Hospital, Ogbia town (~20 min drive)
+  Federal Medical Centre, Yenagoa (full hospital; ~1.5–2 hours)
   Niger Delta University Teaching Hospital, Amassoma (~1 hour)
   For obstetric emergencies: FMC Yenagoa has maternity and NICU
 
-REFERRAL NOTE — ALWAYS WRITE:
-  Patient name, age, sex
-  Vital signs with time of measurement
-  Main complaint and duration
-  Key findings (danger signs, abnormal vitals)
-  Assessment/impression (not diagnosis)
-  Treatment given before referral (if any)
-  Your name and contact number
-  Date and time
+REFERRAL NOTE — ALWAYS INCLUDE:
+  Patient name, age, sex | Vital signs with time | Main complaint + duration
+  Key findings (danger signs, abnormal vitals) | Assessment/impression (not diagnosis)
+  Treatment given before referral | Navigator name + contact | Date and time
 `;
 
-// ─── Learning Topics ──────────────────────────────────────────────────────────
+// ─── Patient group config ─────────────────────────────────────────────────────
 
-const LEARNING_TOPICS: LearningTopic[] = [
-  {
-    id: 'instruments',
-    title: 'Using Clinical Instruments',
-    subtitle: 'Thermometer, BP cuff, weight, height, MUAC, stethoscope — how to use and interpret',
-    icon: <Stethoscope size={22} />,
-    colour: 'from-blue-600 to-indigo-600',
-    urgency: '📏 Master these before everything else',
-  },
-  {
-    id: 'imci-triage',
-    title: 'WHO IMCI Triage: Red / Yellow / Green',
-    subtitle: 'Danger signs, vital sign thresholds, and when to refer urgently',
-    icon: <AlertCircle size={22} />,
-    colour: 'from-red-600 to-orange-600',
-    urgency: '🚨 The core skill of every navigator',
-  },
-  {
-    id: 'malaria',
-    title: 'Malaria Assessment & Management',
-    subtitle: 'Fever protocols, RDT use, danger signs, treatment, referral — Bayelsa context',
-    icon: <Thermometer size={22} />,
-    colour: 'from-amber-600 to-yellow-600',
-    urgency: '🦟 #1 killer in Bayelsa — 56–70% prevalence',
-  },
-  {
-    id: 'child-nutrition',
-    title: 'Child Nutrition & Growth Monitoring',
-    subtitle: 'MUAC, weight-for-age, malnutrition classification, and therapeutic feeding',
-    icon: <Baby size={22} />,
-    colour: 'from-green-600 to-teal-600',
-  },
-  {
-    id: 'maternal',
-    title: 'Maternal & Newborn Health',
-    subtitle: 'Antenatal red flags, pre-eclampsia, danger signs in labour and postpartum',
-    icon: <Heart size={22} />,
-    colour: 'from-rose-600 to-pink-600',
-    urgency: '🤱 High maternal mortality in Niger Delta',
-  },
-  {
-    id: 'hypertension-adults',
-    title: 'Hypertension & Adult Health',
-    subtitle: 'BP measurement, hypertension stages, stroke prevention, diabetes screening',
-    icon: <Activity size={22} />,
-    colour: 'from-purple-600 to-violet-600',
-  },
-];
-
-const TOPIC_SYSTEM_PROMPTS: Record<string, string> = {
-  instruments: `You are a clinical trainer for Community Health Navigators in Nigeria. A student is learning to use medical instruments to assess patients in Oloibiri, Bayelsa.
-${CLINICAL_CONTEXT}
-TODAY'S TOPIC: Using clinical instruments correctly — thermometer, BP cuff, weight scale, length board, MUAC tape, stethoscope, RDT.
-
-TEACHING APPROACH:
-- Teach technique FIRST (exact steps), THEN interpretation (what numbers mean)
-- Be specific about common mistakes: wrong placement, not waiting for beep, rushing BP measurement, measuring height standing when should be lying, not zeroing scale
-- Teach the clinical significance: WHY does technique matter? (Wrong axillary temp misses fever; wrong MUAC classification misses malnutrition)
-- Use simple scenarios: "You measure a 3-year-old's temperature and get 38.5°C. What does that mean and what do you do next?"
-- Stethoscope: be realistic about what a trained navigator can hear (breath sounds present/absent, crackles, wheeze) vs what requires a doctor
-- MUAC is the single most life-saving measurement a navigator can do — teach it with passion
-
-CRITICAL TEACHING POINTS:
-- Thermometer: axillary method is standard; normal is 36.0–37.4°C; fever starts at 37.5°C; ≥39°C = urgent
-- MUAC: RED <11.5cm = SAM, this child can die without treatment this week; YELLOW 11.5–12.4cm = MAM; GREEN ≥12.5cm
-- RR counting: must be a FULL 60 seconds when child is CALM — never estimate
-- BP: two readings, arm relaxed, correct cuff size; first reading often falsely high
-- Weight: always zero scale; always remove shoes
-
-Be encouraging, practical, and check understanding with questions after each technique.`,
-
-  'imci-triage': `You are a WHO IMCI clinical trainer for community health workers in Bayelsa State, Nigeria.
-${CLINICAL_CONTEXT}
-TODAY'S TOPIC: WHO IMCI triage — RED (urgent referral), YELLOW (treat and monitor), GREEN (home care).
-
-CORE TEACHING:
-- IMCI is designed for community health workers with limited tools — it saves lives because it is simple and systematic
-- The colour system is not about what disease the patient has — it's about how urgently they need care
-- DANGER SIGNS = any one = RED, regardless of everything else: convulsions, cannot wake, vomits everything, not feeding/drinking, severe breathing difficulty
-- Fever assessment: Bayelsa is HIGH malaria risk; fever = malaria until RDT negative + no other diagnosis; with any danger sign = RED
-- Pneumonia classification: Fast breathing alone = YELLOW (give amoxicillin if available); chest indrawing = RED (urgent referral)
-- Diarrhoea: assess hydration first; severe dehydration = RED; some dehydration = YELLOW (ORS); no dehydration = GREEN (ORS at home)
-- Malnutrition: MUAC < 11.5 = RED; 11.5–12.4 = YELLOW; ≥12.5 = GREEN; visible severe wasting = RED
-
-PRACTICE WITH CASES:
-- Give the student 2-3 clinical scenarios and ask them to classify RED/YELLOW/GREEN
-- Ask them what they would do before and during referral
-- Emphasise: the navigator's job at RED is not to treat — it is to stabilise and GET THE PATIENT TO CARE FAST
-
-Be systematic. Use the colour codes explicitly. Give real Oloibiri scenarios: mother brings feverish child, man with chest pain, malnourished baby.`,
-
-  malaria: `You are a malaria expert and clinical trainer for community health workers in Bayelsa State — the highest malaria burden state in Nigeria.
-${CLINICAL_CONTEXT}
-TODAY'S TOPIC: Malaria — assessment, RDT use, danger signs, treatment, and referral.
-
-BAYELSA MALARIA REALITY:
-- Prevalence 56–70% — this is not theoretical; every fever case is a potential malaria case
-- Plasmodium falciparum is the deadly species; can progress from fever to coma in hours
-- Children under 5 and pregnant women are highest risk; child mortality from malaria: 200 per 1,000 per year in parts of Bayelsa
-- 2022 floods made malaria worse: more stagnant water = more mosquito breeding; 300+ communities submerged
-
-ASSESSMENT PROTOCOL (teach this step by step):
-1. Take temperature; note duration of fever; any history of rigor/chills
-2. Check ALL danger signs: convulsions? Can't wake? Unable to feed? Vomits everything?
-3. Respiratory assessment: fast breathing? Chest indrawing?
-4. Pallor: look at palms, inside eyelids — very pale = severe anaemia from malaria
-5. Rapid Diagnostic Test (RDT): explain how to do finger-stick, apply blood, read result at 15 min
-6. CLASSIFY: Severe malaria (any danger sign) = RED; Uncomplicated malaria + positive RDT = YELLOW/treat; Negative RDT + no danger sign = still consider malaria in high-risk context
-
-UNCOMPLICATED MALARIA TREATMENT (community level):
-- ACT (Artemisinin-based combination therapy): Artemether-Lumefantrine (AL, "Coartem") is standard
-- Dosing by weight: <5 kg = seek guidance; 5–14 kg = 1 tab twice daily × 3 days; 15–24 kg = 2 tabs; 25–34 kg = 3 tabs
-- Paracetamol for fever: 10–15 mg/kg every 4–6 hours
-- Complete full 3-day course even if fever resolves — this is critical
-
-SEVERE MALARIA = EMERGENCY:
-- Convulsions, loss of consciousness, inability to drink = RED → pre-referral treatment (rectal artesunate if available) then URGENT referral
-- Do not delay referral to give oral medications
-
-PREVENTION (teach community members):
-- Insecticide-treated bed nets (ITNs): use every night, not just when raining
-- Drain stagnant water around home
-- Pregnant women: intermittent preventive treatment (IPTp) at antenatal visits
-- Seek care within 24 hours of fever onset — waiting is dangerous
-
-Be urgent and specific. Malaria kills. The navigator who knows this protocol saves children's lives.`,
-
-  'child-nutrition': `You are a paediatric nutritionist and clinical trainer for community health workers in Bayelsa State, Nigeria.
-${CLINICAL_CONTEXT}
-TODAY'S TOPIC: Child nutrition assessment — MUAC measurement, weight-for-age, malnutrition classification, and what to do.
-
-THE MALNUTRITION CRISIS IN BAYELSA:
-- Stunting (chronic malnutrition) affects >40% of children under 5 in Bayelsa
-- Severe Acute Malnutrition (SAM) is a medical emergency — these children are dying
-- Floods destroy food crops and fishing grounds → food insecurity → malnutrition gets worse
-- A navigator who can identify SAM with a MUAC tape can save a life that would otherwise be missed
-
-MUAC — THE SINGLE MOST IMPORTANT MEASUREMENT (teach with precision):
-- Always LEFT arm; halfway between shoulder tip and elbow tip
-- Wrap snugly — gap = false high reading; tight = false low reading
-- MUAC tape colours: RED zone = SAM (<11.5 cm); YELLOW = MAM (11.5–12.4 cm); GREEN = normal (≥12.5 cm)
-- SAM child with ANY of: bilateral pitting oedema, medical complications, unable to eat = in-patient therapeutic feeding (ITFC)
-- SAM child WITHOUT complications = outpatient therapeutic feeding (OTC) — refer to PHC for RUTF (Ready-to-Use Therapeutic Food)
-
-WEIGHT AND HEIGHT:
-- Weight-for-age: use growth chart; below -2 SD = underweight; below -3 SD = severely underweight
-- Height-for-age: below -2 SD = stunting (chronic); more than -3 SD = severe stunting
-- How to plot on chart: find child's age on x-axis, weight on y-axis; mark where they intersect
-- For field settings: MUAC alone is sufficient for SAM screening; charts are for clinic follow-up
-
-OEDEMA:
-- Bilateral pitting oedema in feet/legs = severe malnutrition (kwashiorkor) even if MUAC is normal
-- Test: press firmly on top of foot for 3 seconds; release; pitting (dent remains) = positive
-- Any oedema in child = immediate referral
-
-FEEDING AND COUNSELLING:
-- Breastfeeding: exclusive breastfeeding 0–6 months; continues to 2 years with complementary foods
-- Complementary foods from 6 months: mashed cassava, yam, egg, fish, palm oil (adds calories and vitamin A)
-- Vitamin A: children 6–59 months should get Vitamin A capsule every 6 months at health facility
-- Zinc: reduces duration of diarrhoea — give 10mg/day (under 6 months) or 20mg/day × 10 days
-
-This topic saves lives and is often underemphasised. Be enthusiastic about MUAC measurement.`,
-
-  maternal: `You are a maternal and newborn health specialist and clinical trainer for community health workers in Bayelsa State, Nigeria.
-${CLINICAL_CONTEXT}
-TODAY'S TOPIC: Maternal and newborn health — danger signs in pregnancy, labour, and after delivery.
-
-CONTEXT — WHY THIS MATTERS:
-- Bayelsa has one of the highest maternal mortality rates in Nigeria
-- Many women deliver without skilled attendance; navigators may be first to identify danger
-- Pre-eclampsia and eclampsia are preventable causes of death if identified early
-- Malaria in pregnancy causes anaemia, low birth weight, and maternal death
-
-PREGNANCY DANGER SIGNS (REFER IMMEDIATELY):
-🔴 EMERGENCY REFERRAL:
-- Convulsions/seizures in pregnancy = ECLAMPSIA — life-threatening, refer urgently NOW
-- Severe headache + blurred vision + swelling = PRE-ECLAMPSIA (BP ≥140/90) — urgent
-- Fever in pregnancy = MALARIA → treat with ACT and refer for supervision
-- Heavy vaginal bleeding at any time in pregnancy = EMERGENCY → lie flat, refer now
-- Severe abdominal pain = possible ectopic pregnancy or abruption → EMERGENCY
-- Reduced or absent fetal movement in late pregnancy = urgent assessment needed
-- Pallor (very pale) = severe anaemia — refer for haemoglobin testing and treatment
-
-BLOOD PRESSURE IN PREGNANCY:
-- ANY reading ≥140/90 in a pregnant woman = pre-eclampsia until proven otherwise
-- Take two readings; if both elevated = urgent referral
-- This can happen suddenly in late pregnancy even without prior hypertension
-
-ANTENATAL VISITS (teach community members):
-- Minimum 4 visits (ideally 8): 1st trimester, 20 weeks, 28 weeks, 36 weeks
-- At each visit: BP, weight, urine test, malaria prevention (ITN + IPTp), iron/folate tablets
-- Tetanus toxoid vaccination: 2 doses during pregnancy
-- If mother has never attended ANC = urge referral at any point
-
-LABOUR DANGER SIGNS:
-- Labour lasting >12 hours in hospital, >24 hours at home = obstructed labour → EMERGENCY
-- Bleeding during labour = EMERGENCY → urgent referral
-- Cord visible before baby delivered (cord prolapse) = EMERGENCY
-
-NEWBORN DANGER SIGNS (first 7 days):
-- Convulsions, not breathing at birth, grunting, flaring nostrils, chest indrawing
-- Temperature <36°C (hypothermia) or >38°C (infection)
-- Not feeding/suckling after 12 hours
-- Yellow jaundice in first 24 hours (normal jaundice appears day 2–3)
-- Umbilical cord pus/redness = omphalitis → treat with antibiotic + refer
-
-REFERRAL PLANNING (teach all pregnant women):
-- Know the nearest facility with skilled birth attendant BEFORE labour begins
-- Plan transport in advance — boat hire or motorcycle taxi
-- Birth preparedness: money saved, transport arranged, blood donor identified
-
-Be compassionate but clear about danger signs. Many maternal deaths are preventable with fast action.`,
-
-  'hypertension-adults': `You are an adult health and chronic disease trainer for community health workers in Bayelsa State, Nigeria.
-${CLINICAL_CONTEXT}
-TODAY'S TOPIC: Hypertension, adult health assessment, and stroke prevention.
-
-WHY HYPERTENSION MATTERS IN OLOIBIRI:
-- Hypertension is increasingly common in Nigerian adults; many have never been diagnosed
-- Stress from economic hardship, oil community grievances, flood-related trauma + poor diet = rising BP
-- Most hypertension is ASYMPTOMATIC — patients feel fine until stroke or heart attack
-- Salt-heavy diets (dried fish, processed foods) and lack of exercise are major contributors
-- STROKE is the devastating consequence of uncontrolled hypertension; often fatal or disabling
-
-BP MEASUREMENT (correct technique is essential):
-- Patient must be seated and relaxed for at least 5 minutes before measuring
-- Two readings at least 1 minute apart; record both
-- Never measure one arm and one leg — always right arm at heart level
-- Large arm circumference = need larger cuff; wrong cuff size = wrong reading
-- NEVER tell a patient they have hypertension based on ONE reading on ONE day — needs confirmation
-
-CLASSIFICATION AND ACTION:
-  Normal <120/80: annual check; lifestyle advice
-  Elevated 120–129/<80: lifestyle modification; recheck in 6 months
-  Stage 1: 130–139/80–89: refer for lifestyle intervention + medication consideration
-  Stage 2: ≥140/90: refer to clinic for treatment to start (antihypertensives)
-  Crisis ≥180/120: URGENT referral — risk of stroke is immediate
-  Crisis WITH symptoms (headache, chest pain, visual disturbance): EMERGENCY → refer NOW
-
-LIFESTYLE ADVICE (give to all adults):
-- Reduce salt: avoid adding salt at table; reduce dried/smoked fish quantity
-- Exercise: 30 minutes walking most days
-- Maintain healthy weight: obesity is a major driver
-- No smoking; reduce alcohol
-- Stress management: community, church, family support
-
-DIABETES SCREENING (basic field assessment):
-- Ask about: excessive thirst, frequent urination, blurred vision, slow-healing wounds
-- Visible risk factors: obesity, family history, previous gestational diabetes
-- If suspected: refer for fasting blood glucose test (not possible in field without glucometer)
-- Simple rule: any adult with symptoms above + age >35 = refer for diabetes screening
-
-STROKE RECOGNITION (teach community members — FAST):
-  F — Face drooping: ask to smile; one side droops
-  A — Arm weakness: raise both arms; one drifts down
-  S — Speech slurred or confused
-  T — Time: call for help IMMEDIATELY; every minute brain tissue dies
-  Any ONE sign = EMERGENCY → transport to hospital now
-
-Be realistic: navigators cannot treat hypertension. But they can FIND IT before it kills.`,
+const PATIENT_GROUPS: Record<PatientGroup, {
+  label: string; emoji: string; colour: string;
+  bgLight: string; border: string; textColour: string;
+}> = {
+  'child-under-5': { label: 'Child under 5',  emoji: '👶🏿', colour: 'from-amber-500 to-orange-500', bgLight: 'bg-amber-50',  border: 'border-amber-300',  textColour: 'text-amber-700'  },
+  'child-5-14':    { label: 'Child 5–14',     emoji: '👧🏿', colour: 'from-teal-500 to-green-500',  bgLight: 'bg-teal-50',   border: 'border-teal-300',   textColour: 'text-teal-700'   },
+  'adult':         { label: 'Adult',           emoji: '🧑🏿', colour: 'from-blue-500 to-indigo-500', bgLight: 'bg-blue-50',   border: 'border-blue-300',   textColour: 'text-blue-700'   },
+  'pregnant':      { label: 'Pregnant woman',  emoji: '🤰🏿', colour: 'from-rose-500 to-pink-500',  bgLight: 'bg-rose-50',   border: 'border-rose-300',   textColour: 'text-rose-700'   },
+  'elderly':       { label: 'Elderly (60+)',   emoji: '👴🏿', colour: 'from-purple-500 to-violet-500', bgLight: 'bg-purple-50', border: 'border-purple-300', textColour: 'text-purple-700' },
 };
 
-// ─── Patient Personas ─────────────────────────────────────────────────────────
-
-const PATIENT_PERSONAS: PatientPersona[] = [
-  {
-    id: 'child_adaeze',
-    name: 'Adaeze (age 3)',
-    age: '3',
-    description: '3-year-old girl, brought by her mother — fever and fast breathing for 2 days',
-    emoji: '👧🏿',
-    colour: 'from-amber-600 to-orange-600',
-    presentation: 'Mother reports 2 days of fever, child is eating less, breathing seems fast. No convulsions. Child is awake but tired and miserable. This is a classic Bayelsa fever presentation — malaria must be ruled out. RDT is available.',
-    mainChallenge: 'Fever + fast breathing = could be malaria OR pneumonia OR both. Student must assess systematically.',
-    openingLine: `Good afternoon. Please, my daughter — she has been hot for two days now. She is not eating well. And she is breathing faster than normal, I think. No fits, she can drink. I am worried. What is wrong with her?`,
-    systemPrompt: `You are the mother of Adaeze, a 3-year-old girl from Oloibiri. You have brought her to the community health navigator because she has had fever for 2 days and is breathing faster than usual.
-${CLINICAL_CONTEXT}
-
-YOUR DAUGHTER'S ACTUAL CLINICAL PICTURE (reveal only when asked the right questions):
-- Temperature: 38.9°C axillary
-- Respiratory rate: 43 breaths/minute (FAST for her age — normal is <40)
-- Weight: 12.5 kg (appropriate for age)
-- MUAC: 13.0 cm (GREEN — normal)
-- No chest indrawing
-- Mild pallor on palm and inner eyelids
-- No danger signs (she is awake, drinking, no convulsions, not vomiting everything)
-- Fever duration: 2 days; started suddenly; some rigors first night
-- RDT result: POSITIVE for malaria (when the navigator performs it)
-- No cough; no diarrhoea
-
-CLINICAL CLASSIFICATION (what a trained navigator should determine):
-- This is UNCOMPLICATED MALARIA with fast breathing (likely malaria-related respiratory change, not pneumonia as no cough, no indrawing)
-- YELLOW classification (treat and monitor; no immediate emergency but needs ACT treatment TODAY)
-- If chest indrawing were present → RED; if convulsions → RED
-
-YOUR CHARACTER:
-- You are anxious and loving — this is your child
-- You speak warm Nigerian English; occasional Pidgin
-- You will answer questions honestly when asked
-- You get more information than the navigator asks for sometimes (mothers talk!)
-- You respond with relief when the navigator is systematic and reassuring
-- You become worried if the navigator seems unsure or doesn't examine her properly
-
-REVEAL measurements ONLY when the navigator asks for them:
-- If they ask about temperature → "I felt she was very hot; I don't have a thermometer at home" (navigator must measure)
-- If they count breathing → you look impressed: "You are counting so carefully! Is it bad?"
-- If they check for pallor → "Her eyes look a bit pale — I noticed that"
-
-After examination, ask: "What is it? Is it serious? What medicine must I give her?"`,
-  },
-  {
-    id: 'mama_joy',
-    name: 'Mama Joy (pregnant, 7 months)',
-    age: '28',
-    description: 'Pregnant woman, 7 months, reporting severe headache and swollen feet',
-    emoji: '🤰🏿',
-    colour: 'from-rose-600 to-pink-600',
-    presentation: 'Mama Joy is 28 years old and 7 months pregnant (third child). She reports severe headache for 2 days and her feet and ankles are very swollen. She has not attended antenatal clinic. BP will be found elevated. This is pre-eclampsia presentation requiring urgent referral.',
-    mainChallenge: 'Student must measure BP correctly, recognise pre-eclampsia danger signs, and communicate urgency calmly but clearly.',
-    openingLine: `Good morning. I am 7 months pregnant. For two days now I have this very bad headache — not like normal headache, it is heavy and throbbing. And my feet are swollen — look. My husband said it is just from standing too long. But I am worried. I have not gone to the clinic since my first pregnancy check. Is everything okay?`,
-    systemPrompt: `You are Mama Joy, a 28-year-old woman who is 7 months (28 weeks) pregnant with her third child. You have come to the community health navigator with a severe headache for 2 days and swollen feet.
-${CLINICAL_CONTEXT}
-
-YOUR ACTUAL CLINICAL PICTURE (reveal when asked the right questions):
-- Blood pressure: 158/102 mmHg (measured twice — both times elevated) = Stage 2, pre-eclampsia territory
-- No convulsions (yet)
-- Severe headache: throbbing, frontal, 2 days, not responding to paracetamol
-- Feet and ankles: bilateral pitting oedema (you can press and see the dent)
-- Blurred vision: "Sometimes the edges of things are not clear — I thought it was tiredness"
-- No vaginal bleeding
-- Baby is moving (you felt movement this morning)
-- You have had 1 ANC visit (at 12 weeks); no BP was taken or recorded
-- Previous pregnancies: no complications; 2 healthy children
-
-CLINICAL REALITY: This is PRE-ECLAMPSIA — urgent referral needed. Without treatment this can progress to eclampsia (seizures) and maternal/fetal death within hours or days.
-
-YOUR CHARACTER:
-- You are slightly minimising — your husband said it's nothing; you don't want to be a drama
-- But you are intelligent and scared, and you KNOW something feels wrong
-- You respond to serious, calm, respectful care
-- You become appropriately alarmed (not panicked) when the navigator explains the BP reading
-- You have practical concerns about transport: "Yenagoa is far. Who will watch my other children?"
-
-REVEAL info when asked:
-- BP: navigator must measure; do not reveal spontaneously
-- Blurred vision: reveal ONLY if asked directly about vision — "You mention it now — yes, sometimes..."
-- Oedema: visible on feet; readily confirm when navigator looks
-
-After navigator explains: ask "How dangerous is this? Can I wait until my husband comes home?"
-This is the crucial moment — the navigator must convey urgency WITHOUT causing panic.`,
-  },
-  {
-    id: 'baba_charles_adult',
-    name: 'Baba Charles (age 61)',
-    age: '61',
-    description: 'Elderly man, complaining of headache and dizziness — no prior health checks in years',
-    emoji: '👴🏿',
-    colour: 'from-purple-700 to-indigo-700',
-    presentation: 'Baba Charles is 61 years old. He has never had his BP measured. He reports headache and dizziness for 3 weeks — comes and goes. He smokes occasionally, eats plenty of dried fish, and does not exercise much. BP will be Stage 2 hypertension. No acute emergency but needs referral for treatment.',
-    mainChallenge: 'Student must take careful BP readings, explain hypertension clearly without alarming, and motivate him to attend clinic.',
-    openingLine: `My son, good afternoon. My daughter told me to come and see you. I have this headache and dizziness — coming and going for three weeks now. I am not one to go to hospital, I have never been sick in my life. Probably it is nothing. I am 61 years. My father lived to 80. I am fine. But my daughter insisted.`,
-    systemPrompt: `You are Baba Charles, a 61-year-old man from Oloibiri. You have never had your blood pressure measured. You are slightly dismissive of health concerns — you have never been "sick" and don't like hospitals.
-${CLINICAL_CONTEXT}
-
-YOUR ACTUAL CLINICAL PICTURE (reveal when asked):
-- BP: First reading 162/98 mmHg; second reading 158/96 mmHg = Stage 2 hypertension, needs treatment
-- No hypertensive crisis; no chest pain; no arm weakness; no facial drooping = not an acute emergency
-- Headache: throbbing, mostly at back of head; worse in mornings; 3 weeks
-- Dizziness: occasional; especially when standing up quickly
-- No history of diabetes; no chest pain
-- Diet: lots of dried fish, occasional fried foods, no fresh vegetables most days
-- Smokes 2–3 cigarettes a day; drinks palm wine "occasionally"
-- No prior blood pressure measurement ever
-- Family history: father died of "sudden collapse" at 72 — likely stroke
-
-YOUR CHARACTER:
-- Initially dismissive: "I am fine, I am 61 not 80"
-- Responds to respect — if the navigator treats you as an intelligent adult elder, you engage
-- When you see the BP numbers (you have seen them on phone health apps), ask: "What does that mean?"
-- You are proud; you don't want to be seen as frail; frame health as strength ("treat this so you stay strong")
-- Practical concern: "The clinic in Ogbia — I will need someone to take me"
-- Deeper concern you don't say out loud: "My father died of collapse. I am scared."
-
-REVEAL when specifically asked:
-- Family history: "My father — he just fell down one day. They said it was the head."
-- Diet details when asked about salt: "Salt? We eat properly in this house. And dried fish, yes."
-- Smoking: "Small small, not a proper smoker."
-
-When the navigator explains the BP reading well, shift: "So this thing can kill me? Even though I feel okay?"
-This is the teaching moment about silent hypertension.`,
-  },
-  {
-    id: 'baby_isoken',
-    name: 'Baby Isoken (9 months)',
-    age: '0',
-    description: '9-month-old baby, brought by grandmother — poor feeding, weight loss, and diarrhoea',
-    emoji: '👶🏿',
-    colour: 'from-teal-700 to-green-700',
-    presentation: 'Grandmother brings Baby Isoken, 9 months old. The baby has had diarrhoea for 5 days, is feeding poorly, and visually looks thin. MUAC will be in RED zone (SAM). The baby has some dehydration signs. Mother is away in Yenagoa — grandmother is the caregiver.',
-    mainChallenge: 'Student must perform MUAC, assess dehydration, identify SAM + diarrhoea combination requiring urgent referral, and communicate clearly to an elderly non-medical caregiver.',
-    openingLine: `Please help. I am the grandmother of this baby — her mother is in Yenagoa working. The child has been having running stomach for five days. She is not eating well. Look at her — she is getting thin. She was not like this before. What can I do?`,
-    systemPrompt: `You are the grandmother of Baby Isoken, a 9-month-old girl. The baby's mother is working in Yenagoa. You are the primary caregiver and you are worried.
-${CLINICAL_CONTEXT}
-
-THE BABY'S ACTUAL CLINICAL PICTURE (reveal when asked/examined):
-- MUAC: 10.8 cm = RED zone = SEVERE ACUTE MALNUTRITION (SAM)
-- Weight: 5.8 kg (she weighed 7.2 kg at 6 months — visible weight loss)
-- Temperature: 37.2°C (no fever)
-- Respiratory rate: 42 bpm (acceptable for age 2–12 months, normal <50 — this is fine)
-- Diarrhoea: 5 days; watery; 4–6 episodes per day; no blood in stool
-- Dehydration: SOME dehydration (not severe): irritable; drinks when offered; slightly sunken eyes; skin turgor slow but returns
-- No convulsions; no unconscious; CAN drink (some dehydration, not severe)
-- Not on breast: mother stopped breastfeeding at 7 months; baby on only soft cassava pap + water
-- Visible wasting: ribs visible when looking at baby; limbs look very thin
-- Oedema: NONE (so this is marasmus / SAM from wasting, not kwashiorkor)
-
-CLINICAL CLASSIFICATION:
-- SAM (MUAC <11.5cm) = requires urgent referral for therapeutic feeding
-- Some dehydration (not severe dehydration) = give ORS before and during referral
-- Overall: YELLOW trending to RED — needs same-day referral
-- The combination of SAM + diarrhoea is dangerous — gut infection spreading in a malnourished baby
-
-YOUR CHARACTER:
-- You are deeply worried and humble; you feel responsible; you did your best
-- You speak simple Nigerian English; may not understand medical terms
-- When navigator explains MUAC as RED: "What does that mean? Is she going to die?"
-- You have one concern: "I don't know if I can go to Ogbia — who will watch my other grandchildren at home?"
-- You respond warmly to any clear, kind explanation
-- When told about ORS: "I have sugar and salt at home — is that the same thing?"
-
-IMPORTANT: grandmother does not know the severity until the navigator explains. Do not add drama — just be a worried elderly woman doing her best. The severity will emerge from proper clinical assessment.`,
-  },
-];
-
-// ─── Rubric ────────────────────────────────────────────────────────────────────
-
-const CONSULT_RUBRIC = [
-  { id: 'assessment', label: 'Systematic Assessment',  desc: 'Did the student take a structured history and all relevant measurements before forming an impression?' },
-  { id: 'triage',     label: 'Correct Triage (R/Y/G)', desc: 'Did the student correctly classify the urgency using RED/YELLOW/GREEN and explain why?' },
-  { id: 'safety',     label: 'Safety & Danger Signs',  desc: 'Did the student check for and respond appropriately to all relevant danger signs?' },
-  { id: 'communication', label: 'Communication',       desc: 'Was advice clear, respectful, and appropriate for the caregiver\'s understanding?' },
-  { id: 'referral',   label: 'Referral Planning',      desc: 'Did the student give clear referral guidance including where to go, what to say, and what to watch for?' },
-];
-
-const LEVEL_LABELS: Record<number, { text: string; color: string; bg: string }> = {
-  0: { text: 'No Evidence', color: 'text-gray-500',    bg: 'bg-gray-100' },
-  1: { text: 'Emerging',    color: 'text-amber-700',   bg: 'bg-amber-100' },
-  2: { text: 'Proficient',  color: 'text-blue-700',    bg: 'bg-blue-100' },
-  3: { text: 'Advanced',    color: 'text-emerald-700', bg: 'bg-emerald-100' },
+const TRIAGE_CONFIG: Record<TriageLevel, {
+  label: string; colour: string; bg: string; border: string;
+  textDark: string; icon: React.ReactNode; description: string;
+}> = {
+  red:     { label: 'RED — Urgent Referral', colour: 'text-red-700',    bg: 'bg-red-50',    border: 'border-red-400',    textDark: 'text-red-800',    icon: <AlertTriangle size={14}/>, description: 'Refer immediately. Do not delay.' },
+  yellow:  { label: 'YELLOW — Treat & Monitor', colour: 'text-yellow-700', bg: 'bg-yellow-50', border: 'border-yellow-400', textDark: 'text-yellow-800', icon: <AlertCircle size={14}/>,  description: 'Treat and monitor. Refer if no improvement in 2 days.' },
+  green:   { label: 'GREEN — Home Care', colour: 'text-green-700',  bg: 'bg-green-50',  border: 'border-green-400',  textDark: 'text-green-800',  icon: <CheckCircle size={14}/>,  description: 'Home care with education and follow-up instructions.' },
+  pending: { label: 'Pending Assessment',  colour: 'text-gray-500',   bg: 'bg-gray-50',   border: 'border-gray-300',   textDark: 'text-gray-700',   icon: <Clock size={14}/>,        description: 'Assessment in progress.' },
 };
 
-// ─── Background ───────────────────────────────────────────────────────────────
+const VILLAGES = ['Oloibiri', 'Ibiade', 'Otuabagi', 'Nembe', 'Ogbia', 'Yenagoa', 'Ikebiri', 'Other'];
+
+// ─── Build AI triage system prompt ───────────────────────────────────────────
+
+function buildTriagePrompt(patient: Patient, assessment: AssessmentData): string {
+  const pg = PATIENT_GROUPS[patient.patient_group];
+  const ageStr = patient.age_years != null
+    ? `${patient.age_years} years${patient.age_months ? ` ${patient.age_months} months` : ''}`
+    : patient.age_months != null ? `${patient.age_months} months` : 'age not specified';
+
+  return `You are a clinical decision support system for a trained Community Health Navigator in Oloibiri, Bayelsa State, Nigeria. The navigator has completed a structured patient assessment and needs your AI-assisted triage classification.
+
+${CLINICAL_CONTEXT}
+
+PATIENT: ${patient.patient_name}, ${pg.label} (${ageStr}), ${patient.sex || 'sex not recorded'}, ${patient.village}
+
+ASSESSMENT DATA COLLECTED:
+Chief complaint: ${assessment.chiefComplaint || 'not recorded'}
+
+VITALS:
+- Temperature: ${assessment.tempC ? `${assessment.tempC}°C (${assessment.tempMethod})` : 'not measured'}
+- Respiratory rate: ${assessment.respiratoryRate ? `${assessment.respiratoryRate} breaths/min` : 'not measured'}
+- Pulse: ${assessment.pulseRate ? `${assessment.pulseRate} bpm` : 'not measured'}
+- Blood pressure: ${assessment.bpSystolic && assessment.bpDiastolic ? `${assessment.bpSystolic}/${assessment.bpDiastolic} mmHg` : 'not measured'}
+
+ANTHROPOMETRY:
+- Weight: ${assessment.weightKg ? `${assessment.weightKg} kg` : 'not measured'}
+- Height: ${assessment.heightCm ? `${assessment.heightCm} cm` : 'not measured'}
+- MUAC: ${assessment.muacCm ? `${assessment.muacCm} cm` : 'not measured'}
+
+GENERAL DANGER SIGNS:
+- Convulsions: ${assessment.convulsions ? '✅ YES' : 'No'}
+- Unconscious/cannot wake: ${assessment.unconscious ? '✅ YES' : 'No'}
+- Unable to feed/drink: ${assessment.unableToFeed ? '✅ YES' : 'No'}
+- Vomits everything: ${assessment.vomitsEverything ? '✅ YES' : 'No'}
+
+SYMPTOMS:
+- Fever: ${assessment.fever ? `Yes (${assessment.feverDays || '?'} days)` : 'No'}
+- Cough: ${assessment.cough ? `Yes (${assessment.coughDays || '?'} days)` : 'No'}
+- Chest indrawing: ${assessment.chestIndrawing ? '✅ YES' : 'No'}
+- Diarrhoea: ${assessment.diarrhoea ? `Yes (${assessment.diarrhoeaDays || '?'} days)${assessment.bloodInStool ? ' + blood in stool' : ''}` : 'No'}
+- Vomiting: ${assessment.vomiting ? 'Yes' : 'No'}
+
+SIGNS:
+- Palmar pallor: ${assessment.palmarPallor ? 'Yes' : 'No'}
+- Stiff neck: ${assessment.stiffNeck ? '✅ YES' : 'No'}
+- Eye jaundice: ${assessment.eyeJaundice ? 'Yes' : 'No'}
+- Oedema: ${assessment.oedema ? 'Yes' : 'No'}
+
+MALARIA:
+- RDT result: ${assessment.rdt}
+- Recent bednet use: ${assessment.recentBednetUse ? 'Yes' : 'No'}
+
+ADDITIONAL NOTES: ${assessment.additionalNotes || 'None'}
+
+YOUR TASK — provide a structured triage response:
+
+1. **TRIAGE CLASSIFICATION**: State clearly — RED / YELLOW / GREEN — and the single most important reason
+2. **KEY FINDINGS**: List the 2–4 most clinically significant findings from this assessment
+3. **IMMEDIATE ACTIONS**: What the navigator must do RIGHT NOW (step by step)
+4. **REFERRAL GUIDANCE** (if RED or YELLOW): Where to go, what to say, what pre-referral actions to take
+5. **REFERRAL NOTE DRAFT**: Write a ready-to-use referral note the navigator can copy or read aloud
+6. **FOLLOW-UP**: If GREEN or YELLOW, when to reassess and what warning signs to watch for
+
+IMPORTANT CONSTRAINTS:
+- You are supporting a trained navigator, NOT replacing clinical judgement
+- Use clear, plain language — the navigator may read this aloud to a supervisor
+- If any danger sign is present: classify RED regardless of other findings
+- Always err on the side of caution in this resource-limited high-risk context
+- Note any measurements that were NOT taken that should have been for this patient type
+- End with one sentence the navigator can say directly to the patient/caregiver
+
+⚠️ DISCLAIMER: This is clinical decision SUPPORT only. The navigator must follow their training and supervision protocols. This does not replace a doctor's assessment.`;
+}
+
+// ─── Build follow-up chat prompt ──────────────────────────────────────────────
+
+function buildFollowupPrompt(patient: Patient, assessment: Assessment): string {
+  const pg = PATIENT_GROUPS[patient.patient_group];
+  const tc = TRIAGE_CONFIG[assessment.triage_level];
+  return `You are a clinical decision support advisor for a Community Health Navigator in Oloibiri, Bayelsa State, Nigeria. The navigator has completed an assessment and has follow-up questions.
+
+${CLINICAL_CONTEXT}
+
+PATIENT ON FILE: ${patient.patient_name}, ${pg.label}, ${patient.village}
+TRIAGE CLASSIFICATION: ${tc.label}
+CHIEF COMPLAINT: ${assessment.assessment_data.chiefComplaint || 'not recorded'}
+AI TRIAGE SUMMARY: ${assessment.ai_triage_summary || 'see assessment'}
+
+The navigator may ask follow-up clinical questions, ask for clarification on the triage, ask how to explain something to the patient/caregiver, or ask about referral logistics.
+
+Respond with practical, specific advice appropriate to this community health navigator role. Keep answers concise and actionable. Never prescribe specific drug doses unless part of approved IMCI/CHIPS protocols. Remind the navigator to consult their supervising health worker for anything outside their scope.`;
+}
+
+// ─── Healthcare background (preserved from original) ─────────────────────────
 
 const HealthBackground: React.FC = () => {
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
@@ -757,32 +371,32 @@ const HealthBackground: React.FC = () => {
     window.addEventListener('mousemove', h);
     return () => { window.removeEventListener('mousemove', h); if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
-  const img = "url('/backghround_healthcare.jpg')";
+  const img = "url('/background_healthcare_navigator.png')";
   return (
     <>
       <svg className="absolute w-0 h-0" aria-hidden="true">
         <defs>
           <filter id="health-distortion">
-            <feTurbulence type="fractalNoise" baseFrequency="0.010" numOctaves="3" seed="22" result="noise" />
-            <feDisplacementMap in="SourceGraphic" in2="noise" scale="50" xChannelSelector="R" yChannelSelector="G" result="displaced" />
+            <feTurbulence type="fractalNoise" baseFrequency="0.007" numOctaves="3" seed="22" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="55" xChannelSelector="R" yChannelSelector="G" result="displaced" />
             <feGaussianBlur in="displaced" stdDeviation="1" />
           </filter>
         </defs>
       </svg>
       <div className="fixed top-16 left-64 right-0 bottom-0" style={{ backgroundImage: img, backgroundSize: 'cover', backgroundPosition: 'center', zIndex: 0 }}>
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-900/70 via-blue-900/60 to-indigo-900/65" />
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-900/70 via-indigo-900/60 to-teal-900/65" />
         <div className="absolute inset-0 bg-black/10" />
       </div>
       {moving && (
         <div className="fixed top-16 left-64 right-0 bottom-0 pointer-events-none" style={{ backgroundImage: img, backgroundSize: 'cover', backgroundPosition: 'center', zIndex: 1, filter: 'url(#health-distortion)', WebkitMaskImage: `radial-gradient(circle 160px at ${mouse.x}px ${mouse.y}px, black 0%, black 45%, transparent 100%)`, maskImage: `radial-gradient(circle 160px at ${mouse.x}px ${mouse.y}px, black 0%, black 45%, transparent 100%)` }}>
-          <div className="absolute inset-0 bg-gradient-to-br from-slate-900/70 via-blue-900/60 to-indigo-900/65" />
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-900/70 via-indigo-900/60 to-teal-900/65" />
         </div>
       )}
     </>
   );
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Markdown renderer (preserved from original) ──────────────────────────────
 
 const MarkdownText: React.FC<{ text: string }> = ({ text }) => (
   <div className="space-y-1.5">
@@ -790,24 +404,32 @@ const MarkdownText: React.FC<{ text: string }> = ({ text }) => (
       if (!line.trim()) return <div key={i} className="h-1.5" />;
       const html = line
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-        .replace(/🔴/g, '<span class="text-red-500">🔴</span>')
-        .replace(/🟡/g, '<span class="text-yellow-500">🟡</span>')
-        .replace(/🟢/g, '<span class="text-green-500">🟢</span>');
+        .replace(/\*(.*?)\*/g, '<em>$1</em>');
       return <p key={i} className="leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />;
     })}
   </div>
 );
 
-const Field: React.FC<{ label: string; children: React.ReactNode; required?: boolean }> = ({ label, children, required }) => (
+// ─── Checkbox row helper ──────────────────────────────────────────────────────
+
+const CheckRow: React.FC<{
+  label: string; checked: boolean; onChange: (v: boolean) => void;
+  danger?: boolean; subField?: React.ReactNode;
+}> = ({ label, checked, onChange, danger, subField }) => (
   <div>
-    <label className="block text-sm font-semibold text-gray-700 mb-1">{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
-    {children}
+    <label className={classNames('flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-colors',
+      checked
+        ? danger ? 'bg-red-50 border-red-400' : 'bg-blue-50 border-blue-400'
+        : 'border-gray-200 hover:border-gray-300')}>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
+        className={classNames('w-4 h-4', danger ? 'accent-red-600' : 'accent-blue-600')} />
+      <span className={classNames('text-sm font-medium', checked && danger ? 'text-red-700 font-bold' : 'text-gray-800')}>
+        {danger && checked && '⚠️ '}{label}
+      </span>
+    </label>
+    {checked && subField && <div className="mt-1 ml-10">{subField}</div>}
   </div>
 );
-
-const inputCls = "w-full px-3 py-2 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400";
-const checkCls = "flex items-center gap-2 cursor-pointer";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Component
@@ -816,130 +438,186 @@ const checkCls = "flex items-center gap-2 cursor-pointer";
 const HealthcareNavigatorPage: React.FC = () => {
   const { user } = useAuth();
 
-  const [mode, setMode]                     = useState<AppMode>('select');
-  const [selectedTopic, setTopic]           = useState<LearningTopic | null>(null);
-  const [selectedPersona, setPersona]       = useState<PatientPersona | null>(null);
-  const [messages, setMessages]             = useState<ChatMessage[]>([]);
-  const [inputText, setInputText]           = useState('');
-  const [isSending, setIsSending]           = useState(false);
-  const [isEvaluating, setIsEvaluating]     = useState(false);
-  const [isSaving, setIsSaving]             = useState(false);
-  const [isAssessing, setIsAssessing]       = useState(false);
-  const [evaluation, setEvaluation]         = useState<any | null>(null);
-  const [assessResult, setAssessResult]     = useState<string>('');
-  const [showEvalModal, setShowEvalModal]   = useState(false);
-  const [dashboardId, setDashboardId]       = useState<string | null>(null);
-  const [assessment, setAssessment]         = useState<AssessmentData>(BLANK_ASSESSMENT);
+  // ── Navigation
+  const [mode, setMode] = useState<AppMode>('dashboard');
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(null);
 
-  const [voices, setVoices]                 = useState<SpeechSynthesisVoice[]>([]);
-  const [speechOn, setSpeechOn]             = useState(true);
-  const [isListening, setIsListening]       = useState(false);
-  const recognitionRef                      = useRef<any>(null);
-  const chatEndRef                          = useRef<HTMLDivElement>(null);
-  const inputRef                            = useRef<HTMLTextAreaElement>(null);
-  const hasInitiated                        = useRef(false);
+  // ── Data
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [loadingPatients, setLoadingPatients] = useState(true);
+  const [loadingAssessments, setLoadingAssessments] = useState(false);
 
+  // ── Add-patient form
+  const [newName, setNewName] = useState('');
+  const [newVillage, setNewVillage] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newAgeYears, setNewAgeYears] = useState('');
+  const [newAgeMonths, setNewAgeMonths] = useState('');
+  const [newSex, setNewSex] = useState<'male' | 'female' | ''>('');
+  const [newGroup, setNewGroup] = useState<PatientGroup>('adult');
+  const [newNotes, setNewNotes] = useState('');
+  const [savingPatient, setSavingPatient] = useState(false);
+
+  // ── Assessment form
+  const [assessment, setAssessment] = useState<AssessmentData>({ ...BLANK_ASSESSMENT });
+  const [isTriaging, setIsTriaging] = useState(false);
+  const [triageResult, setTriageResult] = useState<{ level: TriageLevel; summary: string } | null>(null);
+  const [navigatorActions, setNavigatorActions] = useState('');
+  const [followUpNeeded, setFollowUpNeeded] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState('');
+  const [followUpNotes, setFollowUpNotes] = useState('');
+  const [savingAssessment, setSavingAssessment] = useState(false);
+  const [assessmentSaved, setAssessmentSaved] = useState(false);
+
+  // ── Follow-up chat
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [speechOn, setSpeechOn] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<any>(null);
+
+  // ─── Voice ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const load = () => setVoices(window.speechSynthesis.getVoices());
-    load(); window.speechSynthesis.addEventListener('voiceschanged', load);
+    load();
+    window.speechSynthesis.addEventListener('voiceschanged', load);
     return () => window.speechSynthesis.removeEventListener('voiceschanged', load);
   }, []);
 
   const speak = useCallback((text: string) => {
     if (!speechOn || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(text.slice(0, 380));
-    const voice = voices.find(v => v.name === 'Google UK English Female') || voices.find(v => v.lang === 'en-GB') || voices.find(v => v.lang.startsWith('en'));
+    const utt = new SpeechSynthesisUtterance(text.slice(0, 400));
+    const voice = voices.find(v => v.lang === 'en-NG') || voices.find(v => v.lang.startsWith('en'));
     if (voice) { utt.voice = voice; utt.lang = voice.lang; }
     utt.rate = 0.87;
     window.speechSynthesis.speak(utt);
   }, [speechOn, voices]);
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
-  useEffect(() => { const last = messages[messages.length - 1]; if (last?.role === 'assistant') speak(last.content); }, [messages, speak]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isSending]);
 
-  useEffect(() => {
-    if ((mode === 'learn-chat' || mode === 'consult-chat') && !hasInitiated.current) {
-      hasInitiated.current = true;
-      initiateSession();
-    }
-    if (mode !== 'learn-chat' && mode !== 'consult-chat') hasInitiated.current = false;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  // ─── Load patients ────────────────────────────────────────────────────────
+  const loadPatients = useCallback(async () => {
+    if (!user) return;
+    setLoadingPatients(true);
+    try {
+      const { data, error } = await supabase
+        .from('health_patient_summary')
+        .select('*')
+        .eq('youth_user_id', user.id)
+        .order('patient_name');
+      if (!error && data) setPatients(data as Patient[]);
+    } finally { setLoadingPatients(false); }
+  }, [user]);
 
-  const createEntry = async (title: string) => {
-    if (!user?.id) return;
-    const { data } = await supabase.from('dashboard').insert({
-      user_id: user.id, activity: 'healthcare_navigator',
-      category_activity: 'Community Impact',
-      sub_category: selectedTopic?.id || selectedPersona?.id || 'assessment',
-      title, progress: 'started',
-      chat_history: JSON.stringify([]),
-      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    }).select('id').single();
-    if (data?.id) setDashboardId(data.id);
+  useEffect(() => { loadPatients(); }, [loadPatients]);
+
+  // ─── Load assessments ─────────────────────────────────────────────────────
+  const loadAssessments = useCallback(async (patientId: string) => {
+    setLoadingAssessments(true);
+    try {
+      const { data, error } = await supabase
+        .from('health_assessments')
+        .select('*')
+        .eq('patient_id', patientId)
+        .order('created_at', { ascending: false });
+      if (!error && data) setAssessments(data as Assessment[]);
+    } finally { setLoadingAssessments(false); }
+  }, []);
+
+  // ─── Field updater ────────────────────────────────────────────────────────
+  const setField = <K extends keyof AssessmentData>(key: K, value: AssessmentData[K]) =>
+    setAssessment(prev => ({ ...prev, [key]: value }));
+
+  // ─── Detect triage from AI text ───────────────────────────────────────────
+  const detectTriage = (text: string): TriageLevel => {
+    const upper = text.toUpperCase();
+    if (upper.includes('RED')) return 'red';
+    if (upper.includes('YELLOW')) return 'yellow';
+    if (upper.includes('GREEN')) return 'green';
+    return 'yellow'; // default to caution
   };
 
-  const persistChat = useCallback(async (msgs: ChatMessage[], eval_: any = null) => {
-    if (!dashboardId) return;
-    await supabase.from('dashboard').update({
-      chat_history: JSON.stringify(msgs),
-      ...(eval_ && { english_skills_evaluation: eval_ }),
-      progress: eval_?.can_advance ? 'completed' : 'started',
-      updated_at: new Date().toISOString(),
-    }).eq('id', dashboardId);
-  }, [dashboardId]);
+  // ─── Run AI triage ────────────────────────────────────────────────────────
+  const runTriage = async () => {
+    if (!selectedPatient || isTriaging) return;
+    setIsTriaging(true);
+    try {
+      const systemPrompt = buildTriagePrompt(selectedPatient, assessment);
+      const reply = await chatText(systemPrompt, [{ role: 'user', content: 'Please analyse this patient assessment and provide your triage classification.' }]);
+      const level = detectTriage(reply);
+      setTriageResult({ level, summary: reply });
+      speak(reply.slice(0, 200));
+    } catch { setTriageResult({ level: 'yellow', summary: 'Unable to complete AI triage. Please use your clinical training and contact your supervising health worker.' }); }
+    finally { setIsTriaging(false); }
+  };
 
-  const initiateSession = async () => {
+  // ─── Save assessment ──────────────────────────────────────────────────────
+  const saveAssessment = async () => {
+    if (!user || !selectedPatient || !triageResult) return;
+    setSavingAssessment(true);
+    try {
+      const { data, error } = await supabase
+        .from('health_assessments')
+        .insert({
+          youth_user_id: user.id,
+          patient_id: selectedPatient.id,
+          assessment_data: assessment,
+          triage_level: triageResult.level,
+          ai_triage_summary: triageResult.summary,
+          navigator_actions: navigatorActions || null,
+          conversation_history: [],
+          follow_up_needed: followUpNeeded,
+          follow_up_date: followUpDate || null,
+          follow_up_notes: followUpNotes || null,
+          resolved: false,
+        })
+        .select('id')
+        .single();
+      if (!error && data) {
+        setAssessmentSaved(true);
+        await loadPatients();
+        await loadAssessments(selectedPatient.id);
+      }
+    } finally { setSavingAssessment(false); }
+  };
+
+  // ─── Send follow-up message ───────────────────────────────────────────────
+  const sendMessage = useCallback(async () => {
+    if (!inputText.trim() || isSending || !selectedPatient || !selectedAssessment) return;
+    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: inputText.trim(), timestamp: new Date() };
+    setMessages(prev => [...prev, userMsg]);
+    setInputText('');
     setIsSending(true);
     try {
-      let sys = '', prompt = '', title = '';
-      if (mode === 'learn-chat' && selectedTopic) {
-        sys = TOPIC_SYSTEM_PROMPTS[selectedTopic.id];
-        prompt = `Introduce this topic warmly in 2–3 sentences. Tell the student the 2–3 most important things they will learn. Then ask one question to begin exploring what they already know.`;
-        title = `Health Training — ${selectedTopic.title}`;
-      } else if (mode === 'consult-chat' && selectedPersona) {
-        sys = selectedPersona.systemPrompt;
-        prompt = `Say your opening line exactly as written. Wait for the navigator student to respond.`;
-        title = `Health Consultation — ${selectedPersona.name}`;
-      }
-      await createEntry(title);
-      const reply = await chatText({ page: 'HealthcareNavigatorPage', messages: [{ role: 'user', content: prompt }], system: sys, max_tokens: 350 });
-      const msg: ChatMessage = {
-        id: crypto.randomUUID(), role: 'assistant',
-        content: mode === 'consult-chat' && selectedPersona ? selectedPersona.openingLine : reply,
-        timestamp: new Date(),
-      };
-      setMessages([msg]);
-    } catch { setMessages([{ id: crypto.randomUUID(), role: 'assistant', content: 'Welcome! What would you like to learn first?', timestamp: new Date() }]); }
-    finally { setIsSending(false); }
-  };
-
-  const sendMessage = async () => {
-    if (!inputText.trim() || isSending) return;
-    const userText = inputText.trim();
-    setInputText(''); setIsSending(true);
-    window.speechSynthesis.cancel();
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: userText, timestamp: new Date() };
-    const withUser = [...messages, userMsg];
-    setMessages(withUser);
-    try {
-      const sys = mode === 'learn-chat' && selectedTopic ? TOPIC_SYSTEM_PROMPTS[selectedTopic.id] : (selectedPersona?.systemPrompt ?? '');
-      const reply = await chatText({ page: 'HealthcareNavigatorPage', messages: withUser.map(m => ({ role: m.role, content: m.content })), system: sys, max_tokens: 380 });
+      const history = [...messages, userMsg];
+      const systemPrompt = buildFollowupPrompt(selectedPatient, selectedAssessment);
+      const reply = await chatText(systemPrompt, history.map(m => ({ role: m.role, content: m.content })));
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
-      const final = [...withUser, aiMsg];
-      setMessages(final);
-      await persistChat(final);
-    } catch { setMessages(p => [...p, { id: crypto.randomUUID(), role: 'assistant', content: 'Technical issue. Please try again.', timestamp: new Date() }]); }
+      const updated = [...history, aiMsg];
+      setMessages(updated);
+      speak(reply);
+      // Persist updated conversation to the assessment record
+      await supabase.from('health_assessments').update({ conversation_history: updated }).eq('id', selectedAssessment.id);
+    } catch { setMessages(p => [...p, { id: crypto.randomUUID(), role: 'assistant', content: 'Technical issue — please try again.', timestamp: new Date() }]); }
     finally { setIsSending(false); setTimeout(() => inputRef.current?.focus(), 100); }
-  };
+  }, [inputText, isSending, messages, selectedPatient, selectedAssessment, speak]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
 
   const toggleListening = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { alert('Voice input not supported. Use Chrome.'); return; }
-    if (isListening) { recognitionRef.current?.stop(); return; }
+    if (!SR) return;
+    if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return; }
     const rec = new SR(); recognitionRef.current = rec;
     rec.lang = 'en-NG'; rec.continuous = false; rec.interimResults = false;
     rec.onresult = (e: any) => setInputText(p => p ? `${p} ${e.results[0][0].transcript}` : e.results[0][0].transcript);
@@ -947,341 +625,258 @@ const HealthcareNavigatorPage: React.FC = () => {
     rec.start(); setIsListening(true);
   };
 
-  // ── Clinical Assessment Submission ─────────────────────────────────────────
-  const handleAssessSubmit = async () => {
-    setIsAssessing(true);
+  // ─── Save patient ─────────────────────────────────────────────────────────
+  const savePatient = async () => {
+    if (!user || !newName.trim() || !newVillage) return;
+    setSavingPatient(true);
     try {
-      const a = assessment;
-      const ageStr = `${a.patientAge} ${a.ageUnit}`;
-      const prompt = `You are a WHO IMCI clinical decision support system for a Community Health Navigator in Oloibiri, Bayelsa State, Nigeria.
-
-PATIENT: ${a.patientName || 'unnamed'}, ${ageStr}, ${a.sex || 'sex not recorded'}
-
-VITAL SIGNS:
-- Temperature: ${a.tempC ? `${a.tempC}°C (${a.tempMethod})` : 'not measured'}
-- Respiratory rate: ${a.respiratoryRate ? `${a.respiratoryRate} breaths/min` : 'not counted'}
-- Pulse: ${a.pulseRate ? `${a.pulseRate} bpm` : 'not measured'}
-- Blood pressure: ${a.bpSystolic && a.bpDiastolic ? `${a.bpSystolic}/${a.bpDiastolic} mmHg` : 'not measured'}
-
-ANTHROPOMETRY:
-- Weight: ${a.weightKg ? `${a.weightKg} kg` : 'not weighed'}
-- Height/length: ${a.heightCm ? `${a.heightCm} cm` : 'not measured'}
-- MUAC: ${a.muacCm ? `${a.muacCm} cm` : 'not measured'}
-
-CHIEF COMPLAINT: ${a.chiefComplaint || 'not recorded'}
-
-DANGER SIGNS:
-- Convulsions: ${a.convulsions ? 'YES ⚠️' : 'No'}
-- Unconscious/cannot wake: ${a.unconscious ? 'YES ⚠️' : 'No'}
-- Unable to feed/drink: ${a.unableToFeed ? 'YES ⚠️' : 'No'}
-- Vomits everything: ${a.vomitsEverything ? 'YES ⚠️' : 'No'}
-
-SYMPTOMS:
-- Fever: ${a.fever ? `Yes — ${a.feverDays ? a.feverDays + ' days' : 'duration not recorded'}` : 'No'}
-- Cough: ${a.cough ? `Yes — ${a.coughDays ? a.coughDays + ' days' : 'duration not recorded'}` : 'No'}
-- Chest indrawing: ${a.chestIndrawing ? 'YES ⚠️' : 'No'}
-- Diarrhoea: ${a.diarrhoea ? `Yes — ${a.diarrhoeaDays ? a.diarrhoeaDays + ' days' : 'duration not recorded'}` : 'No'}
-- Blood in stool: ${a.bloodInStool ? 'Yes' : 'No'}
-- Vomiting: ${a.vomiting ? 'Yes' : 'No'}
-- Pallor (palms/eyelids): ${a.palmarPallor ? 'Yes' : 'No'}
-- Stiff neck: ${a.stiffNeck ? 'YES ⚠️' : 'No'}
-- Jaundice (eye yellowing): ${a.eyeJaundice ? 'Yes' : 'No'}
-- Bilateral oedema: ${a.oedema ? 'Yes' : 'No'}
-
-MALARIA:
-- Malaria suspected: ${a.malariaSuspected ? 'Yes' : 'No'}
-- RDT result: ${a.rdt === 'not_done' ? 'Not done' : a.rdt}
-- Bed net used: ${a.recentBednetUse ? 'Yes' : 'No'}
-
-ADDITIONAL NOTES: ${a.additionalNotes || 'None'}
-
-Based on WHO IMCI guidelines and the Bayelsa/Nigeria disease burden context, provide:
-1. TRIAGE CLASSIFICATION: RED, YELLOW, or GREEN — with clear reason
-2. CLINICAL IMPRESSION: Most likely condition(s) — use plain language appropriate for a Community Health Navigator
-3. IMMEDIATE ACTIONS: What the navigator should do RIGHT NOW (in order of priority)
-4. REFERRAL GUIDANCE: Where to refer, how urgently, and what pre-referral treatment to give if any
-5. WHAT TO TELL THE FAMILY: Simple, clear message for the caregiver
-6. REFERRAL NOTE TEMPLATE: A brief, filled-in referral note the navigator can take to the clinic
-7. DATA GAPS: Any important measurements or questions that were not collected but should have been
-
-Format your response clearly with these exact headings. Use plain language — this navigator may not have advanced medical training.
-${CLINICAL_CONTEXT}`;
-
-      const result = await chatText({ page: 'HealthcareNavigatorPage', messages: [{ role: 'user', content: prompt }], system: 'You are a WHO IMCI clinical decision support system. Be specific, practical, and clear. Always prioritise patient safety. Never overstate certainty.', max_tokens: 900 });
-      setAssessResult(result);
-      await createEntry(`Health Assessment — ${a.patientName || 'unnamed'} (${ageStr})`);
-      setMode('assess-result');
-    } catch (e) { console.error(e); alert('Assessment failed. Please try again.'); }
-    finally { setIsAssessing(false); }
-  };
-
-  const handleEvaluate = async () => {
-    if (isEvaluating || messages.length < 4) return;
-    setIsEvaluating(true);
-    const uTurns = messages.filter(m => m.role === 'user').length;
-    const conv = messages.map(m => `${m.role === 'user' ? 'NAVIGATOR STUDENT' : `PATIENT (${selectedPersona?.name})`}: ${m.content}`).join('\n\n');
-    try {
-      const result = await chatJSON({
-        page: 'HealthcareNavigatorPage',  // → Groq Llama 3.3 70B
-        messages: [{
-          role: 'user', content: `Evaluate this Community Health Navigator student's clinical consultation performance in Oloibiri, Nigeria.
-Patient persona: ${selectedPersona?.name} — ${selectedPersona?.presentation}
-
-Conversation (${uTurns} student turns):
-${conv}
-
-Evaluate on 5 dimensions (0–3 each):
-1. Systematic Assessment: Did the student take structured history AND relevant measurements before forming impression?
-2. Correct Triage: Did student correctly identify urgency level (RED/YELLOW/GREEN) and justify it?
-3. Safety & Danger Signs: Did student check for and appropriately respond to relevant danger signs?
-4. Communication: Was advice clear, respectful, appropriate for caregiver's level of understanding?
-5. Referral Planning: Clear guidance on where to go, urgency, what to say, what to watch for?
-
-Return valid JSON only:
-{
-  "scores": {"assessment":0-3,"triage":0-3,"safety":0-3,"communication":0-3,"referral":0-3},
-  "evidence": {"assessment":"<1-2 sentences max>","triage":"<1-2 sentences max>","safety":"<1-2 sentences max>","communication":"<1-2 sentences max>","referral":"<1-2 sentences max>"},
-  "overall_score": 0.0-3.0,
-  "can_advance": true/false,
-  "encouragement": "2-3 specific warm sentences",
-  "main_improvement": "1-2 sentences"
-}`,
-        }],
-        system: 'You are a clinical educator evaluating community health navigator trainees. Be specific. Prioritise patient safety in your evaluation.',
-        max_tokens: 2000, temperature: 0.3,
+      const { error } = await supabase.from('health_patients').insert({
+        youth_user_id: user.id,
+        patient_name: newName.trim(),
+        village: newVillage,
+        phone: newPhone || null,
+        age_years: newAgeYears ? Number(newAgeYears) : null,
+        age_months: newAgeMonths ? Number(newAgeMonths) : null,
+        sex: newSex || null,
+        patient_group: newGroup,
+        notes: newNotes || null,
       });
-      setEvaluation(result); await persistChat(messages, result); setShowEvalModal(true);
-    } catch (e) { console.error(e); }
-    finally { setIsEvaluating(false); }
+      if (!error) { await loadPatients(); resetAddPatient(); setMode('dashboard'); }
+    } finally { setSavingPatient(false); }
   };
 
-  const resetAll = () => {
-    window.speechSynthesis.cancel();
-    setMessages([]); setEvaluation(null); setShowEvalModal(false);
-    setAssessResult(''); setAssessment(BLANK_ASSESSMENT);
-    setDashboardId(null); setTopic(null); setPersona(null); setMode('select');
+  const resetAddPatient = () => { setNewName(''); setNewVillage(''); setNewPhone(''); setNewAgeYears(''); setNewAgeMonths(''); setNewSex(''); setNewGroup('adult'); setNewNotes(''); };
+
+  // ─── Start new assessment ─────────────────────────────────────────────────
+  const startAssessment = (patient: Patient) => {
+    setSelectedPatient(patient);
+    setAssessment({ ...BLANK_ASSESSMENT });
+    setTriageResult(null);
+    setNavigatorActions('');
+    setFollowUpNeeded(false);
+    setFollowUpDate('');
+    setFollowUpNotes('');
+    setAssessmentSaved(false);
+    setMode('new-assessment');
   };
 
-  const A = assessment;
-  const setA = (patch: Partial<AssessmentData>) => setAssessment(prev => ({ ...prev, ...patch }));
-  const userTurns = messages.filter(m => m.role === 'user').length;
-  const isChat = mode === 'learn-chat' || mode === 'consult-chat';
-  const isConsult = mode === 'consult-chat';
-  const activeColour = selectedPersona?.colour || selectedTopic?.colour || 'from-blue-600 to-indigo-600';
+  // ─── Open follow-up chat ──────────────────────────────────────────────────
+  const openFollowupChat = (patient: Patient, assess: Assessment) => {
+    setSelectedPatient(patient);
+    setSelectedAssessment(assess);
+    setMessages(assess.conversation_history || []);
+    setInputText('');
+    setMode('followup-chat');
+    if ((assess.conversation_history || []).length === 0) {
+      const tc = TRIAGE_CONFIG[assess.triage_level];
+      const opener: ChatMessage = {
+        id: crypto.randomUUID(), role: 'assistant',
+        content: `Ready to help with follow-up questions for **${patient.patient_name}** (classified **${tc.label}**).\n\nYou can ask about the triage, how to explain the situation to the patient/caregiver, referral logistics, or any clinical questions within your navigator scope.`,
+        timestamp: new Date(),
+      };
+      setMessages([opener]);
+    }
+  };
 
-  // ─── SELECT ─────────────────────────────────────────────────────────────────
-  if (mode === 'select') {
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  const triageBadge = (level: TriageLevel) => {
+    const cfg = TRIAGE_CONFIG[level];
     return (
-      <AppLayout>
-        <HealthBackground />
-        <div className="relative z-10 max-w-4xl mx-auto px-6 py-10">
-          <div className="bg-black/35 backdrop-blur-sm rounded-2xl p-6 mb-6">
-            <div className="flex items-center gap-3 mb-2">
-              <Heart className="h-10 w-10 text-rose-300" />
-              <h1 className="text-4xl font-bold text-white">Healthcare Navigator</h1>
-            </div>
-            <p className="text-xl text-blue-100 max-w-2xl">
-              Train as a Community Health Navigator — using clinical instruments to assess patients, apply WHO IMCI triage, and connect people in Oloibiri with the care they need.
-            </p>
-          </div>
-
-          {/* Framing box */}
-          <div className="bg-blue-900/50 border border-blue-400/50 backdrop-blur-sm rounded-2xl p-5 mb-6">
-            <h3 className="text-blue-200 font-bold text-lg mb-2 flex items-center gap-2"><ShieldCheck size={18} /> Your Role: Community Health Navigator</h3>
-            <p className="text-blue-100 leading-relaxed">
-              You are trained to <strong>assess, triage, and refer</strong> — not diagnose or prescribe. You collect measurements, identify danger signs, classify urgency using the WHO RED/YELLOW/GREEN system, and prepare clear referral notes. This is the same role as Nigeria's CHIPS Agents, who are already doing this work across the country. The people of Oloibiri lack access to care — your trained eyes and hands fill that gap.
-            </p>
-          </div>
-
-          {/* Three modes */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            {[
-              { label: 'Learn Mode', desc: 'Study instruments, clinical protocols, and disease-specific guidance with an AI tutor.', icon: <BookOpen size={24} />, colour: 'from-blue-600 to-indigo-600', target: 'learn-topics' as AppMode },
-              { label: 'Assess Tool', desc: 'Enter a patient\'s measurements and symptoms. Get AI-assisted WHO IMCI triage and a referral note.', icon: <ClipboardList size={24} />, colour: 'from-teal-600 to-green-600', target: 'assess-form' as AppMode },
-              { label: 'Consult Mode', desc: 'Practice real consultations — the AI plays a patient. Get evaluated on your assessment and communication.', icon: <Users size={24} />, colour: 'from-rose-600 to-pink-600', target: 'consult-personas' as AppMode },
-            ].map(m => (
-              <button key={m.label} onClick={() => setMode(m.target)}
-                className="text-left bg-white/90 backdrop-blur-sm rounded-2xl p-5 shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all border-2 border-transparent hover:border-blue-400">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${m.colour} flex items-center justify-center mb-3 text-white`}>{m.icon}</div>
-                <h3 className="text-xl font-bold text-gray-900 mb-1">{m.label}</h3>
-                <p className="text-sm text-gray-600 leading-relaxed">{m.desc}</p>
-              </button>
-            ))}
-          </div>
-
-          <h2 className="text-lg font-bold text-white mb-3">Key thresholds every Navigator must memorise:</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: 'Fever (axillary)', value: '≥37.5°C', detail: '≥39°C = urgent', colour: 'bg-red-900/60 border-red-400/40 text-red-100' },
-              { label: 'MUAC RED (child)', value: '<11.5 cm', detail: 'SAM — refer today', colour: 'bg-red-900/60 border-red-400/40 text-red-100' },
-              { label: 'BP Crisis', value: '≥180/120', detail: 'Emergency referral', colour: 'bg-orange-900/60 border-orange-400/40 text-orange-100' },
-              { label: 'Fast RR (1–5 yrs)', value: '≥40/min', detail: 'Possible pneumonia', colour: 'bg-amber-900/60 border-amber-400/40 text-amber-100' },
-            ].map((f, i) => (
-              <div key={i} className={`rounded-xl border backdrop-blur-sm p-3 ${f.colour}`}>
-                <p className="text-xs opacity-70 mb-0.5">{f.label}</p>
-                <p className="text-xl font-black">{f.value}</p>
-                <p className="text-xs opacity-80">{f.detail}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </AppLayout>
+      <span className={classNames('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border', cfg.colour, cfg.bg, cfg.border)}>
+        {cfg.icon} {level.toUpperCase()}
+      </span>
     );
-  }
+  };
 
-  // ─── LEARN TOPICS ──────────────────────────────────────────────────────────
-  if (mode === 'learn-topics') {
+  const markResolved = async (assessId: string) => {
+    await supabase.from('health_assessments').update({ resolved: true }).eq('id', assessId);
+    if (selectedPatient) loadAssessments(selectedPatient.id);
+    await loadPatients();
+  };
+
+  const hasDangerSign = () =>
+    assessment.convulsions || assessment.unconscious ||
+    assessment.unableToFeed || assessment.vomitsEverything ||
+    assessment.chestIndrawing || assessment.stiffNeck;
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: DASHBOARD
+  // ════════════════════════════════════════════════════════════════════════════
+
+  if (mode === 'dashboard') {
     return (
       <AppLayout>
         <HealthBackground />
-        <div className="relative z-10 max-w-3xl mx-auto px-6 py-10">
-          <button onClick={() => setMode('select')} className="flex items-center gap-2 text-blue-200 hover:text-white mb-6"><ArrowLeft size={18}/> Back</button>
-          <h2 className="text-3xl font-bold text-white mb-2">Choose a Learning Topic</h2>
-          <p className="text-blue-200 mb-6">Each topic is a focused conversation with an expert clinical tutor grounded in WHO IMCI and Bayelsa disease burden.</p>
-          <div className="space-y-3">
-            {LEARNING_TOPICS.map(t => (
-              <button key={t.id} onClick={() => { setTopic(t); setMode('learn-chat'); }}
-                className="w-full text-left bg-white/90 backdrop-blur-sm rounded-2xl p-5 shadow hover:shadow-xl hover:scale-[1.01] transition-all border-2 border-transparent hover:border-blue-400 flex items-start gap-4">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${t.colour} flex items-center justify-center text-white flex-shrink-0`}>{t.icon}</div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-xl font-bold text-gray-900">{t.title}</h3>
-                    {t.urgency && <span className="text-xs bg-red-100 text-red-700 border border-red-200 px-2 py-0.5 rounded-full font-semibold">{t.urgency}</span>}
-                  </div>
-                  <p className="text-gray-600 mt-0.5">{t.subtitle}</p>
+        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6">
+          <div className="bg-black/40 backdrop-blur-sm rounded-2xl p-5 mb-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-2xl">🏥</div>
+                <div>
+                  <h1 className="text-xl font-bold text-white">Health Navigator</h1>
+                  <p className="text-sm text-blue-200">Your patient casebook · Oloibiri & Ibiade</p>
                 </div>
-                <ChevronRight size={20} className="text-gray-400 flex-shrink-0 mt-1"/>
+              </div>
+              <button onClick={() => { resetAddPatient(); setMode('add-patient'); }}
+                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold text-sm hover:opacity-90">
+                <Plus size={16}/> Add Patient
               </button>
-            ))}
+            </div>
           </div>
+
+          {patients.length > 0 && (
+            <div className="grid grid-cols-3 gap-3 mb-5">
+              {[
+                { label: 'Patients', value: patients.length, icon: '👥' },
+                { label: 'Open Cases', value: patients.reduce((s, p) => s + (p.open_cases ?? 0), 0), icon: '📋' },
+                { label: 'This Month', value: patients.filter(p => p.last_assessment_at && new Date(p.last_assessment_at) > new Date(Date.now() - 30*24*60*60*1000)).length, icon: '📅' },
+              ].map(stat => (
+                <div key={stat.label} className="bg-white/90 backdrop-blur-sm rounded-xl p-4 text-center">
+                  <div className="text-2xl mb-1">{stat.icon}</div>
+                  <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                  <p className="text-xs text-gray-500">{stat.label}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {loadingPatients ? (
+            <div className="flex justify-center py-12"><Loader2 size={28} className="animate-spin text-blue-300"/></div>
+          ) : patients.length === 0 ? (
+            <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-10 text-center">
+              <div className="text-5xl mb-4">🏥</div>
+              <h2 className="text-lg font-bold text-gray-800 mb-2">No patients registered yet</h2>
+              <p className="text-sm text-gray-500 mb-5">Register your first community patient to start your casebook.</p>
+              <button onClick={() => { resetAddPatient(); setMode('add-patient'); }}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold hover:opacity-90">
+                <Plus size={16}/> Register First Patient
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {patients.map(patient => {
+                const pg = PATIENT_GROUPS[patient.patient_group];
+                return (
+                  <button key={patient.id}
+                    onClick={() => { setSelectedPatient(patient); loadAssessments(patient.id); setMode('patient-detail'); }}
+                    className="w-full bg-white/90 backdrop-blur-sm rounded-2xl p-4 text-left hover:bg-white transition-colors border border-transparent hover:border-blue-300">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center text-lg">{pg.emoji}</div>
+                        <div>
+                          <p className="font-bold text-gray-900">{patient.patient_name}</p>
+                          <p className="text-sm text-gray-500">{patient.village}</p>
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            <span className={classNames('text-xs rounded-full px-2 py-0.5 font-medium border', pg.bgLight, pg.border, pg.textColour)}>
+                              {pg.emoji} {pg.label}
+                            </span>
+                            {(patient.age_years != null || patient.age_months != null) && (
+                              <span className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">
+                                {patient.age_years != null ? `${patient.age_years}y` : ''}{patient.age_months != null ? ` ${patient.age_months}m` : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5">
+                        <ChevronRight size={17} className="text-gray-400"/>
+                        {(patient.open_cases ?? 0) > 0 && (
+                          <span className="text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5 font-semibold">{patient.open_cases} open</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center gap-3 text-xs text-gray-400">
+                      <span>{patient.total_assessments ?? 0} assessment{patient.total_assessments !== 1 ? 's' : ''}</span>
+                      {patient.last_assessment_at && <span>Last: {formatDate(patient.last_assessment_at)}</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </AppLayout>
     );
   }
 
-  // ─── ASSESSMENT FORM ───────────────────────────────────────────────────────
-  if (mode === 'assess-form') {
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: ADD PATIENT
+  // ════════════════════════════════════════════════════════════════════════════
+
+  if (mode === 'add-patient') {
     return (
       <AppLayout>
         <HealthBackground />
-        <div className="relative z-10 max-w-[60%] mx-auto px-6 py-8">
-          <button onClick={() => setMode('select')} className="flex items-center gap-2 text-blue-200 hover:text-white mb-5"><ArrowLeft size={18}/> Back</button>
-          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6">
+        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
             <div className="flex items-center gap-3 mb-5">
-              <ClipboardList className="h-8 w-8 text-teal-600"/>
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">Clinical Assessment Tool</h2>
-                <p className="text-sm text-gray-500">Enter measurements and symptoms → receive WHO IMCI triage classification + referral note</p>
-              </div>
+              <button onClick={() => setMode('dashboard')} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
+              <div><h2 className="text-xl font-bold text-gray-900">Register Patient</h2><p className="text-sm text-gray-500">Add to your casebook</p></div>
             </div>
-
-            <div className="space-y-6">
-              {/* Patient basics */}
+            <div className="space-y-4">
               <div>
-                <h3 className="text-base font-bold text-gray-700 uppercase tracking-wide mb-3 border-b pb-1">Patient Information</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label="Patient name"><input type="text" value={A.patientName} onChange={e=>setA({patientName:e.target.value})} placeholder="e.g. Adaeze" className={inputCls}/></Field>
-                  <Field label="Sex"><select value={A.sex} onChange={e=>setA({sex:e.target.value as any})} className={inputCls}><option value="">Select</option><option value="female">Female</option><option value="male">Male</option></select></Field>
-                  <Field label="Age" required><div className="flex gap-2"><input type="number" min="0" value={A.patientAge} onChange={e=>setA({patientAge:e.target.value})} placeholder="e.g. 3" className={inputCls}/><select value={A.ageUnit} onChange={e=>setA({ageUnit:e.target.value as any})} className="px-2 py-2 text-base border border-gray-300 rounded-lg"><option value="days">days</option><option value="months">months</option><option value="years">years</option></select></div></Field>
-                  <Field label="Chief complaint" required><input type="text" value={A.chiefComplaint} onChange={e=>setA({chiefComplaint:e.target.value})} placeholder="e.g. fever and cough for 2 days" className={inputCls}/></Field>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Full Name *</label>
+                <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Adaeze Okafor"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-base"/>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Village *</label>
+                <select value={newVillage} onChange={e => setNewVillage(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-base bg-white">
+                  <option value="">Select village…</option>
+                  {VILLAGES.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Age (years)</label>
+                  <input type="number" min="0" value={newAgeYears} onChange={e => setNewAgeYears(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-base"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Age (months)</label>
+                  <input type="number" min="0" max="11" value={newAgeMonths} onChange={e => setNewAgeMonths(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-base"/>
                 </div>
               </div>
-
-              {/* Vital signs */}
-              <div>
-                <h3 className="text-base font-bold text-gray-700 uppercase tracking-wide mb-3 border-b pb-1">Vital Signs</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label="Temperature (°C)"><div className="flex gap-2"><input type="number" step="0.1" value={A.tempC} onChange={e=>setA({tempC:e.target.value})} placeholder="e.g. 38.5" className={inputCls}/><select value={A.tempMethod} onChange={e=>setA({tempMethod:e.target.value as any})} className="px-2 py-2 text-sm border border-gray-300 rounded-lg"><option value="axillary">Axillary</option><option value="oral">Oral</option><option value="rectal">Rectal</option></select></div></Field>
-                  <Field label="Respiratory rate (per min)"><input type="number" value={A.respiratoryRate} onChange={e=>setA({respiratoryRate:e.target.value})} placeholder="Count 60 seconds" className={inputCls}/></Field>
-                  <Field label="Pulse rate (bpm)"><input type="number" value={A.pulseRate} onChange={e=>setA({pulseRate:e.target.value})} placeholder="e.g. 88" className={inputCls}/></Field>
-                  <Field label="Blood pressure (mmHg)"><div className="flex gap-2 items-center"><input type="number" value={A.bpSystolic} onChange={e=>setA({bpSystolic:e.target.value})} placeholder="Systolic" className={inputCls}/><span className="text-gray-500 font-bold">/</span><input type="number" value={A.bpDiastolic} onChange={e=>setA({bpDiastolic:e.target.value})} placeholder="Diastolic" className={inputCls}/></div></Field>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Sex</label>
+                  <select value={newSex} onChange={e => setNewSex(e.target.value as 'male' | 'female' | '')}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-base bg-white">
+                    <option value="">Not specified</option>
+                    <option value="female">Female</option>
+                    <option value="male">Male</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Patient Group *</label>
+                  <select value={newGroup} onChange={e => setNewGroup(e.target.value as PatientGroup)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-base bg-white">
+                    {(Object.entries(PATIENT_GROUPS) as [PatientGroup, typeof PATIENT_GROUPS[PatientGroup]][]).map(([k, v]) => (
+                      <option key={k} value={k}>{v.emoji} {v.label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
-
-              {/* Anthropometry */}
               <div>
-                <h3 className="text-base font-bold text-gray-700 uppercase tracking-wide mb-3 border-b pb-1">Measurements</h3>
-                <div className="grid grid-cols-3 gap-4">
-                  <Field label="Weight (kg)"><input type="number" step="0.1" value={A.weightKg} onChange={e=>setA({weightKg:e.target.value})} placeholder="e.g. 12.4" className={inputCls}/></Field>
-                  <Field label="Height/length (cm)"><input type="number" step="0.5" value={A.heightCm} onChange={e=>setA({heightCm:e.target.value})} placeholder="e.g. 85.0" className={inputCls}/></Field>
-                  <Field label="MUAC (cm — children <5 yrs)"><input type="number" step="0.1" value={A.muacCm} onChange={e=>setA({muacCm:e.target.value})} placeholder="e.g. 12.0" className={inputCls}/></Field>
-                </div>
-                {A.muacCm && (
-                  <div className={`mt-2 px-3 py-2 rounded-lg text-sm font-semibold ${parseFloat(A.muacCm)<11.5?'bg-red-100 text-red-700':parseFloat(A.muacCm)<12.5?'bg-yellow-100 text-yellow-700':'bg-green-100 text-green-700'}`}>
-                    MUAC {A.muacCm}cm → {parseFloat(A.muacCm)<11.5?'🔴 RED — Severe Acute Malnutrition':parseFloat(A.muacCm)<12.5?'🟡 YELLOW — Moderate Malnutrition':'🟢 GREEN — Normal'}
-                  </div>
-                )}
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Phone (optional)</label>
+                <input value={newPhone} onChange={e => setNewPhone(e.target.value)} placeholder="+234 801 234 5678"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-base"/>
               </div>
-
-              {/* Danger signs */}
               <div>
-                <h3 className="text-base font-bold text-red-700 uppercase tracking-wide mb-3 border-b border-red-200 pb-1">⚠️ Danger Signs (any = RED referral)</h3>
-                <div className="grid grid-cols-2 gap-3 bg-red-50 rounded-xl p-4">
-                  {[
-                    { key:'convulsions', label:'Convulsions / seizures' },
-                    { key:'unconscious', label:'Cannot wake / unconscious' },
-                    { key:'unableToFeed', label:'Unable to drink / breastfeed' },
-                    { key:'vomitsEverything', label:'Vomits everything' },
-                  ].map(({key,label}) => (
-                    <label key={key} className={classNames(checkCls, A[key as keyof AssessmentData] ? 'text-red-700 font-bold' : 'text-gray-700')}>
-                      <input type="checkbox" checked={A[key as keyof AssessmentData] as boolean} onChange={e=>setA({[key]:e.target.checked})} className="accent-red-600 w-4 h-4"/>
-                      {label}
-                    </label>
-                  ))}
-                </div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Notes (optional)</label>
+                <textarea value={newNotes} onChange={e => setNewNotes(e.target.value)} rows={2}
+                  placeholder="Chronic conditions, allergies, previous serious illness…"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm resize-none"/>
               </div>
-
-              {/* Symptoms */}
-              <div>
-                <h3 className="text-base font-bold text-gray-700 uppercase tracking-wide mb-3 border-b pb-1">Symptoms & Signs</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={checkCls}><input type="checkbox" checked={A.fever} onChange={e=>setA({fever:e.target.checked})} className="accent-blue-600 w-4 h-4"/> Fever</label>
-                    {A.fever && <input type="number" value={A.feverDays} onChange={e=>setA({feverDays:e.target.value})} placeholder="Days of fever" className={classNames(inputCls,'mt-1 text-sm')}/>}
-                  </div>
-                  <div>
-                    <label className={checkCls}><input type="checkbox" checked={A.cough} onChange={e=>setA({cough:e.target.checked})} className="accent-blue-600 w-4 h-4"/> Cough</label>
-                    {A.cough && <input type="number" value={A.coughDays} onChange={e=>setA({coughDays:e.target.value})} placeholder="Days of cough" className={classNames(inputCls,'mt-1 text-sm')}/>}
-                  </div>
-                  <label className={checkCls}><input type="checkbox" checked={A.chestIndrawing} onChange={e=>setA({chestIndrawing:e.target.checked})} className="accent-red-600 w-4 h-4"/> <span className={A.chestIndrawing?'text-red-700 font-bold':''}>Chest indrawing ⚠️</span></label>
-                  <div>
-                    <label className={checkCls}><input type="checkbox" checked={A.diarrhoea} onChange={e=>setA({diarrhoea:e.target.checked})} className="accent-blue-600 w-4 h-4"/> Diarrhoea</label>
-                    {A.diarrhoea && <input type="number" value={A.diarrhoeaDays} onChange={e=>setA({diarrhoeaDays:e.target.value})} placeholder="Days" className={classNames(inputCls,'mt-1 text-sm')}/>}
-                  </div>
-                  <label className={checkCls}><input type="checkbox" checked={A.bloodInStool} onChange={e=>setA({bloodInStool:e.target.checked})} className="accent-red-600 w-4 h-4"/> Blood in stool</label>
-                  <label className={checkCls}><input type="checkbox" checked={A.vomiting} onChange={e=>setA({vomiting:e.target.checked})} className="accent-blue-600 w-4 h-4"/> Vomiting (but can still drink)</label>
-                  <label className={checkCls}><input type="checkbox" checked={A.palmarPallor} onChange={e=>setA({palmarPallor:e.target.checked})} className="accent-blue-600 w-4 h-4"/> Pallor (palms/inner eyelids)</label>
-                  <label className={checkCls}><input type="checkbox" checked={A.stiffNeck} onChange={e=>setA({stiffNeck:e.target.checked})} className="accent-red-600 w-4 h-4"/> <span className={A.stiffNeck?'text-red-700 font-bold':''}>Stiff neck ⚠️</span></label>
-                  <label className={checkCls}><input type="checkbox" checked={A.eyeJaundice} onChange={e=>setA({eyeJaundice:e.target.checked})} className="accent-yellow-600 w-4 h-4"/> Yellowing of whites of eyes</label>
-                  <label className={checkCls}><input type="checkbox" checked={A.oedema} onChange={e=>setA({oedema:e.target.checked})} className="accent-blue-600 w-4 h-4"/> Bilateral foot/leg oedema</label>
-                </div>
-              </div>
-
-              {/* Malaria */}
-              <div>
-                <h3 className="text-base font-bold text-amber-700 uppercase tracking-wide mb-3 border-b border-amber-200 pb-1">🦟 Malaria (High Risk in Bayelsa)</h3>
-                <div className="grid grid-cols-2 gap-3 bg-amber-50 rounded-xl p-4">
-                  <label className={checkCls}><input type="checkbox" checked={A.malariaSuspected} onChange={e=>setA({malariaSuspected:e.target.checked})} className="accent-amber-600 w-4 h-4"/> Malaria clinically suspected</label>
-                  <label className={checkCls}><input type="checkbox" checked={A.recentBednetUse} onChange={e=>setA({recentBednetUse:e.target.checked})} className="accent-amber-600 w-4 h-4"/> Sleeps under bed net regularly</label>
-                  <Field label="RDT result">
-                    <select value={A.rdt} onChange={e=>setA({rdt:e.target.value as any})} className={inputCls}>
-                      <option value="not_done">Not done</option>
-                      <option value="positive">Positive ✅</option>
-                      <option value="negative">Negative ❌</option>
-                    </select>
-                  </Field>
-                </div>
-              </div>
-
-              {/* Notes */}
-              <Field label="Additional notes">
-                <textarea value={A.additionalNotes} onChange={e=>setA({additionalNotes:e.target.value})} rows={2} placeholder="Any other observations, history, or relevant context…" className={classNames(inputCls,'resize-none')}/>
-              </Field>
-
-              <button onClick={handleAssessSubmit} disabled={isAssessing || !A.chiefComplaint || !A.patientAge}
-                className={classNames('w-full py-4 rounded-xl text-xl font-bold text-white flex items-center justify-center gap-2 transition-all',
-                  !isAssessing && A.chiefComplaint && A.patientAge ? 'bg-gradient-to-r from-teal-600 to-green-600 hover:opacity-95' : 'bg-gray-300 cursor-not-allowed')}>
-                {isAssessing ? <><Loader2 size={20} className="animate-spin"/> Analysing…</> : <><ClipboardList size={20}/> Generate IMCI Assessment & Referral Note</>}
+              <button onClick={savePatient} disabled={!newName.trim() || !newVillage || savingPatient}
+                className={classNames('w-full py-3.5 rounded-xl font-bold text-white text-base transition-opacity',
+                  newName.trim() && newVillage && !savingPatient ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90' : 'bg-gray-300 cursor-not-allowed')}>
+                {savingPatient ? <span className="flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin"/>Saving…</span> : 'Register Patient'}
               </button>
             </div>
           </div>
@@ -1290,237 +885,564 @@ Return valid JSON only:
     );
   }
 
-  // ─── ASSESSMENT RESULT ─────────────────────────────────────────────────────
-  if (mode === 'assess-result') {
-    const isRed    = assessResult.toLowerCase().includes('🔴') || assessResult.toLowerCase().includes('red — urgent') || assessResult.toLowerCase().includes('red:');
-    const isYellow = !isRed && (assessResult.toLowerCase().includes('🟡') || assessResult.toLowerCase().includes('yellow'));
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: PATIENT DETAIL
+  // ════════════════════════════════════════════════════════════════════════════
+
+  if (mode === 'patient-detail' && selectedPatient) {
+    const patient = selectedPatient;
+    const pg = PATIENT_GROUPS[patient.patient_group];
     return (
       <AppLayout>
         <HealthBackground />
-        <div className="relative z-10 max-w-[60%] mx-auto px-6 py-8">
-          <div className="flex items-center gap-3 mb-5">
-            <button onClick={() => setMode('assess-form')} className="text-blue-200 hover:text-white p-1"><ArrowLeft size={20}/></button>
-            <div className={`px-4 py-2 rounded-xl font-bold text-lg ${isRed?'bg-red-600 text-white':isYellow?'bg-yellow-500 text-white':'bg-green-600 text-white'}`}>
-              {isRed?'🔴 RED — Urgent Referral':isYellow?'🟡 YELLOW — Treat & Monitor':'🟢 GREEN — Home Care'}
+        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6 space-y-4">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <button onClick={() => setMode('dashboard')} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center text-2xl">{pg.emoji}</div>
+              <div className="flex-1">
+                <h2 className="text-xl font-bold text-gray-900">{patient.patient_name}</h2>
+                <p className="text-sm text-gray-500">{patient.village}{patient.phone ? ` · ${patient.phone}` : ''}</p>
+              </div>
             </div>
-            <button onClick={() => { setAssessment(BLANK_ASSESSMENT); setMode('assess-form'); }} className="ml-auto flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white/80 hover:text-white border border-white/30 rounded-lg">
-              <RefreshCw size={14}/> New assessment
+            <div className="flex flex-wrap gap-2 mb-4">
+              <span className={classNames('px-3 py-1.5 rounded-xl text-sm font-semibold border', pg.bgLight, pg.border, pg.textColour)}>
+                {pg.emoji} {pg.label}
+              </span>
+              {(patient.age_years != null || patient.age_months != null) && (
+                <span className="px-3 py-1.5 rounded-xl text-sm font-semibold border bg-gray-50 border-gray-200 text-gray-700">
+                  Age: {patient.age_years != null ? `${patient.age_years}y` : ''}{patient.age_months != null ? ` ${patient.age_months}m` : ''}
+                </span>
+              )}
+              {patient.sex && (
+                <span className="px-3 py-1.5 rounded-xl text-sm font-semibold border bg-gray-50 border-gray-200 text-gray-700">
+                  {patient.sex === 'female' ? '♀' : '♂'} {patient.sex}
+                </span>
+              )}
+            </div>
+            {patient.notes && <p className="text-sm text-gray-600 italic bg-gray-50 rounded-lg px-3 py-2 mb-4">{patient.notes}</p>}
+            <button onClick={() => startAssessment(patient)}
+              className="w-full py-3.5 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90 flex items-center justify-center gap-2">
+              <Stethoscope size={18}/> Start New Assessment
             </button>
           </div>
-          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6">
-            <MarkdownText text={assessResult} />
+
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <ClipboardList size={16} className="text-blue-600"/> Assessment History
+              </h3>
+              <button onClick={() => loadAssessments(patient.id)} className="text-gray-400 hover:text-gray-700"><RefreshCw size={14}/></button>
+            </div>
+            {loadingAssessments ? (
+              <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-blue-600"/></div>
+            ) : assessments.length === 0 ? (
+              <p className="text-sm text-gray-400 italic text-center py-4">No assessments yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {assessments.map(a => (
+                  <div key={a.id} className="border border-gray-200 rounded-xl p-4 hover:border-blue-300 transition-colors">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold text-gray-900 text-sm">{a.assessment_data.chiefComplaint || 'Assessment'}</p>
+                        <p className="text-xs text-gray-500">{formatDate(a.created_at)}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        {triageBadge(a.triage_level)}
+                        {a.resolved
+                          ? <span className="text-xs text-green-600 font-semibold flex items-center gap-1"><CheckCircle size={11}/> Resolved</span>
+                          : <span className="text-xs text-orange-600 font-semibold">Open</span>}
+                      </div>
+                    </div>
+                    {a.follow_up_date && !a.resolved && (
+                      <p className="text-xs text-blue-600 mt-1.5 flex items-center gap-1">
+                        <Calendar size={11}/> Follow-up: {formatDate(a.follow_up_date)}
+                      </p>
+                    )}
+                    <div className="flex gap-2 mt-3">
+                      <button onClick={() => { setSelectedAssessment(a); setMode('case-detail'); }}
+                        className="flex-1 py-2 text-xs font-semibold rounded-lg border border-gray-200 text-gray-700 hover:border-blue-300 hover:text-blue-700">
+                        View Case
+                      </button>
+                      <button onClick={() => openFollowupChat(patient, a)}
+                        className="flex-1 py-2 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">
+                        Ask AI Follow-up
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </AppLayout>
     );
   }
 
-  // ─── CONSULT PERSONAS ──────────────────────────────────────────────────────
-  if (mode === 'consult-personas') {
-    return (
-      <AppLayout>
-        <HealthBackground />
-        <div className="relative z-10 max-w-4xl mx-auto px-6 py-10">
-          <button onClick={() => setMode('select')} className="flex items-center gap-2 text-blue-200 hover:text-white mb-6"><ArrowLeft size={18}/> Back</button>
-          <h2 className="text-3xl font-bold text-white mb-2">Choose a Patient to Assess</h2>
-          <p className="text-blue-200 mb-6">The AI plays the patient or caregiver. You are the navigator. Each case is rooted in the real disease burden of Oloibiri.</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {PATIENT_PERSONAS.map(p => (
-              <button key={p.id} onClick={() => { setPersona(p); setMode('consult-prepare'); }}
-                className="text-left bg-white/90 backdrop-blur-sm rounded-2xl p-5 shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all border-2 border-transparent hover:border-blue-400">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${p.colour} flex items-center justify-center text-2xl`}>{p.emoji}</div>
-                  <div><h3 className="text-xl font-bold text-gray-900">{p.name}</h3><p className="text-sm text-gray-500">{p.description}</p></div>
-                </div>
-                <p className="text-sm text-gray-700 leading-relaxed mb-2">{p.presentation}</p>
-                <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
-                  <p className="text-xs text-amber-800"><strong>Clinical challenge:</strong> {p.mainChallenge}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      </AppLayout>
-    );
-  }
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: NEW ASSESSMENT (structured form + AI triage)
+  // ════════════════════════════════════════════════════════════════════════════
 
-  // ─── CONSULT PREPARE ──────────────────────────────────────────────────────
-  if (mode === 'consult-prepare' && selectedPersona) {
+  if (mode === 'new-assessment' && selectedPatient) {
+    const patient = selectedPatient;
+    const pg = PATIENT_GROUPS[patient.patient_group];
+    const isChild = patient.patient_group === 'child-under-5' || patient.patient_group === 'child-5-14';
+    const isPregnant = patient.patient_group === 'pregnant';
+
     return (
       <AppLayout>
         <HealthBackground />
-        <div className="relative z-10 max-w-2xl mx-auto px-6 py-10">
-          <button onClick={() => setMode('consult-personas')} className="flex items-center gap-2 text-blue-200 hover:text-white mb-6"><ArrowLeft size={18}/> Back</button>
-          <div className="bg-white/93 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden">
-            <div className={`bg-gradient-to-r ${selectedPersona.colour} p-6`}>
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-white/20 flex items-center justify-center text-4xl">{selectedPersona.emoji}</div>
-                <div><h2 className="text-3xl font-bold text-white">{selectedPersona.name}</h2><p className="text-white/80">{selectedPersona.description}</p></div>
+        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6 space-y-4">
+
+          {/* Header */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4">
+            <div className="flex items-center gap-3">
+              <button onClick={() => { setMode('patient-detail'); }} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
+              <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${pg.colour} flex items-center justify-center text-xl`}>{pg.emoji}</div>
+              <div>
+                <h2 className="text-base font-bold text-gray-900">Assessment — {patient.patient_name}</h2>
+                <p className="text-xs text-gray-500">{patient.village} · {pg.label}</p>
               </div>
             </div>
-            <div className="p-6 space-y-5">
-              <div><h3 className="font-bold text-gray-900 text-lg mb-2">Clinical Presentation</h3><p className="text-gray-700 leading-relaxed">{selectedPersona.presentation}</p></div>
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                <p className="font-bold text-blue-900 text-sm mb-1">Opening:</p>
-                <p className="text-blue-800 italic text-sm">"{selectedPersona.openingLine.slice(0,150)}…"</p>
-              </div>
-              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-                <h3 className="font-bold text-indigo-900 text-sm mb-2 flex items-center gap-2"><Lightbulb size={14}/> Navigator Tips</h3>
-                <ul className="space-y-1 text-sm text-indigo-800">
-                  <li>✓ Take a structured history BEFORE forming any impression</li>
-                  <li>✓ Ask about and check for all DANGER SIGNS first</li>
-                  <li>✓ Take measurements — don't skip vitals</li>
-                  <li>✓ Classify clearly: RED, YELLOW, or GREEN</li>
-                  <li>✓ Communicate urgency without causing panic</li>
-                </ul>
-              </div>
-              <button onClick={() => setMode('consult-chat')}
-                className={`w-full py-4 rounded-xl text-xl font-bold text-white bg-gradient-to-r ${selectedPersona.colour} hover:opacity-95 flex items-center justify-center gap-2`}>
-                <Stethoscope size={22}/> Begin Assessment
-              </button>
-            </div>
           </div>
-        </div>
-      </AppLayout>
-    );
-  }
 
-  // ─── CHAT VIEW ─────────────────────────────────────────────────────────────
-  if (isChat) {
-    const title    = isConsult ? `Assessing: ${selectedPersona?.name}` : selectedTopic?.title;
-    const subtitle = isConsult ? selectedPersona?.description : 'Clinical Tutor';
-    const avatar   = isConsult ? selectedPersona?.emoji : '🩺';
-
-    return (
-      <AppLayout>
-        <HealthBackground />
-        <div className="relative z-10 max-w-[67%] mx-auto px-6 py-8">
-
-          {showEvalModal && evaluation && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-2xl w-full max-w-xl max-h-[88vh] overflow-y-auto shadow-2xl">
-                <div className={`sticky top-0 bg-gradient-to-r ${activeColour} px-6 py-4 rounded-t-2xl flex items-center justify-between`}>
-                  <h2 className="text-white font-bold text-lg">Clinical Assessment Evaluation</h2>
-                  <button onClick={()=>setShowEvalModal(false)} className="text-white/80 hover:text-white"><X size={22}/></button>
-                </div>
-                <div className="p-6 space-y-4">
-                  <div className="text-center p-4 bg-gray-50 rounded-xl">
-                    <p className="text-sm text-gray-500 uppercase font-bold mb-1">Overall Score</p>
-                    <p className="text-5xl font-black text-gray-900">{evaluation.overall_score?.toFixed(1)}<span className="text-2xl text-gray-400">/3.0</span></p>
-                    <p className={classNames('text-base font-bold mt-1', evaluation.can_advance?'text-emerald-600':'text-amber-600')}>
-                      {evaluation.can_advance?'✅ Ready to assess real community patients':'🌱 Keep practising — every session builds skill'}
-                    </p>
-                  </div>
-                  <div className="space-y-3">
-                    {CONSULT_RUBRIC.map(dim => {
-                      const score = evaluation.scores?.[dim.id]??0;
-                      const ll = LEVEL_LABELS[score];
-                      return (
-                        <div key={dim.id} className={`rounded-xl p-4 ${ll.bg}`}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-semibold text-gray-900 text-base">{dim.label}</span>
-                            <span className={`text-sm font-bold px-2 py-0.5 rounded-full bg-white ${ll.color}`}>{score}/3 — {ll.text}</span>
-                          </div>
-                          <div className="w-full bg-white/60 rounded-full h-1.5 mb-1.5">
-                            <div className={`h-full rounded-full ${score===3?'bg-emerald-500':score===2?'bg-blue-500':score===1?'bg-amber-500':'bg-gray-300'}`} style={{width:`${(score/3)*100}%`}}/>
-                          </div>
-                          <p className="text-sm text-gray-700">{evaluation.evidence?.[dim.id]}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                    <p className="text-sm font-bold text-emerald-800 mb-1">🌟 What you did well</p>
-                    <p className="text-sm text-emerald-700">{evaluation.encouragement}</p>
-                  </div>
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                    <p className="text-sm font-bold text-amber-800 mb-1">🎯 Focus here next</p>
-                    <p className="text-sm text-amber-700">{evaluation.main_improvement}</p>
-                  </div>
-                  <div className="flex gap-3 pt-2">
-                    <button onClick={resetAll} className="flex-1 py-3 rounded-xl font-bold text-white bg-gray-700 hover:bg-gray-800">New Session</button>
-                    <button onClick={()=>setShowEvalModal(false)} className={`flex-1 py-3 rounded-xl font-bold text-white bg-gradient-to-r ${activeColour} hover:opacity-95`}>Continue</button>
-                  </div>
-                </div>
+          {/* Danger sign banner */}
+          {hasDangerSign() && (
+            <div className="bg-red-600 text-white rounded-xl p-4 flex items-start gap-3 animate-pulse">
+              <AlertTriangle size={20} className="flex-shrink-0 mt-0.5"/>
+              <div>
+                <p className="font-bold">⚠️ DANGER SIGN DETECTED</p>
+                <p className="text-sm opacity-90">At least one IMCI danger sign is present. This patient likely requires IMMEDIATE RED referral. Run AI triage and contact your supervising health worker now.</p>
               </div>
             </div>
           )}
 
-          <div className="bg-white/93 backdrop-blur-sm rounded-2xl shadow-lg p-4 mb-4">
-            <div className="flex items-center justify-between flex-wrap gap-3">
+          {/* Chief complaint */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2"><FileText size={15} className="text-blue-600"/> Chief Complaint</h3>
+            <textarea value={assessment.chiefComplaint} onChange={e => setField('chiefComplaint', e.target.value)} rows={2}
+              placeholder="Main reason for this visit — what the patient/caregiver says in their own words…"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+          </div>
+
+          {/* Vitals */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2"><Thermometer size={15} className="text-blue-600"/> Vital Signs</h3>
+            <div className="space-y-3">
+              {/* Temp */}
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Temperature (°C)</label>
+                  <input type="number" step="0.1" value={assessment.tempC} onChange={e => setField('tempC', e.target.value)} placeholder="e.g. 38.2"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Method</label>
+                  <select value={assessment.tempMethod} onChange={e => setField('tempMethod', e.target.value as AssessmentData['tempMethod'])}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+                    <option value="axillary">Axillary</option>
+                    <option value="oral">Oral</option>
+                    <option value="rectal">Rectal</option>
+                  </select>
+                </div>
+                {assessment.tempC && (
+                  <div className="text-xs font-bold mt-4 px-2 py-1 rounded-lg">
+                    {Number(assessment.tempC) >= 39.0 ? <span className="text-red-600">🔴 High</span>
+                      : Number(assessment.tempC) >= 37.5 ? <span className="text-yellow-600">🟡 Fever</span>
+                      : <span className="text-green-600">🟢 Normal</span>}
+                  </div>
+                )}
+              </div>
+              {/* RR */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Respiratory Rate (breaths/min)</label>
+                  <input type="number" value={assessment.respiratoryRate} onChange={e => setField('respiratoryRate', e.target.value)} placeholder="Count 60 sec"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Pulse (bpm)</label>
+                  <input type="number" value={assessment.pulseRate} onChange={e => setField('pulseRate', e.target.value)} placeholder="e.g. 96"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                </div>
+              </div>
+              {/* BP */}
+              {!isChild && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-600 block mb-1">BP Systolic (mmHg)</label>
+                    <input type="number" value={assessment.bpSystolic} onChange={e => setField('bpSystolic', e.target.value)} placeholder="e.g. 130"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-600 block mb-1">BP Diastolic (mmHg)</label>
+                    <input type="number" value={assessment.bpDiastolic} onChange={e => setField('bpDiastolic', e.target.value)} placeholder="e.g. 85"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Anthropometry */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2"><Activity size={15} className="text-blue-600"/> Measurements</h3>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600 block mb-1">Weight (kg)</label>
+                <input type="number" step="0.1" value={assessment.weightKg} onChange={e => setField('weightKg', e.target.value)} placeholder="e.g. 12.5"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 block mb-1">Height (cm)</label>
+                <input type="number" step="0.1" value={assessment.heightCm} onChange={e => setField('heightCm', e.target.value)} placeholder="e.g. 95"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 block mb-1">MUAC (cm)</label>
+                <div className="relative">
+                  <input type="number" step="0.1" value={assessment.muacCm} onChange={e => setField('muacCm', e.target.value)} placeholder="e.g. 13.0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                  {assessment.muacCm && isChild && (
+                    <div className="text-xs font-bold mt-1 text-center">
+                      {Number(assessment.muacCm) < 11.5 ? <span className="text-red-600">🔴 SAM</span>
+                        : Number(assessment.muacCm) < 12.5 ? <span className="text-yellow-600">🟡 MAM</span>
+                        : <span className="text-green-600">🟢 OK</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Danger signs */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <h3 className="text-sm font-bold text-red-700 mb-3 flex items-center gap-2"><AlertTriangle size={15}/> General Danger Signs (IMCI)</h3>
+            <p className="text-xs text-gray-500 mb-3">ANY one = potential RED classification</p>
+            <div className="space-y-2">
+              <CheckRow label="Convulsions (now or in this illness)" checked={assessment.convulsions} onChange={v => setField('convulsions', v)} danger/>
+              <CheckRow label="Unconscious / cannot be woken" checked={assessment.unconscious} onChange={v => setField('unconscious', v)} danger/>
+              <CheckRow label="Unable to drink or feed" checked={assessment.unableToFeed} onChange={v => setField('unableToFeed', v)} danger/>
+              <CheckRow label="Vomits everything" checked={assessment.vomitsEverything} onChange={v => setField('vomitsEverything', v)} danger/>
+            </div>
+          </div>
+
+          {/* Symptoms */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2"><Stethoscope size={15} className="text-blue-600"/> Symptoms & Signs</h3>
+            <div className="space-y-2">
+              <CheckRow label="Fever" checked={assessment.fever} onChange={v => setField('fever', v)}
+                subField={<input type="text" value={assessment.feverDays} onChange={e => setField('feverDays', e.target.value)} placeholder="Days of fever" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>}/>
+              <CheckRow label="Cough" checked={assessment.cough} onChange={v => setField('cough', v)}
+                subField={<input type="text" value={assessment.coughDays} onChange={e => setField('coughDays', e.target.value)} placeholder="Days of cough" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>}/>
+              <CheckRow label="Chest indrawing (lower chest pulls in when breathing)" checked={assessment.chestIndrawing} onChange={v => setField('chestIndrawing', v)} danger/>
+              <CheckRow label="Diarrhoea" checked={assessment.diarrhoea} onChange={v => setField('diarrhoea', v)}
+                subField={
+                  <div className="space-y-1">
+                    <input type="text" value={assessment.diarrhoeaDays} onChange={e => setField('diarrhoeaDays', e.target.value)} placeholder="Days of diarrhoea" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                    <label className="flex items-center gap-2 text-xs text-gray-700">
+                      <input type="checkbox" checked={assessment.bloodInStool} onChange={e => setField('bloodInStool', e.target.checked)} className="accent-blue-600"/>
+                      Blood in stool
+                    </label>
+                  </div>
+                }/>
+              <CheckRow label="Vomiting" checked={assessment.vomiting} onChange={v => setField('vomiting', v)}/>
+              <CheckRow label="Palmar pallor (pale palms)" checked={assessment.palmarPallor} onChange={v => setField('palmarPallor', v)}/>
+              <CheckRow label="Stiff neck" checked={assessment.stiffNeck} onChange={v => setField('stiffNeck', v)} danger/>
+              <CheckRow label="Jaundice (yellow eyes)" checked={assessment.eyeJaundice} onChange={v => setField('eyeJaundice', v)}/>
+              <CheckRow label="Oedema (swelling — feet, legs, face)" checked={assessment.oedema} onChange={v => setField('oedema', v)}/>
+            </div>
+          </div>
+
+          {/* Malaria */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <h3 className="text-sm font-bold text-amber-700 mb-3 flex items-center gap-2">🦟 Malaria Assessment</h3>
+            <div className="space-y-2">
+              <CheckRow label="Malaria suspected" checked={assessment.malariaSuspected} onChange={v => setField('malariaSuspected', v)}/>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 block mb-1">RDT Result</label>
+                <div className="flex gap-2">
+                  {(['positive', 'negative', 'not_done'] as const).map(val => (
+                    <button key={val} onClick={() => setField('rdt', val)}
+                      className={classNames('flex-1 py-2 text-xs font-bold rounded-lg border transition-colors', assessment.rdt === val
+                        ? val === 'positive' ? 'bg-red-600 text-white border-red-600'
+                          : val === 'negative' ? 'bg-green-600 text-white border-green-600'
+                          : 'bg-gray-600 text-white border-gray-600'
+                        : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400')}>
+                      {val === 'positive' ? '+ Positive' : val === 'negative' ? '– Negative' : 'Not done'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <CheckRow label="Patient uses bednet regularly" checked={assessment.recentBednetUse} onChange={v => setField('recentBednetUse', v)}/>
+            </div>
+          </div>
+
+          {/* Additional notes */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <h3 className="text-sm font-bold text-gray-800 mb-2">Additional Notes</h3>
+            <textarea value={assessment.additionalNotes} onChange={e => setField('additionalNotes', e.target.value)} rows={3}
+              placeholder="Any other observations, caregiver history, context…"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+          </div>
+
+          {/* AI Triage */}
+          {!triageResult ? (
+            <button onClick={runTriage} disabled={isTriaging || !assessment.chiefComplaint.trim()}
+              className={classNames('w-full py-4 rounded-xl font-bold text-white text-base transition-opacity flex items-center justify-center gap-2',
+                !isTriaging && assessment.chiefComplaint.trim() ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90' : 'bg-gray-300 cursor-not-allowed')}>
+              {isTriaging ? <><Loader2 size={18} className="animate-spin"/>Running AI Triage…</> : <><Stethoscope size={18}/>Run AI Triage Classification</>}
+            </button>
+          ) : (
+            <div className={classNames('bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5 border-2', TRIAGE_CONFIG[triageResult.level].border)}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">AI Triage Result</p>
+                  <div className="text-2xl font-black">{triageBadge(triageResult.level)}</div>
+                  <p className="text-xs text-gray-500 mt-1">{TRIAGE_CONFIG[triageResult.level].description}</p>
+                </div>
+                <button onClick={() => { setTriageResult(null); runTriage(); }} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                  <RefreshCw size={12}/> Re-run
+                </button>
+              </div>
+              <div className="text-sm text-gray-800 bg-gray-50 rounded-xl px-4 py-3 max-h-64 overflow-y-auto">
+                <MarkdownText text={triageResult.summary}/>
+              </div>
+
+              {/* Save section */}
+              <div className="mt-4 space-y-3 border-t pt-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Actions taken by navigator</label>
+                  <textarea value={navigatorActions} onChange={e => setNavigatorActions(e.target.value)} rows={2}
+                    placeholder="e.g. Gave ORS, explained referral plan to caregiver, wrote referral note…"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input type="checkbox" id="followup" checked={followUpNeeded} onChange={e => setFollowUpNeeded(e.target.checked)} className="w-4 h-4 accent-blue-600"/>
+                  <label htmlFor="followup" className="text-sm font-semibold text-gray-700">Follow-up needed</label>
+                </div>
+                {followUpNeeded && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Follow-up date</label>
+                      <input type="date" value={followUpDate} onChange={e => setFollowUpDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">What to check</label>
+                      <input value={followUpNotes} onChange={e => setFollowUpNotes(e.target.value)} placeholder="e.g. Check fever resolved"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                    </div>
+                  </div>
+                )}
+                {assessmentSaved ? (
+                  <div className="flex items-center gap-2 text-blue-700 font-semibold text-sm bg-blue-50 rounded-xl px-4 py-3">
+                    <CheckCircle size={16}/> Assessment saved to {patient.patient_name}'s record.
+                  </div>
+                ) : (
+                  <button onClick={saveAssessment} disabled={savingAssessment}
+                    className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90 disabled:opacity-50">
+                    {savingAssessment ? <span className="flex items-center justify-center gap-2"><Loader2 size={15} className="animate-spin"/>Saving…</span> : 'Save Assessment Record'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Clinical disclaimer */}
+          <div className="bg-white/70 backdrop-blur-sm rounded-xl px-4 py-3 flex items-start gap-2">
+            <ShieldCheck size={14} className="text-blue-700 flex-shrink-0 mt-0.5"/>
+            <p className="text-xs text-gray-600">This AI triage is clinical decision <strong>support only</strong>. Always follow your training and supervision protocols. Contact your supervising health worker for any RED or uncertain case.</p>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: FOLLOW-UP CHAT
+  // ════════════════════════════════════════════════════════════════════════════
+
+  if (mode === 'followup-chat' && selectedPatient && selectedAssessment) {
+    const patient = selectedPatient;
+    const assess = selectedAssessment;
+    const tc = TRIAGE_CONFIG[assess.triage_level];
+    const userTurns = messages.filter(m => m.role === 'user').length;
+
+    return (
+      <AppLayout>
+        <HealthBackground />
+        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4 mb-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-3">
-                <button onClick={()=>{window.speechSynthesis.cancel();setMode(isConsult?'consult-personas':'learn-topics');setMessages([]);}} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
-                <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${activeColour} flex items-center justify-center text-xl`}>{avatar}</div>
-                <div><h2 className="text-lg font-bold text-gray-900">{title}</h2><p className="text-sm text-gray-500">{subtitle}</p></div>
+                <button onClick={() => { window.speechSynthesis.cancel(); setMode('patient-detail'); }} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-lg">🏥</div>
+                <div>
+                  <h2 className="text-base font-bold text-gray-900">Follow-up Questions</h2>
+                  <p className="text-xs text-gray-500">{patient.patient_name} · {triageBadge(assess.triage_level)}</p>
+                </div>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <button onClick={()=>{setSpeechOn(s=>!s);if(speechOn)window.speechSynthesis.cancel();}} className={`p-2 rounded-lg ${speechOn?'bg-blue-100 text-blue-700':'bg-gray-100 text-gray-400'}`}>{speechOn?<Volume2 size={16}/>:<VolumeX size={16}/>}</button>
-                <button onClick={async()=>{setIsSaving(true);await persistChat(messages);setIsSaving(false);}} disabled={isSaving||messages.length<2} className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg disabled:opacity-40">
-                  {isSaving?<Loader2 size={13} className="animate-spin"/>:<Save size={13}/>} Save
-                </button>
-                <button onClick={handleEvaluate} disabled={isEvaluating||userTurns<3}
-                  className={classNames('flex items-center gap-1 px-3 py-1.5 text-sm font-bold rounded-lg',userTurns>=3&&!isEvaluating?`bg-gradient-to-r ${activeColour} text-white hover:opacity-90`:'bg-gray-200 text-gray-400 cursor-not-allowed')}>
-                  {isEvaluating?<Loader2 size={13} className="animate-spin"/>:<Star size={13}/>} {isEvaluating?'Evaluating…':'Evaluate'}
-                </button>
-              </div>
+              <button onClick={() => { setSpeechOn(s => !s); if (speechOn) window.speechSynthesis.cancel(); }}
+                className={classNames('p-2 rounded-lg', speechOn ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400')}>
+                {speechOn ? <Volume2 size={15}/> : <VolumeX size={15}/>}
+              </button>
             </div>
           </div>
 
           <div className="bg-white/80 backdrop-blur-sm rounded-xl px-4 py-2.5 mb-4 flex items-center gap-2">
-            <ShieldCheck size={14} className="text-blue-700 flex-shrink-0"/>
-            <p className="text-sm text-gray-700">
-              {isConsult ? `You are the Navigator. Start with a history; check danger signs; take measurements; classify RED/YELLOW/GREEN.` : `Ask as many questions as you need. Evaluate after 3+ exchanges.`}
-            </p>
+            <Lightbulb size={14} className="text-blue-700 flex-shrink-0"/>
+            <p className="text-xs text-gray-700">Ask about the triage, how to explain it to the patient, referral logistics, or any clinical question within your navigator scope.</p>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-lg mb-4 flex flex-col" style={{height:'520px'}}>
-            <div className="flex items-center justify-between px-5 py-3 border-b bg-gray-50 rounded-t-2xl flex-shrink-0 text-sm text-gray-500">
-              <span className="font-semibold text-gray-700">{isConsult?`Assessment: ${selectedPersona?.name}`:`Learning: ${selectedTopic?.title}`}</span>
-              <span>{userTurns} turn{userTurns!==1?'s':''} · {userTurns>=3?'✅ Ready to evaluate':`${3-userTurns} more to unlock evaluation`}</span>
+          <div className="bg-white rounded-2xl shadow-lg mb-4 flex flex-col" style={{ height: '460px' }}>
+            <div className="flex items-center justify-between px-5 py-3 border-b bg-gray-50 rounded-t-2xl text-xs text-gray-500">
+              <span className="font-semibold text-gray-700 flex items-center gap-1.5">🏥 Clinical AI Advisor</span>
+              <span>{userTurns} exchange{userTurns !== 1 ? 's' : ''}</span>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {messages.map(msg=>(
-                <div key={msg.id} className={classNames('flex items-start gap-3',msg.role==='user'?'justify-end':'justify-start')}>
-                  {msg.role==='assistant' && <div className={`flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${activeColour} flex items-center justify-center text-xl`}>{avatar}</div>}
-                  <div className={classNames('max-w-[75%] rounded-2xl px-5 py-4 text-lg leading-relaxed',msg.role==='user'?'bg-blue-600 text-white rounded-tr-sm':'bg-gray-100 text-gray-900 rounded-tl-sm')}>
-                    {msg.role==='assistant'&&<p className="text-xs font-bold mb-1 opacity-60">{isConsult?selectedPersona?.name:'Clinical Tutor'}</p>}
-                    {msg.role==='user'&&<p className="text-xs font-bold mb-1 opacity-75">You (Navigator)</p>}
+              {messages.map(msg => (
+                <div key={msg.id} className={classNames('flex items-start gap-3', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                  {msg.role === 'assistant' && (
+                    <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-lg">🏥</div>
+                  )}
+                  <div className={classNames('max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
+                    msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-gray-100 text-gray-900 rounded-tl-sm')}>
+                    {msg.role === 'assistant' && <p className="text-xs font-bold mb-1 opacity-50">AI Clinical Advisor</p>}
+                    {msg.role === 'user' && <p className="text-xs font-bold mb-1 opacity-75">You (Navigator)</p>}
                     <MarkdownText text={msg.content}/>
                   </div>
-                  {msg.role==='user'&&<div className="flex-shrink-0 w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center"><Stethoscope size={18} className="text-white"/></div>}
+                  {msg.role === 'user' && (
+                    <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center">
+                      <User size={15} className="text-white"/>
+                    </div>
+                  )}
                 </div>
               ))}
-              {isSending&&(
+              {isSending && (
                 <div className="flex items-start gap-3">
-                  <div className={`flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${activeColour} flex items-center justify-center text-xl`}>{avatar}</div>
-                  <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3"><div className="flex gap-1.5 h-5">{[0,150,300].map(d=><div key={d} className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{animationDelay:`${d}ms`}}/>)}</div></div>
+                  <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-lg">🏥</div>
+                  <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
+                    <div className="flex gap-1.5 items-center h-4">{[0, 150, 300].map(d => <div key={d} className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: `${d}ms` }}/>)}</div>
+                  </div>
                 </div>
               )}
               <div ref={chatEndRef}/>
             </div>
             <div className="border-t p-4 rounded-b-2xl">
               <div className="flex items-end gap-2">
-                <textarea ref={inputRef} value={inputText} onChange={e=>setInputText(e.target.value)} onKeyDown={handleKeyDown} rows={3}
-                  placeholder={isConsult?`Talk to ${selectedPersona?.name} or their caregiver…`:'Ask a clinical question…'}
-                  disabled={isSending} className="flex-1 px-4 py-3 text-lg border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none leading-relaxed disabled:opacity-50"/>
+                <textarea ref={inputRef} value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={handleKeyDown} rows={2}
+                  placeholder="Ask a follow-up clinical question…"
+                  disabled={isSending}
+                  className="flex-1 px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none leading-relaxed disabled:opacity-50"/>
                 <div className="flex flex-col gap-2">
-                  <button onClick={toggleListening} className={classNames('p-3 rounded-xl',isListening?'bg-red-500 text-white animate-pulse':'bg-gray-100 text-gray-500 hover:bg-gray-200')}>{isListening?<MicOff size={18}/>:<Mic size={18}/>}</button>
-                  <button onClick={sendMessage} disabled={!inputText.trim()||isSending}
-                    className={classNames('p-3 rounded-xl',inputText.trim()&&!isSending?`bg-gradient-to-br ${activeColour} text-white hover:opacity-90`:'bg-gray-100 text-gray-400 cursor-not-allowed')}><Send size={18}/></button>
+                  <button onClick={toggleListening}
+                    className={classNames('p-2.5 rounded-xl transition-all', isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 text-gray-500 hover:bg-gray-200')}>
+                    {isListening ? <MicOff size={16}/> : <Mic size={16}/>}
+                  </button>
+                  <button onClick={sendMessage} disabled={!inputText.trim() || isSending}
+                    className={classNames('p-2.5 rounded-xl transition-all',
+                      inputText.trim() && !isSending ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white hover:opacity-90' : 'bg-gray-100 text-gray-400 cursor-not-allowed')}>
+                    <Send size={16}/>
+                  </button>
                 </div>
               </div>
             </div>
           </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
-          {userTurns>=3&&!showEvalModal&&(
-            <div className="bg-white/90 backdrop-blur-sm rounded-xl p-4 flex items-center justify-between shadow">
-              <div className="flex items-center gap-2"><Award size={18} className="text-blue-600"/><p className="text-base font-semibold text-gray-800">Good session — evaluate when ready.</p></div>
-              <button onClick={handleEvaluate} disabled={isEvaluating} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-gradient-to-r ${activeColour} hover:opacity-90`}>
-                {isEvaluating?<><Loader2 size={16} className="animate-spin"/>Evaluating…</>:<><Star size={16}/>Evaluate</>}
-              </button>
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: CASE DETAIL
+  // ════════════════════════════════════════════════════════════════════════════
+
+  if (mode === 'case-detail' && selectedAssessment && selectedPatient) {
+    const a = selectedAssessment;
+    const tc = TRIAGE_CONFIG[a.triage_level];
+    return (
+      <AppLayout>
+        <HealthBackground />
+        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6 space-y-4">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <button onClick={() => setMode('patient-detail')} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-2xl">🏥</div>
+              <div className="flex-1">
+                <h2 className="text-base font-bold text-gray-900">Assessment — {selectedPatient.patient_name}</h2>
+                <p className="text-xs text-gray-500">{formatDate(a.created_at)}</p>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                {triageBadge(a.triage_level)}
+                {a.resolved
+                  ? <span className="text-xs text-green-600 font-semibold flex items-center gap-1"><CheckCircle size={11}/> Resolved</span>
+                  : <span className="text-xs text-orange-600 font-semibold">Open</span>}
+              </div>
             </div>
-          )}
-          <div className="mt-3 flex justify-center"><button onClick={resetAll} className="text-sm text-white/60 hover:text-white/90 underline">Start over</button></div>
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Chief Complaint</p>
+                <p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{a.assessment_data.chiefComplaint || 'Not recorded'}</p>
+              </div>
+
+              {/* Key vitals summary */}
+              <div>
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Vitals Recorded</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: 'Temp', value: a.assessment_data.tempC ? `${a.assessment_data.tempC}°C` : '—' },
+                    { label: 'RR', value: a.assessment_data.respiratoryRate ? `${a.assessment_data.respiratoryRate}/min` : '—' },
+                    { label: 'Pulse', value: a.assessment_data.pulseRate ? `${a.assessment_data.pulseRate} bpm` : '—' },
+                    { label: 'BP', value: a.assessment_data.bpSystolic ? `${a.assessment_data.bpSystolic}/${a.assessment_data.bpDiastolic}` : '—' },
+                    { label: 'Weight', value: a.assessment_data.weightKg ? `${a.assessment_data.weightKg} kg` : '—' },
+                    { label: 'MUAC', value: a.assessment_data.muacCm ? `${a.assessment_data.muacCm} cm` : '—' },
+                  ].map(v => (
+                    <div key={v.label} className="flex justify-between bg-gray-50 rounded-lg px-3 py-1.5 text-sm">
+                      <span className="text-gray-500 font-medium">{v.label}</span>
+                      <span className="font-bold text-gray-900">{v.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {a.ai_triage_summary && (
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">AI Triage Summary</p>
+                  <div className={classNames('text-sm text-gray-800 rounded-lg px-3 py-2 max-h-48 overflow-y-auto border', tc.bg, tc.border)}>
+                    <MarkdownText text={a.ai_triage_summary}/>
+                  </div>
+                </div>
+              )}
+              {a.navigator_actions && (
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Actions Taken</p>
+                  <p className="text-sm text-gray-800 bg-blue-50 rounded-lg px-3 py-2">{a.navigator_actions}</p>
+                </div>
+              )}
+              {a.follow_up_needed && (
+                <div className="flex items-start gap-2 text-blue-700 bg-blue-50 rounded-lg px-3 py-2">
+                  <Calendar size={14} className="mt-0.5 flex-shrink-0"/>
+                  <div>
+                    <p className="text-sm font-semibold">Follow-up{a.follow_up_date ? `: ${formatDate(a.follow_up_date)}` : ' needed'}</p>
+                    {a.follow_up_notes && <p className="text-xs mt-0.5">{a.follow_up_notes}</p>}
+                  </div>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button onClick={() => openFollowupChat(selectedPatient, a)}
+                  className="flex-1 py-2.5 text-sm font-bold rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100">
+                  Ask AI Follow-up
+                </button>
+                {!a.resolved && (
+                  <button onClick={async () => { await markResolved(a.id); setSelectedAssessment({ ...a, resolved: true }); }}
+                    className="flex-1 py-2.5 text-sm font-bold rounded-xl text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90">
+                    Mark Resolved ✓
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </AppLayout>
     );
@@ -1529,7 +1451,7 @@ Return valid JSON only:
   return null;
 };
 
-// Tiny alias needed because RefreshCw wasn't imported at the top
+// RefreshCw alias (was inline in original)
 const RefreshCw: React.FC<{ size?: number; className?: string }> = ({ size = 16, className }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
