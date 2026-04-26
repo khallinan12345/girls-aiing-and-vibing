@@ -85,6 +85,7 @@ const Navbar: React.FC = () => {
         { name: 'Healthcare Certification', path: '/community-impact/healthcare/certification' },
         { name: 'Entrepreneurship Consultant', path: '/community-impact/entrepreneurship' },
         { name: 'Entrepreneurship Certification', path: '/community-impact/entrepreneurship/certification' },
+        { name: 'Animal Husbandry Advisor', path: '/community-impact/animal-husbandry' },
       ],
     },
     { name: 'Dashboard', path: '/dashboard', shorthand: 'Dashboard' },

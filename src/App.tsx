@@ -82,6 +82,7 @@ import HealthcareNavigatorPage from './pages/community-impact/HealthcareNavigato
 import HealthcareNavigatorCertificationPage from './pages/community-impact/HealthcareNavigatorCertificationPage';
 import EntrepreneurshipConsultantPage from './pages/community-impact/EntrepreneurshipConsultantPage';
 import EntrepreneurshipConsultantCertificationPage from './pages/community-impact/EntrepreneurshipConsultantCertificationPage';
+import AnimalHusbandryPage from './pages/community-impact/AnimalHusbandryPage';
 
 const AppContent: React.FC = () => {
   const location = useLocation();
@@ -227,6 +228,7 @@ const AppContent: React.FC = () => {
         <Route path="/community-impact/healthcare/certification" element={<HealthcareNavigatorCertificationPage />} />
         <Route path="/community-impact/entrepreneurship" element={<EntrepreneurshipConsultantPage />} />
         <Route path="/community-impact/entrepreneurship/certification" element={<EntrepreneurshipConsultantCertificationPage />} />
+        <Route path="/community-impact/animal-husbandry" element={<AnimalHusbandryPage />} />
 
         {/* Legacy Route Redirects */}
         <Route path="/ai-proficiency" element={<Navigate to="/certifications/ai-proficiency" replace />} />

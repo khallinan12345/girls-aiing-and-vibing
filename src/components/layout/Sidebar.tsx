@@ -6,7 +6,7 @@ import {
   Code, Database, Layers, ImagePlus, Video, Mic, PenLine, Zap,
   Briefcase, Code2, Film, ImagePlus as ImagePlusIcon, Mic as MicIcon,
   Cpu, Wand2, ChevronDown, ChevronUp, ShieldCheck, Users, Sprout, Fish, Heart,
-  GitBranch,
+  GitBranch, PawPrint,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -127,6 +127,7 @@ const Sidebar: React.FC = () => {
         { name: 'Healthcare Certification',        path: '/community-impact/healthcare/certification',      icon: <Award size={20} />     },
         { name: 'Entrepreneurship Consultant',     path: '/community-impact/entrepreneurship',              icon: <Briefcase size={20} /> },
         { name: 'Entrepreneurship Certification',  path: '/community-impact/entrepreneurship/certification',icon: <Award size={20} />     },
+        { name: 'Animal Husbandry Advisor',        path: '/community-impact/animal-husbandry',             icon: <PawPrint size={20} />  },
       ],
     },
   ];
