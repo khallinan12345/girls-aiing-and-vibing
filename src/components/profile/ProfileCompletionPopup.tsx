@@ -118,7 +118,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Join code modal (shown to new org creators before proceeding) ──────────
+  // ── Join code modal state ─────────────────────────────────────────────────
   const [newOrgJoinCode, setNewOrgJoinCode] = useState<string | null>(null);
   const [newOrgName, setNewOrgName]         = useState<string | null>(null);
   const [codeCopied, setCodeCopied]         = useState(false);
@@ -285,9 +285,11 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
 
       const { data: existing } = await supabase.from('profiles').select('id').eq('id', actualUserId).maybeSingle();
       if (existing) {
-        await supabase.from('profiles').update(profilePayload).eq('id', actualUserId);
+        const { error: updateError } = await supabase.from('profiles').update(profilePayload).eq('id', actualUserId);
+        if (updateError) throw new Error('Could not update profile: ' + updateError.message);
       } else {
-        await supabase.from('profiles').insert(profilePayload);
+        const { error: insertError } = await supabase.from('profiles').insert(profilePayload);
+        if (insertError) throw new Error('Could not create profile: ' + insertError.message);
       }
 
       // ── Seed dashboard activities for learners ─────────────────────────────
@@ -314,10 +316,17 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
         }
       }
 
-      // For new org creators: show the join code modal before navigating away.
-      // For everyone else: proceed immediately.
+      // After profile is created, backfill leader_id on the org now that the profiles FK is satisfied
+      if (role === 'leader' && leaderOrgMode === 'create' && organization_id) {
+        await supabase
+          .from('organizations')
+          .update({ leader_id: actualUserId })
+          .eq('id', organization_id);
+      }
+
+      // Show join-code modal for new org leaders; proceed immediately for everyone else
       if (role === 'leader' && leaderOrgMode === 'create') {
-        // modal will be shown via newOrgJoinCode state — don't call onComplete yet
+        // modal shown via newOrgJoinCode state — onComplete called when user dismisses
       } else {
         onComplete();
       }
@@ -333,63 +342,41 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
   // Only show gender picker to learners if org has mixed genders OR no org linked
   const learnerNeedsGender = role === 'learner' && (!orgCtx || orgCtx.learner_gender === 'both');
 
-  // ── Join code modal — shown to new org leaders after profile is saved ───────
+  // ── Join code modal ────────────────────────────────────────────────────────
   if (newOrgJoinCode && newOrgName) {
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center">
-
-          {/* Icon */}
           <div className="mx-auto w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mb-5">
             <Building2 className="w-8 h-8 text-indigo-600" />
           </div>
-
           <h2 className="text-2xl font-bold text-gray-900 mb-1">Organization Created!</h2>
           <p className="text-gray-500 text-sm mb-6">
             <span className="font-semibold text-gray-700">{newOrgName}</span> is live on the platform.
           </p>
-
-          {/* Join code */}
           <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-5 mb-5">
-            <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-2">
-              Your Join Code
-            </p>
-            <p className="text-5xl font-black text-indigo-900 tracking-widest font-mono mb-4">
-              {newOrgJoinCode}
-            </p>
+            <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-2">Your Join Code</p>
+            <p className="text-5xl font-black text-indigo-900 tracking-widest font-mono mb-4">{newOrgJoinCode}</p>
             <button
               onClick={() => {
                 navigator.clipboard.writeText(newOrgJoinCode);
                 setCodeCopied(true);
                 setTimeout(() => setCodeCopied(false), 2500);
               }}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700
-                         text-white text-sm font-semibold rounded-lg transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
             >
-              {codeCopied
-                ? <><CheckCircle className="w-4 h-4" /> Copied!</>
-                : <><Copy className="w-4 h-4" /> Copy Code</>}
+              {codeCopied ? <><CheckCircle className="w-4 h-4" /> Copied!</> : <><Copy className="w-4 h-4" /> Copy Code</>}
             </button>
           </div>
-
-          {/* Instructions */}
           <div className="bg-gray-50 rounded-xl p-4 text-left space-y-2 mb-6">
             <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">How to use it</p>
-            <p className="text-sm text-gray-700">
-              📢 Share this code with your learners <span className="font-semibold">before</span> they sign up.
-            </p>
-            <p className="text-sm text-gray-700">
-              📝 During signup, they enter this code to join <span className="font-semibold">{newOrgName}</span>.
-            </p>
-            <p className="text-sm text-gray-700">
-              🔑 You can always find this code — and generate new ones — on your <span className="font-semibold">Profile page</span>.
-            </p>
+            <p className="text-sm text-gray-700">📢 Share this code with your learners <span className="font-semibold">before</span> they sign up.</p>
+            <p className="text-sm text-gray-700">📝 During signup, they enter this code to join <span className="font-semibold">{newOrgName}</span>.</p>
+            <p className="text-sm text-gray-700">🔑 You can always find this code on your <span className="font-semibold">Profile page</span>.</p>
           </div>
-
           <button
             onClick={onComplete}
-            className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold
-                       rounded-xl transition-colors text-base"
+            className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors text-base"
           >
             Got it — go to my dashboard!
           </button>
