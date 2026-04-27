@@ -154,13 +154,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const markProfileCompleted = useCallback(async (userId: string) => {
     console.log('[Auth] markProfileCompleted for', userId);
     try {
-      // The profile should already be created and marked complete by ProfileCompletionPopup
-      // This just updates our local state and refreshes from the database
+      // Mark locally — do NOT call refreshUserProfile here.
+      // refreshUserProfile causes a re-render that unmounts the popup
+      // before the join-code modal or "Got it" button can be shown.
+      // App.tsx's handleProfileCompletion will navigate after onComplete fires.
       setNeedsProfileCompletion(false);
-      profileConfirmedRef.current = true; // Mark as confirmed
-      
+      profileConfirmedRef.current = true;
       console.log('[Auth] profile completion marked locally');
-      await refreshUserProfile();
+
+      // Refresh in background without awaiting — state will update after navigation
+      refreshUserProfile().catch(err =>
+        console.warn('[Auth] background refresh after markProfileCompleted failed:', err)
+      );
     } catch (error) {
       console.error('[Auth] markProfileCompleted exception:', error);
       throw error;

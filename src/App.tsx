@@ -138,15 +138,17 @@ const AppContent: React.FC = () => {
   }, [user?.id]);
 
   const handleProfileCompletion = async () => {
+    // Called by ProfileCompletionPopup's onComplete — which fires AFTER
+    // the user clicks "Got it" on the join-code modal (for leaders) or
+    // immediately after profile save (for learners).
+    // markProfileCompleted no longer awaits refreshUserProfile, so the
+    // popup is never unmounted prematurely by a re-render.
     console.log('[AppContent] profile completion triggered');
     if (user?.id) {
       try {
         await markProfileCompleted(user.id);
-        console.log('[AppContent] profile marked as completed');
-        setTimeout(() => {
-          console.log('[AppContent] navigating to /dashboard');
-          navigate('/dashboard', { replace: true });
-        }, 100);
+        console.log('[AppContent] profile marked as completed, navigating to /dashboard');
+        navigate('/dashboard', { replace: true });
       } catch (error) {
         console.error('[AppContent] error in profile completion:', error);
       }
