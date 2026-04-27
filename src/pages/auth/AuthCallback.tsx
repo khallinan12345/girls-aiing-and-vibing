@@ -44,9 +44,47 @@ const AuthCallback: React.FC = () => {
 
         console.log('Session data:', data);
 
+        // Helper: ensure a profiles row exists for this auth user
+        const ensureProfile = async (authUser: { id: string; email?: string }) => {
+          const { data: existing } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('id', authUser.id)
+            .maybeSingle();
+
+          if (existing) {
+            console.log('[AuthCallback] profiles row already exists');
+            return;
+          }
+
+          console.log('[AuthCallback] No profiles row — creating minimal profile');
+          const now = new Date().toISOString();
+          const { error: insertError } = await supabase
+            .from('profiles')
+            .insert({
+              id: authUser.id,
+              email: authUser.email ?? '',
+              name: '',
+              role: 'student',          // default; user sets real role in ProfilePage
+              profile_completed: false,
+              created_at: now,
+              updated_at: now,
+            });
+
+          if (insertError) {
+            console.warn('[AuthCallback] Could not create profiles row:', insertError.message);
+          } else {
+            console.log('[AuthCallback] ✅ Minimal profiles row created');
+          }
+        };
+
         // If we have a session, the email was confirmed successfully
         if (data.session) {
           console.log('Email confirmation successful!');
+
+          // Ensure profiles row exists before redirecting
+          await ensureProfile(data.session.user);
+
           setStatus('success');
           
           // For email confirmations, show success page instead of redirecting
@@ -54,7 +92,6 @@ const AuthCallback: React.FC = () => {
           const isEmailConfirmation = urlParams.get('type') === 'signup' || hash.includes('type=signup');
           
           if (isEmailConfirmation) {
-            // Redirect to success page
             navigate('/auth/confirmation-success', { replace: true });
           } else {
             // For OAuth, redirect to home
@@ -76,6 +113,8 @@ const AuthCallback: React.FC = () => {
             }
             
             if (exchangeData.session) {
+              // Ensure profiles row exists for code-exchange flow too
+              await ensureProfile(exchangeData.session.user);
               setStatus('success');
               setTimeout(() => {
                 navigate('/home', { replace: true });

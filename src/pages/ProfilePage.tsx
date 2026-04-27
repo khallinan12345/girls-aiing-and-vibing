@@ -442,10 +442,39 @@ const ProfilePage: React.FC = () => {
     e.preventDefault();
     console.log('[ProfilePage] handleSaveProfile called');
 
-    if (!authUser || !profile) {
-      console.error('[ProfilePage] Missing authUser or profile');
+    if (!authUser) {
+      console.error('[ProfilePage] Missing authUser');
       setError('User information not available');
       return;
+    }
+
+    // ── If no profile row exists yet (edge case: AuthCallback didn't run or
+    //    failed silently), create a minimal one now before updating it. ────────
+    if (!profile) {
+      console.log('[ProfilePage] No profile row found — inserting minimal row first');
+      const now = new Date().toISOString();
+      const { error: insertErr } = await supabase
+        .from('profiles')
+        .insert({
+          id: authUser.id,
+          email: authUser.email ?? '',
+          name: '',
+          role: 'student',
+          profile_completed: false,
+          created_at: now,
+          updated_at: now,
+        });
+      if (insertErr && insertErr.code !== '23505') { // ignore duplicate-key
+        setError('Could not initialise profile: ' + insertErr.message);
+        return;
+      }
+      // Re-fetch so the rest of the function has a valid profile object
+      const { data: newProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (newProfile) setProfile(newProfile);
     }
 
     try {
@@ -456,7 +485,7 @@ const ProfilePage: React.FC = () => {
       // ── If user is becoming a leader with no org yet, create the org first ──
       let newOrgId: string | null = null;
       let newJoinCode: string | null = null;
-      const becomingLeader = formData.role === 'leader' && !profile.organization_id;
+      const becomingLeader = formData.role === 'leader' && !profile?.organization_id;
 
       if (becomingLeader) {
         const orgName = formData.school_name?.trim() || formData.name?.trim() || 'My Organization';
