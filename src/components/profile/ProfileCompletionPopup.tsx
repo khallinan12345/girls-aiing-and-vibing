@@ -283,12 +283,22 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
         profilePayload.grade_level = parseInt(gradeLevel, 10);
       }
 
-      const { data: existing } = await supabase.from('profiles').select('id').eq('id', actualUserId).maybeSingle();
+      console.log('[ProfileCompletionPopup] profile payload:', JSON.stringify(profilePayload));
+      console.log('[ProfileCompletionPopup] actualUserId:', actualUserId, 'session uid:', session.user.id);
+
+      const { data: existing, error: existsError } = await supabase
+        .from('profiles').select('id').eq('id', actualUserId).maybeSingle();
+      console.log('[ProfileCompletionPopup] existing check:', existing, existsError);
+
       if (existing) {
-        const { error: updateError } = await supabase.from('profiles').update(profilePayload).eq('id', actualUserId);
+        // Strip created_at from update payload — let DB manage it
+        const { created_at, ...updatePayload } = profilePayload;
+        const { error: updateError } = await supabase.from('profiles').update(updatePayload).eq('id', actualUserId);
+        console.log('[ProfileCompletionPopup] update result:', updateError);
         if (updateError) throw new Error('Could not update profile: ' + updateError.message);
       } else {
-        const { error: insertError } = await supabase.from('profiles').insert(profilePayload);
+        const { data: insertData, error: insertError } = await supabase.from('profiles').insert(profilePayload).select();
+        console.log('[ProfileCompletionPopup] insert result:', insertData, insertError);
         if (insertError) throw new Error('Could not create profile: ' + insertError.message);
       }
 
