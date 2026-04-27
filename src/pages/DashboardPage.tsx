@@ -756,32 +756,42 @@ const DashboardPage: React.FC = () => {
       });
   }, [userProfile?.role]);
 
-  // For leader: derive join_code from their students' join_code_used
+  // For leader: derive join_code directly from their profile → organizations FK
   useEffect(() => {
     if (userProfile?.role !== 'leader' || !user?.id) return;
+
     supabase
-      .from('profile_organizations')
-      .select('organizations(join_code)')
-      .eq('profile_id', user.id)
-      .limit(1)
-      .then(({ data }) => {
-        const code = (data?.[0] as any)?.organizations?.join_code ?? '';
+      .from('profiles')
+      .select('organizations(join_code, join_codes)')
+      .eq('id', user.id)
+      .single()
+      .then(({ data: profileData }) => {
+        const org = (profileData as any)?.organizations;
+        // Prefer the first entry of join_codes[], fall back to legacy join_code
+        const code: string =
+          (Array.isArray(org?.join_codes) && org.join_codes.length > 0
+            ? org.join_codes[0]
+            : org?.join_code) ?? '';
+
         if (code) {
           setLeaderJoinCode(code);
         } else {
-          // Fallback: infer from a student in their org
-          supabase
-            .from('profiles')
-            .select('join_code_used')
-            .eq('role', 'student')
-            .not('join_code_used', 'is', null)
-            .limit(1)
-            .then(({ data: pd }) => {
-              setLeaderJoinCode(pd?.[0]?.join_code_used ?? '');
-            });
+          // Fallback: find any student in this org and use their join_code_used
+          if (userProfile?.organization_id) {
+            supabase
+              .from('profiles')
+              .select('join_code_used')
+              .eq('organization_id', userProfile.organization_id)
+              .eq('role', 'student')
+              .not('join_code_used', 'is', null)
+              .limit(1)
+              .then(({ data: pd }) => {
+                setLeaderJoinCode(pd?.[0]?.join_code_used ?? '');
+              });
+          }
         }
       });
-  }, [userProfile?.role, user?.id]);
+  }, [userProfile?.role, userProfile?.organization_id, user?.id]);
 
   // Refetch whenever metric or resolved join code changes
   useEffect(() => {

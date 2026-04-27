@@ -18,7 +18,9 @@ import {
   Calendar,
   CheckCircle,
   Globe,
-  MapPin
+  MapPin,
+  Copy,
+  Building2
 } from 'lucide-react';
 import classNames from 'classnames';
 import { useAuth } from '../hooks/useAuth';
@@ -163,6 +165,8 @@ const ProfilePage: React.FC = () => {
   const [cityChoice, setCityChoice] = useState(''); // tracks dropdown selection for smart city field
   const [schoolChoice, setSchoolChoice] = useState(''); // tracks dropdown selection for smart school field
   const [success, setSuccess] = useState<string | null>(null);
+  const [joinCodeModal, setJoinCodeModal] = useState<{ orgName: string; joinCode: string } | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
   
   // Form state - updated to include all profile fields
   const [formData, setFormData] = useState({
@@ -437,7 +441,7 @@ const ProfilePage: React.FC = () => {
   const handleSaveProfile = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     console.log('[ProfilePage] handleSaveProfile called');
-    
+
     if (!authUser || !profile) {
       console.error('[ProfilePage] Missing authUser or profile');
       setError('User information not available');
@@ -449,8 +453,41 @@ const ProfilePage: React.FC = () => {
       setError(null);
       setSuccess(null);
 
-      console.log('[ProfilePage] Updating profile with data:', formData);
+      // ── If user is becoming a leader with no org yet, create the org first ──
+      let newOrgId: string | null = null;
+      let newJoinCode: string | null = null;
+      const becomingLeader = formData.role === 'leader' && !profile.organization_id;
 
+      if (becomingLeader) {
+        const orgName = formData.school_name?.trim() || formData.name?.trim() || 'My Organization';
+        const rawCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        console.log('[ProfilePage] Creating organization:', orgName);
+
+        const { data: orgData, error: orgError } = await supabase
+          .from('organizations')
+          .insert({
+            name: orgName,
+            join_code: rawCode,
+            join_codes: [rawCode],
+            continent: formData.continent || null,
+            country: formData.country || null,
+            city: formData.city || null,
+            description: null,
+          })
+          .select('id, join_code')
+          .single();
+
+        if (orgError) {
+          console.error('[ProfilePage] Org creation error:', orgError);
+          throw new Error('Could not create organization: ' + orgError.message);
+        }
+
+        newOrgId = orgData.id;
+        newJoinCode = orgData.join_code;
+        console.log('[ProfilePage] Organization created:', newOrgId, 'join_code:', newJoinCode);
+      }
+
+      // ── Update the profile ────────────────────────────────────────────────
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
@@ -464,6 +501,7 @@ const ProfilePage: React.FC = () => {
           state: formData.state || null,
           city: formData.city || null,
           school_name: formData.school_name || null,
+          ...(newOrgId ? { organization_id: newOrgId, is_primary_leader: true } : {}),
           updated_at: new Date().toISOString()
         })
         .eq('id', authUser.id);
@@ -475,7 +513,7 @@ const ProfilePage: React.FC = () => {
 
       console.log('[ProfilePage] Profile updated successfully');
 
-      // Update local state
+      // ── Update local state ────────────────────────────────────────────────
       setProfile(prev => prev ? {
         ...prev,
         name: formData.name,
@@ -488,15 +526,22 @@ const ProfilePage: React.FC = () => {
         state: formData.state,
         city: formData.city,
         school_name: formData.school_name,
+        ...(newOrgId ? { organization_id: newOrgId, is_primary_leader: true } : {}),
         updated_at: new Date().toISOString()
       } : null);
 
-      // Refresh the auth user profile
       await refreshUserProfile();
-
       setEditing(false);
-      setSuccess('Profile updated successfully!');
-      setTimeout(() => setSuccess(null), 3000);
+
+      // ── Show join-code modal for new leaders; plain success for everyone else ──
+      if (becomingLeader && newJoinCode) {
+        const orgName = formData.school_name?.trim() || formData.name?.trim() || 'My Organization';
+        setJoinCodeModal({ orgName, joinCode: newJoinCode });
+        await fetchProfileData();
+      } else {
+        setSuccess('Profile updated successfully!');
+        setTimeout(() => setSuccess(null), 3000);
+      }
 
     } catch (err) {
       console.error('[ProfilePage] Error updating profile:', err);
@@ -504,7 +549,7 @@ const ProfilePage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [authUser, profile, formData, refreshUserProfile]);
+  }, [authUser, profile, formData, refreshUserProfile, fetchProfileData]);
 
   const handlePasswordReset = useCallback(async () => {
     if (!profile?.email) {
@@ -1473,6 +1518,75 @@ const ProfilePage: React.FC = () => {
           </div>
         </div>
       </div>
+      {/* ── Join Code Modal (shown once after org creation) ─────────────── */}
+      {joinCodeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setJoinCodeModal(null)}
+          />
+
+          {/* Panel */}
+          <div className="relative bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center animate-fade-in">
+            {/* Icon */}
+            <div className="mx-auto w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mb-5">
+              <Building2 className="w-8 h-8 text-indigo-600" />
+            </div>
+
+            <h2 className="text-2xl font-bold text-gray-900 mb-1">
+              Organization Created!
+            </h2>
+            <p className="text-gray-500 text-sm mb-6">
+              <span className="font-semibold text-gray-700">{joinCodeModal.orgName}</span> is live on the platform.
+            </p>
+
+            {/* Join code display */}
+            <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-5 mb-4">
+              <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-2">
+                Your Join Code
+              </p>
+              <p className="text-5xl font-black text-indigo-900 tracking-widest font-mono mb-3">
+                {joinCodeModal.joinCode}
+              </p>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(joinCodeModal.joinCode);
+                  setCodeCopied(true);
+                  setTimeout(() => setCodeCopied(false), 2500);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700
+                           text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                <Copy className="w-4 h-4" />
+                {codeCopied ? 'Copied!' : 'Copy Code'}
+              </button>
+            </div>
+
+            {/* Instructions */}
+            <div className="bg-gray-50 rounded-xl p-4 text-left space-y-2 mb-6">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">How to use it</p>
+              <p className="text-sm text-gray-700">
+                📢 Share this code with your learners <span className="font-semibold">before</span> they sign up.
+              </p>
+              <p className="text-sm text-gray-700">
+                📝 During signup, they enter this code to be linked to <span className="font-semibold">{joinCodeModal.orgName}</span>.
+              </p>
+              <p className="text-sm text-gray-700">
+                🔑 You can always find this code — and generate new ones — on your <span className="font-semibold">Profile page</span>.
+              </p>
+            </div>
+
+            <button
+              onClick={() => setJoinCodeModal(null)}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold
+                         rounded-xl transition-colors text-base"
+            >
+              Got it — let's go!
+            </button>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 };
