@@ -214,7 +214,6 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
             description:      orgDescription.trim() || null,
             join_code:        newCode,          // legacy single column — keep for compat
             join_codes:       [newCode],        // new array column
-            leader_id:        actualUserId,
             continent,
             country,
             state:            state  || null,
