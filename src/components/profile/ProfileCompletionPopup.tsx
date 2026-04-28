@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
-import { User, GraduationCap, Globe, MapPin, Key, Building2, Search, PlusCircle, Copy, CheckCircle } from 'lucide-react';
+import { User, GraduationCap, Globe, MapPin, Key, Building2, Search, PlusCircle, Upload, Copy, CheckCircle } from 'lucide-react';
 
 // Leader can either join an existing org (they have a co-leader join code)
 // or create a brand-new org for their own cohort.
@@ -115,13 +115,20 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
   const [ageMax, setAgeMax] = useState('');
   const [learnerGender, setLearnerGender] = useState<'female'|'male'|'both'>('both');
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // ── Logo + community context (optional, org creator only) ────────────────
+  const [logoFile, setLogoFile]                   = useState<File | null>(null);
+  const [logoPreview, setLogoPreview]             = useState<string | null>(null);
+  const [communityLivelihood, setCommunityLivelihood] = useState('');
+  const [communityChallenges, setCommunityChallenges] = useState('');
+  const [communityHopes, setCommunityHopes]       = useState('');
 
   // ── Join code modal state ─────────────────────────────────────────────────
   const [newOrgJoinCode, setNewOrgJoinCode] = useState<string | null>(null);
   const [newOrgName, setNewOrgName]         = useState<string | null>(null);
   const [codeCopied, setCodeCopied]         = useState(false);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // ── Learner join code lookup (array-aware via RPC) ────────────────────────
   const handleJoinCodeChange = async (code: string) => {
@@ -158,6 +165,19 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
     } else {
       setCoJoinStatus('not_found');
       setCoOrgCtx(null);
+    }
+  };
+
+  // ── Logo file picker ──────────────────────────────────────────────────────
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    setLogoFile(file);
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = ev => setLogoPreview(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setLogoPreview(null);
     }
   };
 
@@ -214,6 +234,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
             description:      orgDescription.trim() || null,
             join_code:        newCode,          // legacy single column — keep for compat
             join_codes:       [newCode],        // new array column
+            leader_id:        actualUserId,
             continent,
             country,
             state:            state  || null,
@@ -229,9 +250,38 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
         localStorage.setItem('my_org_join_code',  orgData.join_code);
         localStorage.setItem('my_org_join_codes', JSON.stringify(orgData.join_codes));
         localStorage.setItem('my_org_name',       orgName.trim());
+
         // Store for join-code modal
         setNewOrgJoinCode(orgData.join_code);
         setNewOrgName(orgName.trim());
+
+        // ── Upload logo (optional) ───────────────────────────────────────────
+        let logoUrl: string | null = null;
+        if (logoFile) {
+          const ext      = logoFile.name.split('.').pop() ?? 'png';
+          const filePath = `${orgData.id}/logo.${ext}`;
+          const { error: uploadError } = await supabase.storage
+            .from('org-logos')
+            .upload(filePath, logoFile, { upsert: true, contentType: logoFile.type });
+          if (!uploadError) {
+            const { data: urlData } = supabase.storage
+              .from('org-logos')
+              .getPublicUrl(filePath);
+            logoUrl = urlData.publicUrl;
+          } else {
+            console.warn('[ProfileCompletionPopup] Logo upload failed:', uploadError.message);
+          }
+        }
+
+        // ── Update org with logo + community context ─────────────────────────
+        const orgUpdates: Record<string, any> = {};
+        if (logoUrl)                          orgUpdates.logo_url              = logoUrl;
+        if (communityLivelihood.trim())       orgUpdates.community_livelihood  = communityLivelihood.trim();
+        if (communityChallenges.trim())       orgUpdates.community_challenges  = communityChallenges.trim();
+        if (communityHopes.trim())            orgUpdates.community_hopes       = communityHopes.trim();
+        if (Object.keys(orgUpdates).length) {
+          await supabase.from('organizations').update(orgUpdates).eq('id', orgData.id);
+        }
       }
 
       // ── LEARNER with code: link to org ─────────────────────────────────────
@@ -283,16 +333,11 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
         profilePayload.grade_level = parseInt(gradeLevel, 10);
       }
 
-      const { data: existing } = await supabase
-        .from('profiles').select('id').eq('id', actualUserId).maybeSingle();
-
+      const { data: existing } = await supabase.from('profiles').select('id').eq('id', actualUserId).maybeSingle();
       if (existing) {
-        const { created_at, ...updatePayload } = profilePayload;
-        const { error: updateError } = await supabase.from('profiles').update(updatePayload).eq('id', actualUserId);
-        if (updateError) throw new Error('Could not update profile: ' + updateError.message);
+        await supabase.from('profiles').update(profilePayload).eq('id', actualUserId);
       } else {
-        const { error: insertError } = await supabase.from('profiles').insert(profilePayload);
-        if (insertError) throw new Error('Could not create profile: ' + insertError.message);
+        await supabase.from('profiles').insert(profilePayload);
       }
 
       // ── Seed dashboard activities for learners ─────────────────────────────
@@ -317,14 +362,6 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
             );
           }
         }
-      }
-
-      // After profile is created, backfill leader_id on the org now that the profiles FK is satisfied
-      if (role === 'leader' && leaderOrgMode === 'create' && organization_id) {
-        await supabase
-          .from('organizations')
-          .update({ leader_id: actualUserId })
-          .eq('id', organization_id);
       }
 
       // Show join-code modal for new org leaders; proceed immediately for everyone else
@@ -368,7 +405,9 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
               }}
               className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
             >
-              {codeCopied ? <><CheckCircle className="w-4 h-4" /> Copied!</> : <><Copy className="w-4 h-4" /> Copy Code</>}
+              {codeCopied
+                ? <><CheckCircle className="w-4 h-4" /> Copied!</>
+                : <><Copy className="w-4 h-4" /> Copy Code</>}
             </button>
           </div>
           <div className="bg-gray-50 rounded-xl p-4 text-left space-y-2 mb-6">
@@ -651,6 +690,69 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
                     <input type="text" value={orgDescription} onChange={e => setOrgDescription(e.target.value)}
                       className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
                       placeholder="What does your group do?" />
+                  </div>
+
+                  {/* ── Organization Logo ──────────────────────────────────── */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      <Upload className="inline mr-1" size={12} /> Organization Logo (optional)
+                    </label>
+                    <div className="flex items-center gap-3">
+                      {logoPreview && (
+                        <img src={logoPreview} alt="Logo preview"
+                          className="w-14 h-14 object-contain rounded-lg border border-gray-200 bg-white p-1" />
+                      )}
+                      <label className="flex-1 cursor-pointer">
+                        <div className="w-full px-3 py-2 border-2 border-dashed border-indigo-200 rounded-lg
+                                        text-xs text-indigo-500 hover:border-indigo-400 hover:bg-indigo-50
+                                        transition-colors text-center">
+                          {logoFile ? logoFile.name : 'Click to upload PNG, JPG, or SVG'}
+                        </div>
+                        <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                          onChange={handleLogoChange} className="sr-only" />
+                      </label>
+                      {logoFile && (
+                        <button type="button" onClick={() => { setLogoFile(null); setLogoPreview(null); }}
+                          className="text-xs text-red-400 hover:text-red-600">Remove</button>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Your logo will appear across the platform for your learners.
+                    </p>
+                  </div>
+
+                  {/* ── Community Context ──────────────────────────────────── */}
+                  <div className="space-y-3 pt-1">
+                    <p className="text-xs font-semibold text-indigo-700">
+                      Community Context <span className="font-normal text-gray-400">(optional — helps personalize learning activities)</span>
+                    </p>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        🌾 How do people in your community make their livelihood?
+                      </label>
+                      <textarea value={communityLivelihood} onChange={e => setCommunityLivelihood(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 text-xs resize-none"
+                        placeholder="e.g. Fishing, farming, small-scale trading, oil industry work…" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        ⚡ What are the main challenges your community faces?
+                      </label>
+                      <textarea value={communityChallenges} onChange={e => setCommunityChallenges(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 text-xs resize-none"
+                        placeholder="e.g. Limited electricity access, youth unemployment, flood risk…" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        🌟 What are your community's hopes for the future?
+                      </label>
+                      <textarea value={communityHopes} onChange={e => setCommunityHopes(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 text-xs resize-none"
+                        placeholder="e.g. AI-powered income opportunities, better healthcare access, youth empowerment…" />
+                    </div>
                   </div>
 
                   {/* Learner demographics */}
