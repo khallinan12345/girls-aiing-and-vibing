@@ -41,12 +41,14 @@ Also return sessionContext: { pages: "comma-separated page names", components: "
 
   app_shell: `
 Build the application shell with react-router-dom v6 routing.
-Return these files:
-- src/App.jsx — BrowserRouter + Routes with one Route per planned page. Import each page lazily.
-- src/components/Navbar.jsx — responsive navigation with links for every route
-- src/components/Footer.jsx — simple footer with site name and copyright
-- src/index.css — clean base styles: reset, font, colour variables, basic layout utilities
-Create placeholder page components for any pages not yet built (just an <h1> and a paragraph).`,
+Return EXACTLY these four files (no more):
+- src/App.jsx — BrowserRouter + Routes with one Route per planned page. Import each page component.
+- src/components/Navbar.jsx — responsive navigation with <Link> to every route
+- src/components/Footer.jsx — simple footer with site name and copyright year
+- src/index.css — clean base styles: CSS reset, font stack, colour variables, basic layout utilities
+
+For any page not yet built, create a minimal placeholder file in src/pages/ (just an <h1> and <p>).
+Keep component code concise — save detailed styling for the styling task.`,
 
   home_page: `
 Build the Home page — the most important page of the site.
@@ -216,6 +218,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const apiKey = process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
 
+    // Phase 1 planning tasks return a single markdown file — 4000 tokens is enough.
+    // Phase 2+ tasks generate multiple JSX files simultaneously (App + Navbar + Footer + pages).
+    // Those routinely exceed 4000 tokens, causing silent JSON truncation → empty files response.
+    const SINGLE_FILE_TASKS = new Set(['define_site', 'plan_pages']);
+    const maxTokens = (action === 'critique' || SINGLE_FILE_TASKS.has(taskId)) ? 4000 : 8000;
+
     const response = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
       headers: {
@@ -225,7 +233,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
+        max_tokens: maxTokens,
         system: buildSystemPrompt(action, taskId, sessionContext, communicationStrategy, learningStrategy, freeFormFeedback ? freeFormInstruction : undefined),
         messages: [{ role: 'user', content: userContent }],
       }),
@@ -237,6 +245,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     const completion = await response.json();
     const raw: string = completion.content?.[0]?.text || '{}';
+
+    // Log stop_reason — 'max_tokens' means the response was truncated (the primary cause of
+    // silent empty-files failures in Phase 2). Surface it immediately rather than swallowing it.
+    const stopReason = completion.stop_reason;
+    console.log(`[generate-site-code] taskId=${taskId} stop_reason=${stopReason} raw_len=${raw.length} max_tokens=${maxTokens}`);
+    if (stopReason === 'max_tokens') {
+      console.error('[generate-site-code] Response truncated — JSON will be malformed. Increase max_tokens or reduce file scope.');
+      return res.status(200).json({
+        files: [],
+        explanation: `The AI ran out of space generating code for "${taskId}". Try asking for one file at a time, or break this task into smaller steps.`,
+      });
+    }
 
     // Robustly extract the JSON object even when Claude adds preamble or closing text.
     // Strategy: find the outermost { ... } block in the response.
@@ -253,9 +273,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let result: any;
     try {
       result = JSON.parse(extractJSON(raw));
-    } catch {
+    } catch (parseErr: any) {
+      // JSON parse failure after stop_reason=end_turn is unexpected — log the raw output for debugging
+      console.error('[generate-site-code] JSON parse failed. stop_reason:', stopReason, 'raw (first 500):', raw.slice(0, 500));
       if (action === 'critique') return res.status(200).json({ critique: raw, feedback: raw });
-      return res.status(200).json({ files: [], explanation: 'Code generated successfully.' });
+      return res.status(500).json({ error: `AI response could not be parsed. Raw output (first 200 chars): ${raw.slice(0, 200)}` });
     }
 
     if (action === 'critique') {
