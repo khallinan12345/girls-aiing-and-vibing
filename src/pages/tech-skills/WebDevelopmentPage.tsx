@@ -635,6 +635,11 @@ const WebDevelopmentPage: React.FC = () => {
   const assetInputRef      = useRef<HTMLInputElement>(null);
   const [copied, setCopied]                   = useState(false);
   const [showStackBlitzModal, setShowStackBlitzModal] = useState(false);
+  // Right-panel tab: 'teaching' shows explanation/significance; 'code' shows Monaco editor
+  const [editorTab, setEditorTab]             = useState<'teaching' | 'code'>('teaching');
+  // Popup modals
+  const [showTeachingPopup, setShowTeachingPopup] = useState(false);
+  const [showBuiltPopup, setShowBuiltPopup]   = useState(false);
 
   const currentTask  = TASKS[taskIndex];
   const currentPhase = currentTask?.phase ?? 1;
@@ -1142,6 +1147,7 @@ const WebDevelopmentPage: React.FC = () => {
         if (main) setActiveFilePath(main.path);
       }
       setAiExplanation(result.explanation || null);
+      if (result.explanation) setEditorTab('teaching'); // auto-switch to Teaching tab after generation
       if (result.sessionContext) setSessionContext(prev => ({ ...prev, ...result.sessionContext }));
       // Snapshot instruction state — will be stale in async callbacks below
       const snapInstruction = taskInstruction;
@@ -1938,24 +1944,25 @@ const WebDevelopmentPage: React.FC = () => {
                     </div>
                   ) : taskInstruction ? (
                     <div className="rounded-xl border border-gray-700 overflow-hidden">
-                      {/* Teaching commentary */}
+                      {/* Teaching button — opens popup with full narrate-teaching text */}
                       {taskInstruction.subTaskTeaching?.[subTaskIndex] && (
-                        <div className="px-3 pt-2.5 pb-2 bg-gray-800/80 border-b border-gray-700">
-                          <p className={`text-[9px] font-bold uppercase tracking-wide mb-1 ${pm.color}`}>
-                            Why this matters — Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
-                          </p>
-                          <p className="text-xs text-gray-300 leading-relaxed italic">
-                            {taskInstruction.subTaskTeaching[subTaskIndex]}
-                          </p>
-                        </div>
+                        <button
+                          onClick={() => setShowTeachingPopup(true)}
+                          className={`w-full flex items-center justify-between px-3 py-2 bg-gray-800/80 border-b border-gray-700 hover:bg-gray-800 transition-colors group`}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Lightbulb size={12} className={`flex-shrink-0 ${pm.color}`} />
+                            <p className={`text-[10px] font-bold uppercase tracking-wide ${pm.color}`}>
+                              Why this matters
+                            </p>
+                          </div>
+                          <ChevronRight size={11} className="text-gray-600 group-hover:text-gray-400 flex-shrink-0" />
+                        </button>
                       )}
-                      {/* The question */}
-                      <div className={`px-3 py-2.5 ${pm.bg}`}>
-                        {!taskInstruction.subTaskTeaching?.[subTaskIndex] && (
-                          <p className={`text-[9px] font-bold uppercase tracking-wide mb-1 ${pm.color}`}>
-                            Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
-                          </p>
-                        )}
+                      {/* The question — prominent, readable */}
+                      <div className={`px-3 py-3 ${pm.bg}`}>
+                        <p className={`text-[9px] font-bold uppercase tracking-wide mb-1.5 ${pm.color}`}>
+                          Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
+                        </p>
                         <p className="text-sm text-white leading-relaxed font-medium">
                           {taskInstruction.subTasks[subTaskIndex]}
                         </p>
@@ -1970,43 +1977,41 @@ const WebDevelopmentPage: React.FC = () => {
                     </div>
                   ) : null}
 
-                  {/* AI code explanation */}
+                  {/* What was built — popup trigger button */}
                   {aiExplanation && (
-                    <div className="p-2.5 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                      <p className="text-[9px] font-bold text-blue-400 uppercase mb-1">What was built</p>
-                      <p className="text-xs text-gray-300 leading-relaxed">{aiExplanation}</p>
-                    </div>
+                    <button
+                      onClick={() => setShowBuiltPopup(true)}
+                      className="w-full flex items-center justify-between p-2.5 bg-amber-500/10 border border-amber-500/25 rounded-lg hover:bg-amber-500/15 transition-colors group text-left">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Sparkles size={12} className="text-amber-400 flex-shrink-0" />
+                        <p className="text-[10px] font-bold text-amber-400 uppercase">What was built</p>
+                      </div>
+                      <ChevronRight size={11} className="text-gray-600 group-hover:text-amber-400 flex-shrink-0" />
+                    </button>
                   )}
 
-                  {/* Response critique */}
+                  {/* Critique status indicator — details are in the Teaching tab */}
                   {isCritiquingResponse && (
                     <div className="flex items-center gap-2 py-1">
                       <Loader2 size={12} className="animate-spin text-purple-400 flex-shrink-0" />
                       <span className="text-xs text-gray-400">Reviewing your response…</span>
                     </div>
                   )}
-                  {subTaskCritique && (
-                    <div className={`rounded-xl border overflow-hidden ${
-                      subTaskCritique.hasSuggestions
-                        ? 'border-amber-500/30 bg-amber-500/5'
-                        : 'border-emerald-500/30 bg-emerald-500/5'
-                    }`}>
-                      <div className="px-3 pt-2.5 pb-1 border-b border-inherit">
-                        <p className={`text-[9px] font-bold uppercase tracking-wide ${
-                          subTaskCritique.hasSuggestions ? 'text-amber-400' : 'text-emerald-400'
-                        }`}>
-                          {subTaskCritique.hasSuggestions ? '💡 Feedback on your response' : '✅ Step complete'}
-                        </p>
-                      </div>
-                      <p className="px-3 py-2.5 text-xs text-gray-200 leading-relaxed">
-                        {subTaskCritique.feedback}
+                  {subTaskCritique && !isCritiquingResponse && (
+                    <button
+                      onClick={() => setEditorTab('teaching')}
+                      className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg border text-left transition-colors hover:opacity-80 ${
+                        subTaskCritique.hasSuggestions
+                          ? 'border-amber-500/30 bg-amber-500/8'
+                          : 'border-emerald-500/30 bg-emerald-500/8'
+                      }`}>
+                      <p className={`text-[10px] font-bold uppercase ${
+                        subTaskCritique.hasSuggestions ? 'text-amber-400' : 'text-emerald-400'
+                      }`}>
+                        {subTaskCritique.hasSuggestions ? '💡 Feedback ready' : '✅ Step complete'}
                       </p>
-                      {subTaskCritique.hasSuggestions && (
-                        <div className="px-3 pb-2.5 text-[10px] text-gray-500 italic">
-                          Refine your response above, or move on when ready.
-                        </div>
-                      )}
-                    </div>
+                      <ChevronRight size={11} className="text-gray-600 flex-shrink-0" />
+                    </button>
                   )}
 
                   {/* Error */}
@@ -2147,38 +2152,315 @@ const WebDevelopmentPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Monaco editor */}
+            {/* Right panel: Teaching tab + Code tab */}
             <div className="flex-1 flex flex-col min-w-0">
+
               {/* Tab bar */}
-              <div className="flex items-center gap-2 px-3 py-2 bg-gray-800/80 border-b border-gray-700 flex-shrink-0">
-                <FileCode size={12} className="text-emerald-400 flex-shrink-0" />
-                <span className="text-xs text-gray-300 font-medium flex-1 truncate">{activeFilePath}</span>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-[10px] text-gray-600">{activeFile?.content.split('\n').length}L</span>
-                  <button onClick={handleCopy}
-                    className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors">
-                    {copied ? <Check size={11} /> : <Copy size={11} />}{copied ? 'Copied' : 'Copy'}
-                  </button>
-                </div>
+              <div className="flex items-center border-b border-gray-700 flex-shrink-0" style={{ background: '#1e2128' }}>
+                {/* Teaching tab */}
+                <button
+                  onClick={() => setEditorTab('teaching')}
+                  className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${
+                    editorTab === 'teaching'
+                      ? 'border-amber-400 text-amber-300 bg-amber-500/5'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}>
+                  <Lightbulb size={12} />
+                  Teaching
+                </button>
+                {/* Code tab */}
+                <button
+                  onClick={() => setEditorTab('code')}
+                  className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${
+                    editorTab === 'code'
+                      ? 'border-emerald-400 text-emerald-300 bg-emerald-500/5'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}>
+                  <FileCode size={12} />
+                  Code
+                  {activeFilePath && (
+                    <span className="ml-1 text-[9px] text-gray-600 font-normal truncate max-w-24">
+                      {activeFilePath.split('/').pop()}
+                    </span>
+                  )}
+                </button>
+                {/* Spacer + copy button shown in code tab */}
+                <div className="flex-1" />
+                {editorTab === 'code' && (
+                  <div className="flex items-center gap-2 pr-3 flex-shrink-0">
+                    <span className="text-[10px] text-gray-700">{activeFile?.content.split('\n').length}L</span>
+                    <button onClick={handleCopy}
+                      className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors">
+                      {copied ? <Check size={11} /> : <Copy size={11} />}{copied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                )}
               </div>
 
-              <div className="flex-1">
-                <Editor
-                  height="100%"
-                  language={getLanguage(activeFilePath)}
-                  value={activeFile?.content || ''}
-                  onChange={handleEditorChange}
-                  theme="vs-dark"
-                  options={{
-                    fontSize: 13, minimap: { enabled: false }, padding: { top: 12 },
-                    lineNumbers: 'on', wordWrap: 'on', scrollBeyondLastLine: false,
-                    automaticLayout: true, tabSize: 2,
-                  }}
-                />
-              </div>
+              {/* ── Teaching tab content ── */}
+              {editorTab === 'teaching' && (
+                <div className="flex-1 overflow-y-auto" style={{ background: '#f9f6ef' }}>
+                  {/* Header */}
+                  <div className="px-6 pt-5 pb-3 border-b" style={{ borderColor: '#e8e0d0' }}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-base">{currentTask?.icon}</span>
+                      <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#8a6d3b' }}>
+                        {pm.label} · {currentTask?.label}
+                      </p>
+                    </div>
+                    <p className="text-xs" style={{ color: '#6b5c45' }}>
+                      Step {subTaskIndex + 1} of {taskInstruction?.subTasks?.length ?? 1}
+                    </p>
+                  </div>
+
+                  <div className="px-6 py-5 space-y-5">
+
+                    {/* What was built — if explanation exists */}
+                    {aiExplanation ? (
+                      <div className="rounded-xl p-4 border" style={{ background: '#fff8ed', borderColor: '#f0c060' }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Sparkles size={13} style={{ color: '#c07020' }} />
+                          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#c07020' }}>
+                            What was built
+                          </p>
+                        </div>
+                        <p className="text-sm leading-relaxed" style={{ color: '#3d2b00' }}>
+                          {aiExplanation}
+                        </p>
+                        <button
+                          onClick={() => setShowBuiltPopup(true)}
+                          className="mt-3 text-[10px] font-bold hover:opacity-70 transition-opacity"
+                          style={{ color: '#c07020' }}>
+                          Read full analysis →
+                        </button>
+                      </div>
+                    ) : (
+                      /* Placeholder before first generation */
+                      <div className="rounded-xl p-4 border border-dashed" style={{ borderColor: '#d4c4a0', background: 'transparent' }}>
+                        <p className="text-xs text-center" style={{ color: '#a08060' }}>
+                          Submit your first response — the AI's explanation of what it built will appear here.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Teaching text for current sub-task */}
+                    {taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
+                      <div className="rounded-xl p-4 border" style={{ background: '#f0f8f0', borderColor: '#7ab87a' }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Lightbulb size={13} style={{ color: '#3a7a3a' }} />
+                          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#3a7a3a' }}>
+                            Why this step matters
+                          </p>
+                        </div>
+                        <p className="text-sm leading-relaxed italic" style={{ color: '#1a3a1a' }}>
+                          {taskInstruction.subTaskTeaching[subTaskIndex]}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Critique / feedback */}
+                    {subTaskCritique && (
+                      <div className="rounded-xl p-4 border" style={{
+                        background: subTaskCritique.hasSuggestions ? '#fffbf0' : '#f0fff4',
+                        borderColor: subTaskCritique.hasSuggestions ? '#e8c840' : '#68b868',
+                      }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wide" style={{
+                            color: subTaskCritique.hasSuggestions ? '#9a7800' : '#2d7a2d'
+                          }}>
+                            {subTaskCritique.hasSuggestions ? '💡 Feedback on your response' : '✅ Step complete'}
+                          </p>
+                        </div>
+                        <p className="text-sm leading-relaxed" style={{ color: '#2a2a1a' }}>
+                          {subTaskCritique.feedback}
+                        </p>
+                        {subTaskCritique.hasSuggestions && (
+                          <p className="mt-2 text-[10px] italic" style={{ color: '#7a6a2a' }}>
+                            Refine your response in the left panel, or move on when ready.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Loading critique */}
+                    {isCritiquingResponse && (
+                      <div className="flex items-center gap-2 py-1">
+                        <Loader2 size={12} className="animate-spin" style={{ color: '#8a6d3b' }} />
+                        <span className="text-xs" style={{ color: '#8a6d3b' }}>Reviewing your response…</span>
+                      </div>
+                    )}
+
+                    {/* Next question preview */}
+                    {taskInstruction?.subTasks?.[subTaskIndex] && (
+                      <div className="rounded-xl p-4 border" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
+                        <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: '#6040a0' }}>
+                          Your current question
+                        </p>
+                        <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>
+                          {taskInstruction.subTasks[subTaskIndex]}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Switch to code */}
+                    {taskHasGeneration && (
+                      <button
+                        onClick={() => setEditorTab('code')}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-bold transition-colors hover:opacity-80"
+                        style={{ borderColor: '#b0c8b0', color: '#3a6a3a', background: '#e8f4e8' }}>
+                        <FileCode size={12} />
+                        View generated code →
+                      </button>
+                    )}
+
+                  </div>
+                </div>
+              )}
+
+              {/* ── Code tab content ── */}
+              {editorTab === 'code' && (
+                <div className="flex-1 flex flex-col min-h-0">
+                  <Editor
+                    height="100%"
+                    language={getLanguage(activeFilePath)}
+                    value={activeFile?.content || ''}
+                    onChange={handleEditorChange}
+                    theme="vs-dark"
+                    options={{
+                      fontSize: 13, minimap: { enabled: false }, padding: { top: 12 },
+                      lineNumbers: 'on', wordWrap: 'on', scrollBeyondLastLine: false,
+                      automaticLayout: true, tabSize: 2,
+                    }}
+                  />
+                </div>
+              )}
+
             </div>
           </div>
         </div>
+
+        {/* ── Teaching Popup Modal ───────────────────────────────────────── */}
+        {showTeachingPopup && taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+            <div className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col rounded-2xl shadow-2xl border" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#f0e8d8' }}>
+                <div className="flex items-center gap-2">
+                  <Lightbulb size={16} style={{ color: '#3a7a3a' }} />
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#8a6d3b' }}>
+                      {pm.label} · {currentTask?.label}
+                    </p>
+                    <p className="text-sm font-bold" style={{ color: '#2a1800' }}>
+                      Why This Step Matters
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setShowTeachingPopup(false)} className="p-1.5 rounded-lg transition-colors hover:bg-black/10">
+                  <X size={16} style={{ color: '#5a4a30' }} />
+                </button>
+              </div>
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto px-5 py-5">
+                <div className="rounded-xl p-4 border mb-4" style={{ background: '#f0f8f0', borderColor: '#7ab87a' }}>
+                  <p className="text-sm leading-relaxed italic" style={{ color: '#1a3a1a', lineHeight: '1.75' }}>
+                    {taskInstruction.subTaskTeaching[subTaskIndex]}
+                  </p>
+                </div>
+                <div className="rounded-xl p-4 border" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: '#6040a0' }}>
+                    Your question for this step
+                  </p>
+                  <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>
+                    {taskInstruction.subTasks[subTaskIndex]}
+                  </p>
+                </div>
+              </div>
+              {/* Footer */}
+              <div className="px-5 py-4 border-t flex-shrink-0" style={{ borderColor: '#e0d4b8' }}>
+                <button
+                  onClick={() => setShowTeachingPopup(false)}
+                  className="w-full py-2.5 rounded-xl text-sm font-bold transition-colors hover:opacity-90"
+                  style={{ background: '#3a7a3a', color: 'white' }}>
+                  Got it — back to writing
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── What Was Built Popup Modal ─────────────────────────────────── */}
+        {showBuiltPopup && aiExplanation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+            <div className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col rounded-2xl shadow-2xl border" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#fff8ed' }}>
+                <div className="flex items-center gap-2">
+                  <Sparkles size={16} style={{ color: '#c07020' }} />
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#8a6d3b' }}>
+                      {currentTask?.label}
+                    </p>
+                    <p className="text-sm font-bold" style={{ color: '#2a1800' }}>
+                      What Was Built & Why It Matters
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setShowBuiltPopup(false)} className="p-1.5 rounded-lg transition-colors hover:bg-black/10">
+                  <X size={16} style={{ color: '#5a4a30' }} />
+                </button>
+              </div>
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
+                <div className="rounded-xl p-4 border" style={{ background: '#fff8ed', borderColor: '#f0c060' }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-3" style={{ color: '#c07020' }}>
+                    AI Explanation
+                  </p>
+                  <p className="text-sm leading-relaxed" style={{ color: '#3d2b00', lineHeight: '1.75' }}>
+                    {aiExplanation}
+                  </p>
+                </div>
+                {/* Files modified in the last generation */}
+                {promptHistory.length > 0 && promptHistory[promptHistory.length - 1]?.filesModified?.length > 0 && (
+                  <div className="rounded-xl p-4 border" style={{ background: '#f0f8f0', borderColor: '#7ab87a' }}>
+                    <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: '#3a7a3a' }}>
+                      Files created or updated
+                    </p>
+                    <div className="space-y-1">
+                      {promptHistory[promptHistory.length - 1].filesModified!.map((f, i) => (
+                        <button
+                          key={i}
+                          onClick={() => { setActiveFilePath(f); setEditorTab('code'); setShowBuiltPopup(false); }}
+                          className="flex items-center gap-2 text-xs hover:opacity-70 transition-opacity"
+                          style={{ color: '#1a3a1a' }}>
+                          <FileCode size={11} style={{ color: '#3a7a3a' }} />
+                          {f}
+                          <ChevronRight size={10} style={{ color: '#3a7a3a' }} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {/* Footer */}
+              <div className="px-5 py-4 border-t flex-shrink-0 flex gap-2" style={{ borderColor: '#e0d4b8' }}>
+                <button
+                  onClick={() => { setEditorTab('code'); setShowBuiltPopup(false); }}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-colors hover:opacity-90 flex items-center justify-center gap-2"
+                  style={{ background: '#2a5a2a', color: 'white' }}>
+                  <FileCode size={13} /> View code
+                </button>
+                <button
+                  onClick={() => setShowBuiltPopup(false)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-colors border hover:opacity-80"
+                  style={{ borderColor: '#c8b890', color: '#5a4a30', background: 'transparent' }}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   );
