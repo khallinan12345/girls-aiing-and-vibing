@@ -64,10 +64,14 @@ const supabase = createClient(
 async function callClaude(
   systemPrompt: string,
   userPrompt: string,
-  maxTokens = 4000
+  maxTokens = 4000,
+  timeoutMs = 240_000  // 4 min — leaves 1 min buffer inside Vercel's 5 min limit
 ): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
+    signal: controller.signal,
     headers: {
       "Content-Type": "application/json",
       "x-api-key": process.env.ANTHROPIC_API_KEY!,
@@ -86,6 +90,7 @@ async function callClaude(
     }),
   });
 
+  clearTimeout(timer);
   if (!response.ok) {
     const err = await response.json();
     throw new Error(`Anthropic API Error: ${JSON.stringify(err.error)}`);
