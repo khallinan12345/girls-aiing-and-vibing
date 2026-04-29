@@ -36,6 +36,21 @@ const EXCLUDED_USER_IDS = new Set([
   "f6157a9d-5ffd-4058-b0b3-af3ea897d876", // Bennywhite Davidson (bennywhite090d@gmail.com)
 ]);
 
+// ─── Unicode Sanitizer ───────────────────────────────────────────────────────
+// Removes lone UTF-16 surrogates that appear in some chat messages (broken
+// emoji, copy-pasted mobile text). A lone surrogate causes JSON.stringify to
+// produce invalid JSON, which Anthropic batch API rejects with:
+//   "no low surrogate in string"
+function sanitize(text: string): string {
+  if (!text) return "";
+  try {
+    // JSON round-trip in V8 throws on lone surrogates — catch and strip them
+    return JSON.parse(JSON.stringify(text));
+  } catch {
+    return text.replace(/[\uD800-\uDFFF]/g, "\uFFFD");
+  }
+}
+
 // ─── Clients ─────────────────────────────────────────────────────────────────
 
 const supabase = createClient(
@@ -618,7 +633,7 @@ async function assessMonthlySkills(
     .map((s, i) => {
       const msgs = s.messages
         .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => `[${m.role.toUpperCase()}]: ${(m.content || "").slice(0, 600)}`)
+        .map((m) => `[${m.role.toUpperCase()}]: ${sanitize(m.content || "").slice(0, 600)}`)
         .join("\n");
       return msgs ? `--- SESSION ${i + 1} ---\n${msgs}` : null;
     })
@@ -630,7 +645,7 @@ async function assessMonthlySkills(
     .map((s, i) => {
       const msgs = s.messages
         .filter((m) => m.role === "user")
-        .map((m) => `[LEARNER]: ${(m.content || "").slice(0, 600)}`)
+        .map((m) => `[LEARNER]: ${sanitize(m.content || "").slice(0, 600)}`)
         .join("\n");
       return msgs ? `--- SESSION ${i + 1} ---\n${msgs}` : null;
     })
@@ -678,7 +693,7 @@ async function assessMonthlySkills(
         playgroundWordCount += userMsgs.reduce((acc, m) => acc + (m.content || "").split(/\s+/).length, 0);
         const section = msgs
           .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => `[${m.role.toUpperCase()}]: ${(m.content || "").slice(0, 800)}`)
+          .map((m) => `[${m.role.toUpperCase()}]: ${sanitize(m.content || "").slice(0, 800)}`)
           .join("\n");
         if (section) pgSections.push(`--- PLAYGROUND: ${(row.title || "Chat").slice(0, 60)} ---\n${section}`);
       }
@@ -2481,7 +2496,7 @@ Be encouraging and specific. Note strongest and weakest dimensions if AI Profici
             .map((s, i) => {
               const msgs = s.messages
                 .filter((m: ChatMsg) => m.role === "user")
-                .map((m: ChatMsg) => `[LEARNER]: ${(m.content || "").slice(0, 600)}`)
+                .map((m: ChatMsg) => `[LEARNER]: ${sanitize(m.content || "").slice(0, 600)}`)
                 .join("\n");
               return msgs ? `--- SESSION ${i + 1} ---\n${msgs}` : null;
             }).filter(Boolean).join("\n\n");
@@ -2490,7 +2505,7 @@ Be encouraging and specific. Note strongest and weakest dimensions if AI Profici
             .map((s, i) => {
               const msgs = s.messages
                 .filter((m: ChatMsg) => m.role === "user" || m.role === "assistant")
-                .map((m: ChatMsg) => `[${m.role.toUpperCase()}]: ${(m.content || "").slice(0, 600)}`)
+                .map((m: ChatMsg) => `[${m.role.toUpperCase()}]: ${sanitize(m.content || "").slice(0, 600)}`)
                 .join("\n");
               return msgs ? `--- SESSION ${i + 1} ---\n${msgs}` : null;
             }).filter(Boolean).join("\n\n");
@@ -2511,8 +2526,8 @@ Be encouraging and specific. Note strongest and weakest dimensions if AI Profici
               const sections = pgRows.map((row) => {
                 const msgs = Array.isArray(row.messages) ? row.messages : [];
                 const section = msgs.filter((m: ChatMsg) => m.role === "user" || m.role === "assistant")
-                  .map((m: ChatMsg) => `[${m.role.toUpperCase()}]: ${(m.content || "").slice(0, 800)}`).join("\n");
-                return section ? `--- PLAYGROUND: ${(row.title || "Chat").slice(0, 60)} ---\n${section}` : null;
+                  .map((m: ChatMsg) => `[${m.role.toUpperCase()}]: ${sanitize(m.content || "").slice(0, 800)}`).join("\n");
+                return section ? `--- PLAYGROUND: ${sanitize(row.title || "Chat").slice(0, 60)} ---\n${section}` : null;
               }).filter(Boolean);
               pgTranscript = sections.join("\n\n").slice(0, 10000);
             }
