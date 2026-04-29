@@ -700,9 +700,13 @@ async function assessMonthlySkills(
   }
 
   try {
+    // Sanitize the entire assembled prompt — bad chars can come from
+    // any interpolated DB value (name, message content, playground title)
+    const rawPrompt = buildAssessmentPrompt(truncated, engagedSessionCount, playgroundTranscript, playgroundSessionCount);
+    const safePrompt = sanitize(rawPrompt);
     const content = await callClaude(
       "Expert educational assessment analyst. Respond ONLY with valid JSON, no markdown.",
-      buildAssessmentPrompt(truncated, engagedSessionCount, playgroundTranscript, playgroundSessionCount)
+      safePrompt
     );
 
     if (!content) throw new Error("Empty Claude response");
