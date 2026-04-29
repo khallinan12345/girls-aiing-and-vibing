@@ -1,3 +1,18 @@
+function sanitize(t: string): string {
+  if (!t) return "";
+  let o = "";
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF) {
+      const n = t.charCodeAt(i + 1);
+      if (n >= 0xDC00 && n <= 0xDFFF) { o += t[i] + t[i+1]; i++; }
+    } else if (c >= 0xDC00 && c <= 0xDFFF) {
+      // lone low surrogate — drop
+    } else { o += t[i]; }
+  }
+  return o;
+}
+
 /**
  * MONTHLY SKILLS ASSESSMENT v2.0 — Vercel Cron Handler
  *
