@@ -703,7 +703,17 @@ async function assessMonthlySkills(
     // Sanitize the entire assembled prompt — bad chars can come from
     // any interpolated DB value (name, message content, playground title)
     const rawPrompt = buildAssessmentPrompt(truncated, engagedSessionCount, playgroundTranscript, playgroundSessionCount);
-    const safePrompt = sanitize(rawPrompt);
+    // Strip lone surrogates inline — sanitize() is defined later in the file
+    let safePrompt = "";
+    for (let i = 0; i < rawPrompt.length; i++) {
+      const code = rawPrompt.charCodeAt(i);
+      if (code >= 0xD800 && code <= 0xDBFF) {
+        const next = rawPrompt.charCodeAt(i + 1);
+        if (next >= 0xDC00 && next <= 0xDFFF) { safePrompt += rawPrompt[i] + rawPrompt[i + 1]; i++; }
+      } else if (code >= 0xDC00 && code <= 0xDFFF) {
+        // lone low surrogate — drop
+      } else { safePrompt += rawPrompt[i]; }
+    }
     const content = await callClaude(
       "Expert educational assessment analyst. Respond ONLY with valid JSON, no markdown.",
       safePrompt
