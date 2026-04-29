@@ -648,12 +648,16 @@ async function assessMonthlySkills(
 
   // Budget: 40k chars learner-only + 20k scaffold (AI turns) = ~60k total
   // vs old 70k chars of full transcript — fewer tokens, same analytical coverage
-  const truncatedLearner = learnerOnlyTranscript.length > 40000
-    ? learnerOnlyTranscript.slice(0, 40000) + "\n\n[LEARNER TRANSCRIPT TRUNCATED]"
+  // Keep most recent sessions — recent activity reflects current capability.
+  const LEARNER_BUDGET  = 40000;
+  const SCAFFOLD_BUDGET = 20000;
+
+  const truncatedLearner = learnerOnlyTranscript.length > LEARNER_BUDGET
+    ? "[OLDER SESSIONS TRUNCATED — SHOWING MOST RECENT]\n\n" + learnerOnlyTranscript.slice(-LEARNER_BUDGET)
     : learnerOnlyTranscript;
 
-  const truncatedScaffold = scaffoldTranscript.length > 20000
-    ? scaffoldTranscript.slice(0, 20000) + "\n\n[SCAFFOLD TRANSCRIPT TRUNCATED]"
+  const truncatedScaffold = scaffoldTranscript.length > SCAFFOLD_BUDGET
+    ? "[OLDER SESSIONS TRUNCATED — SHOWING MOST RECENT]\n\n" + scaffoldTranscript.slice(-SCAFFOLD_BUDGET)
     : scaffoldTranscript;
 
   // Combined transcript passed to Claude: learner-first, scaffold appended
