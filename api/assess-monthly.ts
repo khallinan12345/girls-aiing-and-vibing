@@ -36,21 +36,6 @@ const EXCLUDED_USER_IDS = new Set([
   "f6157a9d-5ffd-4058-b0b3-af3ea897d876", // Bennywhite Davidson (bennywhite090d@gmail.com)
 ]);
 
-// ─── Unicode Sanitizer ───────────────────────────────────────────────────────
-// Removes lone UTF-16 surrogates that appear in some chat messages (broken
-// emoji, copy-pasted mobile text). A lone surrogate causes JSON.stringify to
-// produce invalid JSON, which Anthropic batch API rejects with:
-//   "no low surrogate in string"
-function sanitize(text: string): string {
-  if (!text) return "";
-  try {
-    // JSON round-trip in V8 throws on lone surrogates — catch and strip them
-    return JSON.parse(JSON.stringify(text));
-  } catch {
-    return text.replace(/[\uD800-\uDFFF]/g, "\uFFFD");
-  }
-}
-
 // ─── Clients ─────────────────────────────────────────────────────────────────
 
 const supabase = createClient(
@@ -633,7 +618,7 @@ async function assessMonthlySkills(
     .map((s, i) => {
       const msgs = s.messages
         .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => `[${m.role.toUpperCase()}]: ${sanitize(m.content || "").slice(0, 600)}`)
+        .map((m) => `[${m.role.toUpperCase()}]: ${(m.content || "").slice(0, 600)}`)
         .join("\n");
       return msgs ? `--- SESSION ${i + 1} ---\n${msgs}` : null;
     })
@@ -645,7 +630,7 @@ async function assessMonthlySkills(
     .map((s, i) => {
       const msgs = s.messages
         .filter((m) => m.role === "user")
-        .map((m) => `[LEARNER]: ${sanitize(m.content || "").slice(0, 600)}`)
+        .map((m) => `[LEARNER]: ${(m.content || "").slice(0, 600)}`)
         .join("\n");
       return msgs ? `--- SESSION ${i + 1} ---\n${msgs}` : null;
     })
@@ -693,7 +678,7 @@ async function assessMonthlySkills(
         playgroundWordCount += userMsgs.reduce((acc, m) => acc + (m.content || "").split(/\s+/).length, 0);
         const section = msgs
           .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => `[${m.role.toUpperCase()}]: ${sanitize(m.content || "").slice(0, 800)}`)
+          .map((m) => `[${m.role.toUpperCase()}]: ${(m.content || "").slice(0, 800)}`)
           .join("\n");
         if (section) pgSections.push(`--- PLAYGROUND: ${(row.title || "Chat").slice(0, 60)} ---\n${section}`);
       }
@@ -2425,13 +2410,17 @@ Be encouraging and specific. Note strongest and weakest dimensions if AI Profici
   }
 
   // ── MODE 1: Orchestrate ────────────────────────────────────────────────────
-  // Optimisation 3: Use Anthropic Batch API (50% off all tokens) rather than
-  // firing individual per-user serverless calls. All assessments are submitted
-  // as a single batch; the batchId is saved to DB so MODE 3 can poll & retrieve
-  // results before building the email report.
-  //
-  // Fallback: if fewer than 2 users need assessment, use single-user path to
-  // avoid batch overhead for trivial runs.
+  // Replaces the Anthropic Batch API path with parallel per-user assessments.
+  // Reasons:
+  //   • Batch API serialises ALL transcripts into one JSON body — a single
+  //     lone-surrogate character anywhere in the cohort kills the entire run.
+  //   • For 112 learners, parallel single-user calls complete in ~60–90s,
+  //     well within Vercel's 5-min function limit.
+  //   • assessMonthlySkills() already sanitises transcripts and handles errors
+  //     per-user, so one bad record never affects the others.
+  //   • Simpler: no batchId, no poll step, no batch_jobs table.
+  //     One call → results saved → email sent.
+  const startTime = Date.now();
   console.log(`\n${"═".repeat(60)}\nORCHESTRATE — ${monthLabel}\n${"═".repeat(60)}`);
   try {
     const userIds = await getAfricanUsersNeedingAssessment(startDate, endDate);
@@ -2439,174 +2428,99 @@ Be encouraging and specific. Note strongest and weakest dimensions if AI Profici
 
     if (userIds.length === 0) {
       return res.status(200).json({
-        mode: "orchestrate", month: monthLabel, total: 0, succeeded: 0, failed: 0,
+        mode: "orchestrate", month: monthLabel, total: 0,
+        succeeded: 0, skipped: 0, failed: 0,
         message: "No users need assessment this period.",
       });
     }
 
-    // For small runs (1 user) skip batch overhead and use single-user path
-    if (userIds.length < 2) {
+    // Run all users in parallel — each calls assessMonthlySkills() which
+    // handles its own DB write, error catching, and transcript sanitisation.
+    // Concurrency cap at 10 to avoid overwhelming Supabase connection pool.
+    const CONCURRENCY = 10;
+    const results: Array<{ userId: string; status: string; error?: string }> = [];
+
+    for (let i = 0; i < userIds.length; i += CONCURRENCY) {
+      const batch = userIds.slice(i, i + CONCURRENCY);
+      console.log(`   Processing users ${i + 1}–${Math.min(i + CONCURRENCY, userIds.length)} of ${userIds.length}...`);
       const settled = await Promise.allSettled(
-        userIds.map((userId) =>
-          fetch(`${baseUrl}?start=${startStr}&end=${endStr}&userId=${userId}`, { headers: authHeader })
-            .then((r) => r.json())
-        )
+        batch.map(async (userId) => {
+          const { status, error } = await assessMonthlySkills(userId, startDate, endDate);
+          return { userId, status, error };
+        })
       );
-      const succeeded = settled.filter((r) => r.status === "fulfilled").length;
-      return res.status(200).json({
-        mode: "orchestrate", month: monthLabel, total: userIds.length,
-        succeeded, failed: userIds.length - succeeded,
-        message: `${succeeded}/${userIds.length} assessed. Call ?mode=report to send email.`,
-      });
-    }
-
-    // Build batch requests — one per user
-    // Each request uses the same cached system prompt; Anthropic deduplicates
-    // cache writes across the batch so caching savings apply per-user.
-    const ASSESSMENT_SYSTEM = "Expert educational assessment analyst. Respond ONLY with valid JSON, no markdown.";
-
-    // Gather transcripts for all users in parallel (DB reads, not API calls)
-    const userTranscripts = await Promise.all(
-      userIds.map(async (userId) => {
-        try {
-          const { data: activities } = await supabase
-            .from("dashboard").select("chat_history, created_at")
-            .eq("user_id", userId)
-            .gte("created_at", startDate.toISOString())
-            .lte("created_at", endDate.toISOString())
-            .order("created_at", { ascending: true });
-
-          if (!activities?.length) return { userId, skip: true, reason: "no_activity" };
-
-          type ChatMsg = { role: string; content: string };
-          const parsedSessions = activities.map((a) => {
-            try {
-              const h = typeof a.chat_history === "string" ? JSON.parse(a.chat_history) : (a.chat_history || []);
-              return { messages: Array.isArray(h) ? h : [] as ChatMsg[] };
-            } catch { return { messages: [] as ChatMsg[] }; }
-          });
-
-          const engagedCount = parsedSessions.filter(
-            (s) => s.messages.filter((m: ChatMsg) => m.role === "user").length >= 1
-          ).length;
-          if (engagedCount === 0) return { userId, skip: true, reason: "no_activity" };
-
-          // Learner-only transcript (Optimisation 4)
-          const learnerOnly = parsedSessions
-            .map((s, i) => {
-              const msgs = s.messages
-                .filter((m: ChatMsg) => m.role === "user")
-                .map((m: ChatMsg) => `[LEARNER]: ${sanitize(m.content || "").slice(0, 600)}`)
-                .join("\n");
-              return msgs ? `--- SESSION ${i + 1} ---\n${msgs}` : null;
-            }).filter(Boolean).join("\n\n");
-
-          const scaffoldFull = parsedSessions
-            .map((s, i) => {
-              const msgs = s.messages
-                .filter((m: ChatMsg) => m.role === "user" || m.role === "assistant")
-                .map((m: ChatMsg) => `[${m.role.toUpperCase()}]: ${sanitize(m.content || "").slice(0, 600)}`)
-                .join("\n");
-              return msgs ? `--- SESSION ${i + 1} ---\n${msgs}` : null;
-            }).filter(Boolean).join("\n\n");
-
-          const tLearner = learnerOnly.length > 40000 ? learnerOnly.slice(0, 40000) + "\n[TRUNCATED]" : learnerOnly;
-          const tScaffold = scaffoldFull.length > 20000 ? scaffoldFull.slice(0, 20000) + "\n[TRUNCATED]" : scaffoldFull;
-          const transcript = `${tLearner}\n\n=== FULL DIALOGUE FOR SCAFFOLDING ANALYSIS ONLY ===\n${tScaffold}`;
-
-          // Playground transcript
-          let pgTranscript = ""; let pgCount = 0;
-          try {
-            const { data: pgRows } = await supabase
-              .from("ai_playground_chats").select("title, messages, updated_at")
-              .eq("user_id", userId)
-              .gte("updated_at", startDate.toISOString()).lte("updated_at", endDate.toISOString());
-            if (pgRows?.length) {
-              pgCount = pgRows.length;
-              const sections = pgRows.map((row) => {
-                const msgs = Array.isArray(row.messages) ? row.messages : [];
-                const section = msgs.filter((m: ChatMsg) => m.role === "user" || m.role === "assistant")
-                  .map((m: ChatMsg) => `[${m.role.toUpperCase()}]: ${sanitize(m.content || "").slice(0, 800)}`).join("\n");
-                return section ? `--- PLAYGROUND: ${sanitize(row.title || "Chat").slice(0, 60)} ---\n${section}` : null;
-              }).filter(Boolean);
-              pgTranscript = sections.join("\n\n").slice(0, 10000);
-            }
-          } catch { /* non-fatal */ }
-
-          return { userId, skip: false, transcript, pgTranscript, pgCount, sessionCount: activities.length, engagedCount };
-        } catch (err: any) {
-          return { userId, skip: true, reason: err.message };
+      for (const r of settled) {
+        if (r.status === "fulfilled") {
+          results.push(r.value);
+          console.log(`   ${r.value.userId.slice(0, 8)} → ${r.value.status}${r.value.error ? ` (${r.value.error})` : ""}`);
+        } else {
+          results.push({ userId: "unknown", status: "error", error: String(r.reason) });
+          console.error(`   ❌ Promise rejected:`, r.reason);
         }
-      })
-    );
-
-    // Separate skipped users
-    const toAssess = userTranscripts.filter((u) => !u.skip) as Array<{
-      userId: string; transcript: string; pgTranscript: string;
-      pgCount: number; sessionCount: number; engagedCount: number;
-    }>;
-    const skipped = userTranscripts.filter((u) => u.skip);
-    console.log(`   ${toAssess.length} with transcripts, ${skipped.length} skipped`);
-
-    if (toAssess.length === 0) {
-      return res.status(200).json({
-        mode: "orchestrate", month: monthLabel, total: userIds.length,
-        succeeded: 0, failed: 0, skipped: skipped.length,
-        message: "All users skipped (no activity). Call ?mode=report to send email.",
-      });
+      }
     }
 
-    // Build batch request array
-    const batchRequests: BatchRequest[] = toAssess.map(({ userId, transcript, pgTranscript, pgCount, engagedCount }) => ({
-      custom_id: userId,
-      params: {
-        model: "claude-sonnet-4-6",
-        max_tokens: 4000,
-        temperature: 0.2,
-        // Prompt caching on system prompt — shared across all batch items
-        system: [{ type: "text", text: ASSESSMENT_SYSTEM, cache_control: { type: "ephemeral" } }],
-        messages: [{
-          role: "user",
-          content: buildAssessmentPrompt(transcript, engagedCount, pgTranscript, pgCount),
-        }],
-      },
-    }));
+    const succeeded = results.filter((r) => r.status === "success").length;
+    const skipped   = results.filter((r) => r.status === "skipped" || r.status === "no_activity").length;
+    const failed    = results.filter((r) => r.status === "error").length;
 
-    // Submit batch and return immediately — Vercel functions time out if we poll
-    // inline. Use ?mode=poll&batchId=XXX to fetch results once Anthropic is done
-    // (usually 1–3 min for 46 learners), then ?mode=report to send the email.
-    console.log(`   Submitting batch of ${batchRequests.length} requests...`);
-    const batchId = await submitBatchRequests(batchRequests);
+    console.log(`\n✅ Done — ${succeeded} assessed, ${skipped} skipped, ${failed} errors`);
 
-    // Store batchId + userIds + endDate in a temp DB row so poll mode can find them
-    // Uses a simple key-value pattern in a dedicated table. Non-fatal if it fails.
+    // Build summaries for the email from results that succeeded
+    const successIds = results.filter((r) => r.status === "success").map((r) => r.userId);
+
+    // Auto-send the email report immediately after assessment
+    // (no separate mode=report call needed for the monthly cron)
+    let emailSent = false;
     try {
-      await supabase.from("batch_jobs").upsert({
-        batch_id: batchId,
-        start_date: startDate.toISOString(),
-        end_date: endDate.toISOString(),
-        user_ids: toAssess.map((u) => u.userId),
-        session_counts: Object.fromEntries(toAssess.map((u) => [u.userId, u.sessionCount])),
-        engaged_counts: Object.fromEntries(toAssess.map((u) => [u.userId, u.engagedCount])),
-        pg_counts: Object.fromEntries(toAssess.map((u) => [u.userId, u.pgCount])),
-        created_at: new Date().toISOString(),
-        status: "submitted",
-      });
-    } catch (dbErr: any) {
-      console.warn("   Could not save batch job to DB (non-fatal):", dbErr.message);
+      const { data: periodRows } = await supabase
+        .from("user_monthly_assessments")
+        .select("*")
+        .in("user_id", successIds)
+        .gte("measured_at", startDate.toISOString())
+        .lte("measured_at", endDate.toISOString());
+
+      if (periodRows?.length) {
+        // Fetch names for the report
+        const VAI_ORG_ID_ORC       = "c0b48eae-67af-449d-8c04-cc6950bf0982";
+        const SOLARDERO_ORG_ID_ORC = "a1b2c3d4-0002-0002-0002-000000000002";
+        const { data: profilesForReport } = await supabase
+          .from("profiles").select("id, name")
+          .or(`continent.eq.Africa,organization_id.eq.${VAI_ORG_ID_ORC},organization_id.eq.${SOLARDERO_ORG_ID_ORC}`);
+        const nameMap: Record<string, string> = {};
+        for (const p of profilesForReport || []) nameMap[p.id] = p.name || "Unknown";
+
+        const reportSummaries: AssessmentSummary[] = periodRows.map((row) => ({
+          userId: row.user_id,
+          name: nameMap[row.user_id] || "Unknown",
+          sessionCount: row.session_count || 0,
+          engagedSessionCount: row.engaged_session_count || 0,
+          scores: row as unknown as MonthlySkillsResult,
+          status: "success" as const,
+        }));
+
+        const durationMs = Date.now() - startTime;
+        await sendEmailReport(monthLabel, reportSummaries, startDate, endDate, durationMs);
+        emailSent = true;
+        console.log("✉️  Email report sent automatically after orchestrate");
+      }
+    } catch (emailErr: any) {
+      console.warn("⚠️  Auto-email failed (non-fatal):", emailErr.message);
+      console.warn("    Run ?mode=report manually to send the email.");
     }
 
-    console.log(`   Batch submitted: ${batchId}. Call ?mode=poll&batchId=${batchId} in ~2 min.`);
     return res.status(200).json({
       mode: "orchestrate",
       month: monthLabel,
       period: `${startStr} to ${endStr}`,
       total: userIds.length,
-      queued: toAssess.length,
-      skipped: skipped.length,
-      batchId,
-      message: `Batch submitted. Wait ~2 min then call: ?mode=poll&batchId=${batchId}&start=${startStr}&end=${endStr}`,
-      nextStep: `?mode=poll&batchId=${batchId}&start=${startStr}&end=${endStr}`,
+      succeeded,
+      skipped,
+      failed,
+      emailSent,
+      message: emailSent
+        ? `${succeeded} assessed and email sent to khallinan1@udayton.edu.`
+        : `${succeeded} assessed. Run ?mode=report&start=${startStr}&end=${endStr} to send email.`,
     });
   } catch (err: any) {
     console.error("❌ Orchestrate fatal:", err.message);
