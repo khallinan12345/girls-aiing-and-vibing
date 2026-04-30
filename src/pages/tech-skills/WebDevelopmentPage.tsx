@@ -790,136 +790,136 @@ const WebDevelopmentPage: React.FC = () => {
 
       define_site: [
         {
-          teaching: "Every professional website project begins with a single clear statement of purpose. Without it, developers spend weeks building the wrong thing. The most common reason websites fail is not bad code — it is unclear purpose. Write this first. Check every decision that follows against it.',
-          question: "What is the main purpose of this website? Describe in 1–2 sentences what it does and why someone would visit it.",
+          teaching: `Every professional website project begins with a single clear statement of purpose. Without it, developers spend weeks building the wrong thing. The most common reason websites fail is not bad code — it is unclear purpose. Write this first. Check every decision that follows against it.`,
+          question: `What is the main purpose of this website? Describe in 1–2 sentences what it does and why someone would visit it.`,
         },
         {
-          teaching: 'Knowing your audience shapes every design decision. A site for local customers reads differently from one for international partners. A site for students reads differently from one for professionals. You need to decide who you are speaking to first.",
-          question: "Who is your target audience? Describe their background and what they are looking for when they arrive.',
+          teaching: `Knowing your audience shapes every design decision. A site for local customers reads differently from one for international partners. A site for students reads differently from one for professionals. You need to decide who you are speaking to first.`,
+          question: `Who is your target audience? Describe their background and what they are looking for when they arrive.`,
         },
         {
-          teaching: "Scoping — deciding what is in and what is out before building — is one of the most important skills in software development. Get the essentials right first. Add everything else in version two.",
-          question: 'List 3–5 key things a visitor should be able to find or do on this website.",
+          teaching: `Scoping — deciding what is in and what is out before building — is one of the most important skills in software development. Get the essentials right first. Add everything else in version two.`,
+          question: `List 3–5 key things a visitor should be able to find or do on this website.`,
         },
       ],
 
       plan_pages: [
         {
-          teaching: "Each page should have exactly one job. When a page tries to do too many things, visitors get confused and leave. Think of each page like a chapter in a book — it has a title, a purpose, and a clear end.',
-          question: "What pages does your site need? List each one and its single job (e.g. Home — first impression, About — build trust, Contact — reach you).",
+          teaching: `Each page should have exactly one job. When a page tries to do too many things, visitors get confused and leave. Think of each page like a chapter in a book — it has a title, a purpose, and a clear end.`,
+          question: `What pages does your site need? List each one and its single job (e.g. Home — first impression, About — build trust, Contact — reach you).`,
         },
         {
-          teaching: 'In React, a component is reusable UI — code you write once and place anywhere. The Navbar and Footer appear on every page. Write them once, use them everywhere. Identifying shared components now saves hours later.",
-          question: "Which elements appear on every page and should be reusable components? (e.g. Navbar at the top, Footer at the bottom, a Card for repeated items)',
+          teaching: `In React, a component is reusable UI — code you write once and place anywhere. The Navbar and Footer appear on every page. Write them once, use them everywhere. Identifying shared components now saves hours later.`,
+          question: `Which elements appear on every page and should be reusable components? (e.g. Navbar at the top, Footer at the bottom, a Card for repeated items)`,
         },
         {
-          teaching: "Visitor flow is the path someone takes from arrival to goal. If the flow is broken, visitors get lost and leave. Map the journey of your typical visitor — from the moment they arrive to the moment they accomplish their goal.",
-          question: 'Walk through the path a typical visitor takes — from landing on your site to accomplishing their goal. What pages do they visit in order?",
+          teaching: `Visitor flow is the path someone takes from arrival to goal. If the flow is broken, visitors get lost and leave. Map the journey of your typical visitor — from the moment they arrive to the moment they accomplish their goal.`,
+          question: `Walk through the path a typical visitor takes — from landing on your site to accomplishing their goal. What pages do they visit in order?`,
         },
       ],
 
       app_shell: [
         {
-          teaching: "The App Shell is the skeleton of the entire site. In React, it lives in App.jsx — it sets up routing, which is how visitors move between pages without the browser reloading. Think of it like installing the hallways in a building before you furnish the rooms.',
-          question: "Describe your navigation bar. What is the site name, what links appear, and what should it look and feel like?",
+          teaching: `The App Shell is the skeleton of the entire site. In React, it lives in App.jsx — it sets up routing, which is how visitors move between pages without the browser reloading. Think of it like installing the hallways in a building before you furnish the rooms.`,
+          question: `Describe your navigation bar. What is the site name, what links appear, and what should it look and feel like?`,
         },
         {
-          teaching: 'Colors and typography communicate identity before a single word is read. Choosing your palette now means the AI applies it consistently across every page it generates. Choose colors that represent what your site stands for.",
-          question: "What are your brand colors and font style? Give a main color, an accent color, and describe the overall feeling or mood.',
+          teaching: `Colors and typography communicate identity before a single word is read. Choosing your palette now means the AI applies it consistently across every page it generates. Choose colors that represent what your site stands for.`,
+          question: `What are your brand colors and font style? Give a main color, an accent color, and describe the overall feeling or mood.`,
         },
         {
-          teaching: "A footer is the last thing a visitor sees on every page. It anchors the site, carries important information, and gives people a way to contact you or find out more.",
-          question: 'What should your footer contain? For example: a tagline or mission, contact information, links, or copyright.",
+          teaching: `A footer is the last thing a visitor sees on every page. It anchors the site, carries important information, and gives people a way to contact you or find out more.`,
+          question: `What should your footer contain? For example: a tagline or mission, contact information, links, or copyright.`,
         },
       ],
 
       home_page: [
         {
-          teaching: "The hero section is the first thing every visitor sees. You have about three seconds before a visitor decides to stay or leave. One powerful headline. One sentence describing who you are. One clear action. Not five things — one.',
-          question: "Write your hero section — a bold headline, one sentence describing who you are or what you offer, and the label for your main call-to-action button.",
+          teaching: `The hero section is the first thing every visitor sees. You have about three seconds before a visitor decides to stay or leave. One powerful headline. One sentence describing who you are. One clear action. Not five things — one.`,
+          question: `Write your hero section — a bold headline, one sentence describing who you are or what you offer, and the label for your main call-to-action button.`,
         },
         {
-          teaching: 'After the hero, visitors want to know: is this real? Three key facts or statistics in a row is one of the most effective trust-building patterns in web design. Specific, concrete information makes visitors lean forward. Vague claims do not.",
-          question: "Give three facts, statistics, or highlights about your site"s subject that would catch a visitor's attention mid-scroll.",
+          teaching: `After the hero, visitors want to know: is this real? Three key facts or statistics in a row is one of the most effective trust-building patterns in web design. Specific, concrete information makes visitors lean forward. Vague claims do not.`,
+          question: `Give three facts, statistics, or highlights about your site"s subject that would catch a visitor's attention mid-scroll.`,
         },
         {
-          teaching: "The preview section at the bottom of the home page pulls visitors deeper into the site — like a trailer for what is coming. A short sentence and a link for each inner page.",
-          question: 'Write a one-sentence preview for each of your inner pages that would make a visitor want to click through.",
+          teaching: `The preview section at the bottom of the home page pulls visitors deeper into the site — like a trailer for what is coming. A short sentence and a link for each inner page.`,
+          question: `Write a one-sentence preview for each of your inner pages that would make a visitor want to click through.`,
         },
       ],
 
       content_pages: [
         {
-          teaching: "Your main content page is the most important page on the site after the home page — it answers: who are you and why should I trust you? The answer has to be specific, honest, and human. Do not summarize — tell the story.',
-          question: "Write the content for your primary page — the core story, mission, or information you most want visitors to understand.",
+          teaching: `Your main content page is the most important page on the site after the home page — it answers: who are you and why should I trust you? The answer has to be specific, honest, and human. Do not summarize — tell the story.`,
+          question: `Write the content for your primary page — the core story, mission, or information you most want visitors to understand.`,
         },
         {
-          teaching: 'Specificity is what makes content credible. Vague claims are ignored. Specific, verifiable details build trust. Name real things. Use real numbers. Show real evidence.",
-          question: "Write content for two more pages — for example, one about the people or team involved, and one showing evidence of results or impact.',
+          teaching: `Specificity is what makes content credible. Vague claims are ignored. Specific, verifiable details build trust. Name real things. Use real numbers. Show real evidence.`,
+          question: `Write content for two more pages — for example, one about the people or team involved, and one showing evidence of results or impact.`,
         },
         {
-          teaching: "The final pages complete the site. A contact or submission page gives visitors a way to engage. A forward-looking page maps where you go next — and invites others to join.",
-          question: 'Write content for your remaining pages — including any contact or submission page and a page about your future plans or next steps.",
+          teaching: `The final pages complete the site. A contact or submission page gives visitors a way to engage. A forward-looking page maps where you go next — and invites others to join.`,
+          question: `Write content for your remaining pages — including any contact or submission page and a page about your future plans or next steps.`,
         },
       ],
 
       interactivity: [
         {
-          teaching: "State is what makes a website feel alive instead of like a printed page. When you click a button and something changes — a menu opens, a form submits, a counter animates — that is state at work. In React, state is managed with useState. Decide what should change when a visitor interacts with your site.',
-          question: "What interactive element would make your site more engaging? Describe specifically what triggers it and what changes on screen.",
+          teaching: `State is what makes a website feel alive instead of like a printed page. When you click a button and something changes — a menu opens, a form submits, a counter animates — that is state at work. In React, state is managed with useState. Decide what should change when a visitor interacts with your site.`,
+          question: `What interactive element would make your site more engaging? Describe specifically what triggers it and what changes on screen.`,
         },
         {
-          teaching: 'Feedback keeps visitors engaged. When someone submits a form, something must respond immediately — or they wonder: did that work? A single clear confirmation message does more for trust than a paragraph of text.",
-          question: "What should happen after a visitor submits the form — what do they see immediately after?',
+          teaching: `Feedback keeps visitors engaged. When someone submits a form, something must respond immediately — or they wonder: did that work? A single clear confirmation message does more for trust than a paragraph of text.`,
+          question: `What should happen after a visitor submits the form — what do they see immediately after?`,
         },
         {
-          teaching: "Mobile users make up more than 60% of web traffic worldwide. If your interactive elements break on a phone screen, you lose most of your audience. Describe the mobile behavior explicitly before the AI builds it.",
-          question: 'How should your interactive elements behave on a mobile phone screen? Be specific about sizes, stacking, and tap targets.",
+          teaching: `Mobile users make up more than 60% of web traffic worldwide. If your interactive elements break on a phone screen, you lose most of your audience. Describe the mobile behavior explicitly before the AI builds it.`,
+          question: `How should your interactive elements behave on a mobile phone screen? Be specific about sizes, stacking, and tap targets.`,
         },
       ],
 
       styling: [
         {
-          teaching: "Typography communicates personality before a single word is read. Choosing your font pairing now lets the AI apply it consistently everywhere. Think about the mood your site should convey — professional, playful, bold, calm — and choose fonts that match.',
-          question: "Choose a font pairing — a heading font and a body font — and describe the mood they should create.",
+          teaching: `Typography communicates personality before a single word is read. Choosing your font pairing now lets the AI apply it consistently everywhere. Think about the mood your site should convey — professional, playful, bold, calm — and choose fonts that match.`,
+          question: `Choose a font pairing — a heading font and a body font — and describe the mood they should create.`,
         },
         {
-          teaching: 'White space is not empty space — it is breathing room. Crowded pages feel overwhelming. Pages with generous spacing feel professional and intentional. Review your pages now. Which section feels too dense?",
-          question: "Which section feels too crowded or too empty? Describe one specific spacing improvement you want made.',
+          teaching: `White space is not empty space — it is breathing room. Crowded pages feel overwhelming. Pages with generous spacing feel professional and intentional. Review your pages now. Which section feels too dense?`,
+          question: `Which section feels too crowded or too empty? Describe one specific spacing improvement you want made.`,
         },
         {
-          teaching: "Visual hierarchy guides a visitor"s eye in the order you intend. Size, weight, and color create hierarchy. When everything is the same size, nothing stands out. Is your most important message visually the most dominant element?',
-          question: "Describe one change to make the visual hierarchy clearer — what should be the most visually dominant element on the page, and how should it stand out?",
+          teaching: `Visual hierarchy guides a visitor"s eye in the order you intend. Size, weight, and color create hierarchy. When everything is the same size, nothing stands out. Is your most important message visually the most dominant element?`,
+          question: `Describe one change to make the visual hierarchy clearer — what should be the most visually dominant element on the page, and how should it stand out?`,
         },
       ],
 
       responsive: [
         {
-          teaching: 'Responsive design means the site looks correct on every screen size — phone, tablet, and desktop. More than half of web visitors worldwide are on mobile. Breakpoints tell the browser when to change the layout.",
-          question: "Imagine your site on a phone screen. Which page or section would break or look wrong first — and how?',
+          teaching: `Responsive design means the site looks correct on every screen size — phone, tablet, and desktop. More than half of web visitors worldwide are on mobile. Breakpoints tell the browser when to change the layout.`,
+          question: `Imagine your site on a phone screen. Which page or section would break or look wrong first — and how?`,
         },
         {
-          teaching: "The hamburger menu is one of the most recognized patterns in mobile web design. It hides navigation links behind a toggle button, freeing up screen space. React state makes this work — one boolean: menu open or closed.",
-          question: 'Should your mobile navbar use a hamburger menu? Describe what happens when it opens and how it closes.",
+          teaching: `The hamburger menu is one of the most recognized patterns in mobile web design. It hides navigation links behind a toggle button, freeing up screen space. React state makes this work — one boolean: menu open or closed.`,
+          question: `Should your mobile navbar use a hamburger menu? Describe what happens when it opens and how it closes.`,
         },
         {
-          teaching: "Images are the most common reason a mobile site breaks or loads slowly. Large images cause pages to load so slowly that visitors give up. This is a real constraint for visitors on slower connections — not a hypothetical.',
-          question: "Describe how images should behave on mobile and what you want to do about load performance.",
+          teaching: `Images are the most common reason a mobile site breaks or loads slowly. Large images cause pages to load so slowly that visitors give up. This is a real constraint for visitors on slower connections — not a hypothetical.`,
+          question: `Describe how images should behave on mobile and what you want to do about load performance.`,
         },
       ],
 
       deploy_prep: [
         {
-          teaching: 'Before any website goes live, it needs a title and description that tell search engines what it is about. Without them your site is invisible in search results. These are called the page title and meta description.",
-          question: "Write your browser tab title — under 60 characters — and your meta description — under 160 characters describing what your site does.',
+          teaching: `Before any website goes live, it needs a title and description that tell search engines what it is about. Without them your site is invisible in search results. These are called the page title and meta description.`,
+          question: `Write your browser tab title — under 60 characters — and your meta description — under 160 characters describing what your site does.`,
         },
         {
-          teaching: "When you share a link on social media or messaging apps, a preview card appears — a title, description, and image. This preview is often the first impression a new visitor gets, before they even click the link.",
-          question: 'What image or graphic should appear when your site is shared on social media or messaging apps?",
+          teaching: `When you share a link on social media or messaging apps, a preview card appears — a title, description, and image. This preview is often the first impression a new visitor gets, before they even click the link.`,
+          question: `What image or graphic should appear when your site is shared on social media or messaging apps?`,
         },
         {
-          teaching: "A README file explains your project to anyone who opens it — including future you, and including other developers who want to understand how it was built. On GitHub, the README appears automatically below the code.',
-          question: "Write the opening paragraph of your README — project name, what it does, why it was built, and the technology stack.',
+          teaching: `A README file explains your project to anyone who opens it — including future you, and including other developers who want to understand how it was built. On GitHub, the README appears automatically below the code.`,
+          question: `Write the opening paragraph of your README — project name, what it does, why it was built, and the technology stack.`,
         },
       ],
 
