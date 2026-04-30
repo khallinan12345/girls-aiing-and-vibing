@@ -2093,7 +2093,7 @@ Explain what this question is asking in simple terms and give a short example of
               rel="noopener noreferrer"
               download="My_Community_My_Voice_Tutorial_Script.pdf"
               title="Download Tutorial Script (PDF)"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-600/30 rounded-lg transition-colors border border-amber-500/30">
+              className={'flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-600/30 rounded-lg transition-colors border border-amber-500/30'}>
               <FileText size={12} /> Script
             </a>
             <button onClick={() => { loadSessions(); setShowSessionPicker(true); }}
