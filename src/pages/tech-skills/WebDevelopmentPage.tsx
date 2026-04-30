@@ -2088,7 +2088,7 @@ Explain what this question is asking in simple terms and give a short example of
               {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} .zip
             </button>
 
-            <a href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/public/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf"
+            <a href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/sign/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV81YTZmOGZhNi1hMTY1LTRlNjYtOTM2Ny1mYzE4NWMzN2YyODUiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJwbGF0Zm9ybS1hc3NldHMvTXlfQ29tbXVuaXR5X015X1ZvaWNlX1R1dG9yaWFsX1NjcmlwdC5wZGYiLCJpYXQiOjE3Nzc1MTMwODYsImV4cCI6MTgwOTA0OTA4Nn0.1sNqQSEAjikBAU-EuqGPbB4wAb_W6CiNIk3jgoNMBzg"
               target="_blank" rel="noopener noreferrer"
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-600/30 rounded-lg transition-colors border border-amber-500/30">
               <FileText size={12} />{' '}Script
