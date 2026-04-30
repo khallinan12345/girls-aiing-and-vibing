@@ -18,6 +18,7 @@ import {
   Award, X, Copy, Check, Volume2, VolumeX, AlertCircle, Star,
   Key, Globe, Link, Eye, EyeOff, Trash2, Plus, Code2,
   Package, Layers, Cpu, MessageSquarePlus,
+  HelpCircle, FileText, ChevronRight, Lightbulb as LightbulbIcon,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -859,6 +860,13 @@ const FullStackDevelopmentPage: React.FC = () => {
   const [generatedSql, setGeneratedSql] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [copied, setCopied]           = useState(false);
+  const [stepperOpen, setStepperOpen]         = useState(false);
+  const [editorTab, setEditorTab]             = useState<'teaching' | 'code' | 'tables' | 'sql'>('teaching');
+  const [showTeachingPopup, setShowTeachingPopup] = useState(false);
+  const [showBuiltPopup, setShowBuiltPopup]   = useState(false);
+  const [showHelpPopup, setShowHelpPopup]     = useState(false);
+  const [helpLoading, setHelpLoading]         = useState(false);
+  const [helpResponse, setHelpResponse]       = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
   const currentTask  = TASKS[taskIndex];
@@ -943,10 +951,125 @@ const FullStackDevelopmentPage: React.FC = () => {
     } finally { setDeletingSessionId(null); }
   }, [userId]);
 
+  // Script-authoritative questions
+  const SCRIPT_SEEDS: Record<string, { teaching: string; question: string }[]> = {
+    supabase_setup: [
+      { teaching: "Every full-stack app needs a backend. Supabase gives you a free PostgreSQL database, API, and authentication in minutes. The anon key is public-safe but never expose the service role key.",
+        question: "Have you created a free account at supabase.com? Paste your Project URL here, or describe the app you want to build." },
+      { teaching: "The anon key controls what unauthenticated users can access. Row Level Security policies determine what it can and cannot read or write. Understanding this now prevents the most common full-stack security mistake.",
+        question: "Find your anon key in Supabase Settings > API. Paste it into the Credentials panel, then click Test Connection. What status does it show?" },
+      { teaching: "Environment variables keep secrets out of your source code. The .env file is never pushed to GitHub. This pattern is used by every production application.",
+        question: "Confirm your .env file has VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY set. Is your .env file listed in .gitignore?" },
+    ],
+    schema_design: [
+      { teaching: "A schema is the blueprint of your database. Designing it before creating tables prevents mistakes that are costly to fix later.",
+        question: "What is the main purpose of your app? What is the single most important type of data it stores?" },
+      { teaching: "Every table needs a clear, single purpose. Naming tables as plural nouns is universal convention. Primary keys should be UUIDs for distributed systems.",
+        question: "List the 2-4 tables your app needs. For each, describe its purpose and list the most important columns with their data types." },
+      { teaching: "Relationships connect tables through foreign keys. They enforce data integrity and enable joins -- fetching related data in one query.",
+        question: "Describe the relationships between your tables. Which column in which table references which other table?" },
+    ],
+    create_tables: [
+      { teaching: "CREATE TABLE defines a table structure. Each column has a name, a data type, and optional constraints. DEFAULT NOW() records the timestamp automatically.",
+        question: "Generate the SQL to create your main content table with all columns, primary key, foreign keys, and default values." },
+      { teaching: "Indexes make queries fast. Without an index, fetching rows by a column requires scanning every row. Index the columns your app filters and sorts by most often.",
+        question: "What queries will your app run most often? Which columns should have indexes? Generate CREATE INDEX statements for those columns." },
+      { teaching: "A trigger automatically runs a function when something happens -- like updating updated_at whenever a row changes. Written once, it works everywhere.",
+        question: "Create a trigger to automatically update the updated_at column whenever a row is modified. Show the function and the trigger definition." },
+    ],
+    connect_react: [
+      { teaching: "The Supabase client knows how to talk to your database. Created once in src/lib/supabase.js and imported anywhere you need database access.",
+        question: "Look at src/lib/supabase.js in your file tree. Describe what createClient does and how you would import the client in a component." },
+      { teaching: "A custom hook encapsulates data-fetching logic. Instead of writing the same useEffect and useState pattern everywhere, write it once in a hook and call it anywhere.",
+        question: "Design a custom hook for your main data type. What state does it manage, what query does it run, and what does it return?" },
+      { teaching: "A connection test component verifies the database is reachable before building the full UI. Build this first -- a failed test tells you immediately if credentials are wrong.",
+        question: "Build a DatabaseStatus component that tests the connection and shows how many rows are in your main table." },
+    ],
+    read_data: [
+      { teaching: "Reading data uses the select method. Real queries filter with .eq(), sort with .order(), limit with .limit(), and join related tables by naming them in the select string.",
+        question: "Build your main listing page. Fetch all active records from your primary table and display them as cards. Include loading and error states." },
+      { teaching: "Filtering narrows results. .eq() for exact matches, .ilike() for partial matches, .in() for a list of values. Combining filters applies multiple conditions at once.",
+        question: "Add filtering to your listing page. What filters make sense for your data? Describe the filter UI and the queries it generates." },
+      { teaching: "A detail page shows the full content of one record, fetched by ID from the URL. React Router useParams() extracts the ID. .single() returns one object instead of an array.",
+        question: "Build the single record detail page. How does it get the ID from the URL and what does the full-detail view show?" },
+    ],
+    write_data: [
+      { teaching: "INSERT adds a new row. The user_id comes from the authenticated session -- never trust the client to say who they are. Read the user ID from supabase.auth.getUser().",
+        question: "Build the submission form. What fields does it have, how does it validate, and what happens on successful submission?" },
+      { teaching: "UPDATE modifies an existing row. Always chain .update() with a .eq() filter on the primary key. Always verify the user owns the record before updating.",
+        question: "Build the edit interface. How does a user reach their own records and what can they change? Show the update query with the ownership check." },
+      { teaching: "Optimistic updates improve perceived performance -- update the UI immediately and roll back if the database call fails.",
+        question: "Add a status change button. How does optimistic update work here? What happens if the database call fails?" },
+    ],
+    auth: [
+      { teaching: "Supabase Auth handles email/password signup, login, and session management with no server code. supabase.auth.getUser() works anywhere in your app.",
+        question: "Build the sign-up and sign-in forms. What fields do they have and what happens after successful authentication?" },
+      { teaching: "Auth context makes the current user available everywhere without prop drilling. A React context wraps the entire application and exposes the current user to any component.",
+        question: "Build an AuthContext and ProtectedRoute component. Which pages require authentication and which are public?" },
+      { teaching: "The navigation bar should reflect auth state without a page reload. Subscribe to auth state changes directly in the nav component.",
+        question: "Update your Navbar to show different options based on auth state. What does the signed-in navigation look like?" },
+    ],
+    rls: [
+      { teaching: "Row Level Security is the most important security feature. Without RLS, anyone with your anon key can read or write every row. Enable RLS on every table. Default deny. Explicit allow.",
+        question: "Enable RLS on your tables and write the policy that allows the right users to read your public content." },
+      { teaching: "Write policies use auth.uid() -- a Supabase function that returns the current user ID. A policy using auth.uid() = user_id means each user can only touch rows they created.",
+        question: "Write the INSERT, UPDATE, and DELETE policies with auth.uid() checks for authenticated users." },
+      { teaching: "Test RLS by signing in with two different accounts and confirming each only sees their own private data. Test before deploying.",
+        question: "Test your RLS policies. What did you test and what did you find? Describe any fix needed." },
+    ],
+    deploy_prep: [
+      { teaching: "Deploying a Vite + React + Supabase app to Vercel takes under five minutes. The connection between Vercel and Supabase is the environment variables set in Vercel's dashboard -- not your .env file.",
+        question: "Walk through the deployment steps. What environment variables does Vercel need and where do you set them?" },
+      { teaching: "Supabase needs to know which URLs are allowed to make requests. After deployment, add your Vercel URL to allowed redirect URLs and CORS origins.",
+        question: "What Supabase settings need to be updated after deployment? Check Authentication > URL Configuration and Settings > API > CORS." },
+      { teaching: "A production checklist prevents common deployment mistakes: RLS enabled, no sensitive keys in source code, .env in .gitignore, user-friendly error messages.",
+        question: "Walk through the production readiness checklist. Confirm RLS, environment variables, error handling, and protected routes are all correct." },
+    ],
+  };
+
+  const handleJumpToTask = useCallback(async (idx: number) => {
+    if (idx === taskIndex || idx >= taskIndex) return;
+    setTaskIndex(idx); setSubTaskIndex(0); setSubTaskCritique(null);
+    setPrompt(''); setAiExplanation(null); setErrorMsg(null);
+    setEditorTab('teaching'); setStepperOpen(false);
+    const lastEntry = [...promptHistory].reverse().find((e: any) => e.taskId === TASKS[idx]?.id);
+    if (lastEntry?.aiExplanation) setAiExplanation(lastEntry.aiExplanation);
+    await fetchTaskInstruction(idx, projectFiles, sessionContext);
+  }, [taskIndex, projectFiles, promptHistory, sessionContext]);
+
+  const handleHelpRequest = useCallback(async () => {
+    if (!taskInstruction?.subTasks?.[subTaskIndex]) return;
+    setShowHelpPopup(true); setHelpLoading(true); setHelpResponse(null);
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6', max_tokens: 600,
+          system: 'You are a friendly full-stack development coach. Explain what the question is asking in simple terms. Give a short concrete example of a good answer. Under 150 words. No jargon.',
+          messages: [{ role: 'user', content: 'Task: "' + currentTask?.label + '". Question: "' + taskInstruction.subTasks[subTaskIndex] + '". Explain and give an example answer.' }],
+        }),
+      });
+      const data = await res.json();
+      setHelpResponse(data.content?.[0]?.text || 'Sorry, could not load help right now.');
+    } catch { setHelpResponse('Sorry, could not load help right now.'); }
+    finally { setHelpLoading(false); }
+  }, [taskInstruction, subTaskIndex, currentTask]);
+
+  const handleSkipSubTask = useCallback(() => {
+    if (!taskInstruction) return;
+    const nextIdx = subTaskIndex + 1;
+    if (nextIdx >= taskInstruction.subTasks.length) { handleCompleteTask(); }
+    else { setSubTaskIndex(nextIdx); setSubTaskCritique(null); setPrompt(''); }
+  }, [subTaskIndex, taskInstruction, handleCompleteTask]);
+
+
   // ── Fetch task instruction ────────────────────────────────────────────
   const fetchTaskInstruction = useCallback(async (idx: number, files: ProjectFile[], ctx: Record<string, any>) => {
     const task = TASKS[idx]; if (!task || task.isOnboarding) return;
     setLoadingInstruction(true); setTaskInstruction(null);
+    const canonicalSeeds = SCRIPT_SEEDS[task.id] ?? [
+      { teaching: `This task builds a core full-stack skill: ${task.label}.`, question: `Describe what you want to achieve: ${task.label}` },
+    ];
     try {
       const fileSummary = files.filter(f => f.content.length > 10).map(f => ({ path: f.path, preview: f.content.substring(0, 400) }));
       const result = await callInstructionAPI({
@@ -955,13 +1078,18 @@ const FullStackDevelopmentPage: React.FC = () => {
         completedTasks: TASKS.slice(0, idx).map(t => t.id),
         communicationStrategy, learningStrategy,
         supabaseConnected: !!(creds.url && creds.anonKey),
+        scriptSubTasks: canonicalSeeds.map((s: any) => s.question),
+        scriptTeaching: canonicalSeeds.map((s: any) => s.teaching),
       });
-      setTaskInstruction(result as TaskInstruction);
-      if (result?.subTaskTeaching?.[0] && result?.subTasks?.[0]) {
-        speakTextRef.current(result.subTaskTeaching[0] + ' ' + result.subTasks[0]);
-      } else if (result?.subTasks?.[0]) {
-        speakTextRef.current(result.subTasks[0]);
-      }
+      setTaskInstruction({
+        headline: result.headline || task.label,
+        context: result.context || `Working on: ${task.label}`,
+        subTasks: canonicalSeeds.map((s: any) => s.question),
+        subTaskTeaching: canonicalSeeds.map((s: any) => s.teaching),
+        examplePrompt: canonicalSeeds[0].question,
+      });
+      speakTextRef.current(canonicalSeeds[0].teaching + ' ' + canonicalSeeds[0].question);
+      setEditorTab('teaching');
     } catch {
       // Fallback instruction seeds per task
       const fallbacks: Record<string, { teaching: string; question: string }[]> = {
@@ -1458,25 +1586,34 @@ const FullStackDevelopmentPage: React.FC = () => {
               </div>
             ) : (
               <>
-                {/* Task header */}
-                <div className={`flex-shrink-0 flex items-center gap-2.5 px-4 py-3 border-b ${pm.border} ${pm.bg}`}>
-                  <span className="text-lg">{currentTask?.icon}</span>
-                  <div className="min-w-0">
-                    <p className={`text-[9px] font-bold uppercase tracking-wider ${pm.color}`}>{pm.label}</p>
-                    <p className="text-sm font-bold text-white truncate">{currentTask?.label}</p>
-                  </div>
-                  {taskInstruction?.subTasks && taskInstruction.subTasks.length > 1 && (
-                    <div className="flex gap-1 ml-auto flex-shrink-0">
-                      {taskInstruction.subTasks.map((_, i) => (
-                        <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${
-                          i < subTaskIndex ? 'bg-emerald-400' : i === subTaskIndex ? 'bg-blue-400' : 'bg-gray-700'}`} />
-                      ))}
+                {/* Task header -- collapsible stepper */}
+                <div className="flex-shrink-0 border-b border-gray-700">
+                  <button onClick={() => setStepperOpen(prev => !prev)}
+                    className={`w-full flex items-center gap-2.5 px-4 py-3 text-left transition-colors ${pm.bg} hover:opacity-90`}>
+                    <span className="text-lg flex-shrink-0">{currentTask?.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[9px] font-bold uppercase tracking-wider ${pm.color}`}>{pm.label}</p>
+                      <p className="text-sm font-bold text-white truncate">{currentTask?.label}</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {taskInstruction?.subTasks && taskInstruction.subTasks.length > 1 && (
+                        <div className="flex gap-1">
+                          {taskInstruction.subTasks.map((_, i) => (
+                            <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                              i < subTaskIndex ? 'bg-emerald-400' : i === subTaskIndex ? pm.color.replace('text-', 'bg-') : 'bg-gray-700'}`} />
+                          ))}
+                        </div>
+                      )}
+                      <ChevronDown size={13} className={`text-gray-500 transition-transform duration-200 ${stepperOpen ? 'rotate-180' : ''}`} />
+                    </div>
+                  </button>
+                  {stepperOpen && (
+                    <div className="border-t border-gray-700/60 bg-gray-900/60">
+                      <TaskStepper tasks={TASKS} taskIndex={taskIndex}
+                        onJump={(idx) => { handleJumpToTask(idx); setStepperOpen(false); }} />
                     </div>
                   )}
                 </div>
-
-                {/* Task stepper */}
-                <TaskStepper tasks={TASKS} taskIndex={taskIndex} onJump={idx => { setTaskIndex(idx); setSubTaskIndex(0); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); setErrorMsg(null); }} />
 
                 {/* Scrollable middle */}
                 <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
@@ -1490,46 +1627,74 @@ const FullStackDevelopmentPage: React.FC = () => {
                   {loadingInstruction ? (
                     <div className="flex items-center gap-2 py-2">
                       <Loader2 size={14} className="animate-spin text-purple-400" />
-                      <span className="text-xs text-gray-400">Preparing instruction…</span>
+                      <span className="text-xs text-gray-400">Preparing instruction...</span>
                     </div>
                   ) : taskInstruction ? (
                     <div className="rounded-xl border border-gray-700 overflow-hidden">
                       {taskInstruction.subTaskTeaching?.[subTaskIndex] && (
-                        <div className="px-3 pt-2.5 pb-2 bg-gray-800/80 border-b border-gray-700">
-                          <p className={`text-[9px] font-bold uppercase tracking-wide mb-1 ${pm.color}`}>
-                            Why this matters — Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
-                          </p>
-                          <p className="text-xs text-gray-300 leading-relaxed italic">
-                            {taskInstruction.subTaskTeaching[subTaskIndex]}
-                          </p>
-                        </div>
+                        <button onClick={() => setShowTeachingPopup(true)}
+                          className="w-full flex items-center justify-between px-3 py-2 bg-gray-800/80 border-b border-gray-700 hover:bg-gray-800 transition-colors group">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <LightbulbIcon size={12} className={`flex-shrink-0 ${pm.color}`} />
+                            <p className={`text-[10px] font-bold uppercase tracking-wide ${pm.color}`}>Why this matters</p>
+                          </div>
+                          <ChevronRight size={11} className="text-gray-600 group-hover:text-gray-400 flex-shrink-0" />
+                        </button>
                       )}
-                      <div className={`px-3 py-2.5 ${pm.bg}`}>
-                        {!taskInstruction.subTaskTeaching?.[subTaskIndex] && (
-                          <p className={`text-[9px] font-bold uppercase tracking-wide mb-1 ${pm.color}`}>
+                      <div className={`px-3 py-3 ${pm.bg}`}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <p className={`text-[9px] font-bold uppercase tracking-wide ${pm.color}`}>
                             Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
                           </p>
-                        )}
+                          <div className="flex items-center gap-1.5">
+                            <button onClick={handleHelpRequest} title="What does this question mean?"
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+                              <HelpCircle size={11} /> Help
+                            </button>
+                            <button onClick={handleSkipSubTask} title="Skip this question"
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors">
+                              <SkipForward size={11} /> Skip
+                            </button>
+                          </div>
+                        </div>
                         <p className="text-sm text-white leading-relaxed font-medium">
                           {taskInstruction.subTasks[subTaskIndex]}
                         </p>
                         {subTaskIndex === 0 && taskInstruction.examplePrompt && (
                           <button onClick={() => { setPrompt(taskInstruction!.examplePrompt); promptRef.current?.focus(); }}
                             className={`mt-2 text-[10px] font-bold ${pm.color} hover:opacity-70 transition-opacity`}>
-                            See example →
+                            See example
                           </button>
                         )}
                       </div>
                     </div>
                   ) : null}
 
-                  {/* AI explanation */}
+                  {/* What was built -- popup trigger */}
                   {aiExplanation && (
-                    <div className="p-2.5 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                      <p className="text-[9px] font-bold text-blue-400 uppercase mb-1">What was built</p>
-                      <p className="text-xs text-gray-300 leading-relaxed">{aiExplanation}</p>
-                    </div>
+                    <button onClick={() => setShowBuiltPopup(true)}
+                      className="w-full flex items-center justify-between p-2.5 bg-amber-500/10 border border-amber-500/25 rounded-lg hover:bg-amber-500/15 transition-colors group text-left">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Sparkles size={12} className="text-amber-400 flex-shrink-0" />
+                        <p className="text-[10px] font-bold text-amber-400 uppercase">What was built</p>
+                      </div>
+                      <ChevronRight size={11} className="text-gray-600 group-hover:text-amber-400 flex-shrink-0" />
+                    </button>
                   )}
+
+                  {/* Tutorial Script download */}
+                  <a href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/public/platform-assets/My_Community_My_Voice_FullStack_Tutorial_Script.pdf"
+                    target="_blank" rel="noopener noreferrer"
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <FileText size={13} className="text-amber-400 flex-shrink-0" />
+                      <div>
+                        <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wide">Tutorial Script</p>
+                        <p className="text-[9px] text-amber-300/70">Download PDF guide</p>
+                      </div>
+                    </div>
+                    <Download size={11} className="text-amber-400 flex-shrink-0" />
+                  </a>
 
                   {/* Critique */}
                   {isCritiquingResponse && (
@@ -1611,29 +1776,32 @@ const FullStackDevelopmentPage: React.FC = () => {
             )}
           </div>
 
-          {/* ═══ RIGHT: Code / Tables / SQL ═══ */}
+          {/* RIGHT: Teaching / Code / Tables / SQL */}
           <div className="flex-1 flex flex-col overflow-hidden">
 
             {/* Tab bar */}
-            <div className="flex items-center gap-1 px-3 py-2 bg-gray-800/80 border-b border-gray-700 flex-shrink-0">
-              {RIGHT_TABS.map(tab => (
-                <button key={tab.id} onClick={() => setRightTab(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all
-                    ${rightTab === tab.id ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/40'}`}>
-                  {tab.icon} {tab.label}
-                  {tab.id === 'sql' && generatedSql && rightTab !== 'sql' && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-0.5" />
-                  )}
-                </button>
-              ))}
-              {/* Right-side file info when on code tab */}
-              {rightTab === 'code' && (
-                <div className="ml-auto flex items-center gap-2">
-                  <FileCode size={12} className="text-emerald-400" />
-                  <span className="text-xs text-gray-400 truncate max-w-40">{activeFilePath}</span>
-                  <span className="text-[10px] text-gray-600">{activeFile?.content.split('\n').length}L</span>
-                  <button onClick={handleCopy}
-                    className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors">
+            <div className="flex items-center border-b border-gray-700 flex-shrink-0" style={{ background: '#1e2128' }}>
+              <button onClick={() => setEditorTab('teaching')}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${editorTab === 'teaching' ? 'border-amber-400 text-amber-300 bg-amber-500/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+                <LightbulbIcon size={12} /> Teaching
+              </button>
+              <button onClick={() => setEditorTab('code')}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${editorTab === 'code' ? 'border-emerald-400 text-emerald-300 bg-emerald-500/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+                <FileCode size={12} /> Code
+              </button>
+              <button onClick={() => setEditorTab('tables')}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${editorTab === 'tables' ? 'border-blue-400 text-blue-300 bg-blue-500/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+                <Database size={12} /> Tables
+              </button>
+              <button onClick={() => setEditorTab('sql')}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${editorTab === 'sql' ? 'border-purple-400 text-purple-300 bg-purple-500/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+                <Code2 size={12} /> SQL
+                {generatedSql && editorTab !== 'sql' && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-0.5" />}
+              </button>
+              <div className="flex-1" />
+              {editorTab === 'code' && (
+                <div className="flex items-center gap-2 pr-3">
+                  <button onClick={handleCopy} className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors">
                     {copied ? <Check size={11} /> : <Copy size={11} />}{copied ? 'Copied' : 'Copy'}
                   </button>
                 </div>
@@ -1643,8 +1811,74 @@ const FullStackDevelopmentPage: React.FC = () => {
             {/* Tab content */}
             <div className="flex-1 flex overflow-hidden">
 
-              {/* Code tab: file tree + Monaco */}
-              {rightTab === 'code' && (
+              {/* Teaching tab */}
+              {editorTab === 'teaching' && (
+                <div className="flex-1 overflow-y-auto" style={{ background: '#f9f6ef' }}>
+                  <div className="px-6 pt-5 pb-3 border-b" style={{ borderColor: '#e8e0d0' }}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-base">{currentTask?.icon}</span>
+                      <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#8a6d3b' }}>{pm.label} {currentTask?.label}</p>
+                    </div>
+                    <p className="text-xs" style={{ color: '#6b5c45' }}>Step {subTaskIndex + 1} of {taskInstruction?.subTasks?.length ?? 1}</p>
+                  </div>
+                  <div className="px-6 py-5 space-y-5">
+                    {aiExplanation ? (
+                      <div className="rounded-xl p-4 border" style={{ background: '#fff8ed', borderColor: '#f0c060' }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Sparkles size={13} style={{ color: '#c07020' }} />
+                          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#c07020' }}>What was built</p>
+                        </div>
+                        <p className="text-sm leading-relaxed" style={{ color: '#3d2b00' }}>{aiExplanation}</p>
+                        <button onClick={() => setShowBuiltPopup(true)} className="mt-3 text-[10px] font-bold hover:opacity-70 transition-opacity" style={{ color: '#c07020' }}>Read full analysis</button>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl p-4 border border-dashed" style={{ borderColor: '#d4c4a0' }}>
+                        <p className="text-xs text-center" style={{ color: '#a08060' }}>Submit your first response -- the AI explanation will appear here.</p>
+                      </div>
+                    )}
+                    {taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
+                      <div className="rounded-xl p-4 border" style={{ background: '#f0f8f0', borderColor: '#7ab87a' }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <LightbulbIcon size={13} style={{ color: '#3a7a3a' }} />
+                          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#3a7a3a' }}>Why this step matters</p>
+                        </div>
+                        <p className="text-sm leading-relaxed italic" style={{ color: '#1a3a1a' }}>{taskInstruction.subTaskTeaching[subTaskIndex]}</p>
+                      </div>
+                    )}
+                    {subTaskCritique && (
+                      <div className="rounded-xl p-4 border" style={{ background: subTaskCritique.hasSuggestions ? '#fffbf0' : '#f0fff4', borderColor: subTaskCritique.hasSuggestions ? '#e8c840' : '#68b868' }}>
+                        <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: subTaskCritique.hasSuggestions ? '#9a7800' : '#2d7a2d' }}>
+                          {subTaskCritique.hasSuggestions ? 'Feedback on your response' : 'Step complete'}
+                        </p>
+                        <p className="text-sm leading-relaxed" style={{ color: '#2a2a1a' }}>{subTaskCritique.feedback}</p>
+                      </div>
+                    )}
+                    {isCritiquingResponse && (
+                      <div className="flex items-center gap-2 py-1">
+                        <Loader2 size={12} className="animate-spin" style={{ color: '#8a6d3b' }} />
+                        <span className="text-xs" style={{ color: '#8a6d3b' }}>Reviewing your response...</span>
+                      </div>
+                    )}
+                    {taskInstruction?.subTasks?.[subTaskIndex] && (
+                      <div className="rounded-xl p-4 border" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
+                        <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: '#6040a0' }}>Your current question</p>
+                        <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>{taskInstruction.subTasks[subTaskIndex]}</p>
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <button onClick={() => setEditorTab('code')} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-bold transition-colors hover:opacity-80" style={{ borderColor: '#b0c8b0', color: '#3a6a3a', background: '#e8f4e8' }}>
+                        <FileCode size={12} /> View code
+                      </button>
+                      <button onClick={() => setEditorTab('sql')} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-bold transition-colors hover:opacity-80" style={{ borderColor: '#b0a0d0', color: '#5030a0', background: '#ede8f8' }}>
+                        <Code2 size={12} /> View SQL
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Code tab */}
+              {editorTab === 'code' && (
                 <>
                   <div className="w-44 flex-shrink-0 border-r border-gray-700 flex flex-col" style={{ background: '#161820' }}>
                     <div className="px-3 pt-2 pb-1 flex-shrink-0">
@@ -1656,26 +1890,22 @@ const FullStackDevelopmentPage: React.FC = () => {
                   </div>
                   <div className="flex-1 flex flex-col min-w-0">
                     <div className="flex-1">
-                      <Editor
-                        height="100%" language={getLanguage(activeFilePath)}
-                        value={activeFile?.content || ''} onChange={handleEditorChange}
-                        theme="vs-dark"
-                        options={{ fontSize: 13, minimap: { enabled: false }, padding: { top: 12 }, lineNumbers: 'on', wordWrap: 'on', scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2 }}
-                      />
+                      <Editor height="100%" language={getLanguage(activeFilePath)} value={activeFile?.content || ''} onChange={handleEditorChange} theme="vs-dark"
+                        options={{ fontSize: 13, minimap: { enabled: false }, padding: { top: 12 }, lineNumbers: 'on', wordWrap: 'on', scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2 }} />
                     </div>
                   </div>
                 </>
               )}
 
               {/* Tables tab */}
-              {rightTab === 'tables' && (
+              {editorTab === 'tables' && (
                 <div className="flex-1 overflow-hidden">
                   <TableViewerPanel creds={creds.url && creds.anonKey ? creds : null} />
                 </div>
               )}
 
               {/* SQL tab */}
-              {rightTab === 'sql' && (
+              {editorTab === 'sql' && (
                 <div className="flex-1 overflow-hidden">
                   <SqlRunnerPanel creds={creds.url && creds.anonKey ? creds : null} generatedSql={generatedSql} />
                 </div>
@@ -1685,6 +1915,111 @@ const FullStackDevelopmentPage: React.FC = () => {
         </div>
       </main>
     </div>
+
+        {/* Teaching Popup */}
+        {showTeachingPopup && taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+            <div className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col rounded-2xl shadow-2xl border" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
+              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#f0e8d8' }}>
+                <div className="flex items-center gap-2">
+                  <LightbulbIcon size={16} style={{ color: '#3a7a3a' }} />
+                  <p className="text-sm font-bold" style={{ color: '#2a1800' }}>Why This Step Matters</p>
+                </div>
+                <button onClick={() => setShowTeachingPopup(false)} className="p-1.5 rounded-lg hover:bg-black/10">
+                  <X size={16} style={{ color: '#5a4a30' }} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
+                <div className="rounded-xl p-4 border" style={{ background: '#f0f8f0', borderColor: '#7ab87a' }}>
+                  <p className="text-sm leading-relaxed italic" style={{ color: '#1a3a1a', lineHeight: '1.75' }}>
+                    {taskInstruction.subTaskTeaching[subTaskIndex]}
+                  </p>
+                </div>
+                <div className="rounded-xl p-4 border" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: '#6040a0' }}>Your question for this step</p>
+                  <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>{taskInstruction.subTasks[subTaskIndex]}</p>
+                </div>
+              </div>
+              <div className="px-5 py-4 border-t flex-shrink-0" style={{ borderColor: '#e0d4b8' }}>
+                <button onClick={() => setShowTeachingPopup(false)} className="w-full py-2.5 rounded-xl text-sm font-bold hover:opacity-90" style={{ background: '#3a7a3a', color: 'white' }}>
+                  Got it -- back to writing
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* What Was Built Popup */}
+        {showBuiltPopup && aiExplanation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+            <div className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col rounded-2xl shadow-2xl border" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
+              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#fff8ed' }}>
+                <div className="flex items-center gap-2">
+                  <Sparkles size={16} style={{ color: '#c07020' }} />
+                  <p className="text-sm font-bold" style={{ color: '#2a1800' }}>What Was Built</p>
+                </div>
+                <button onClick={() => setShowBuiltPopup(false)} className="p-1.5 rounded-lg hover:bg-black/10">
+                  <X size={16} style={{ color: '#5a4a30' }} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-5">
+                <div className="rounded-xl p-4 border" style={{ background: '#fff8ed', borderColor: '#f0c060' }}>
+                  <p className="text-sm leading-relaxed" style={{ color: '#3d2b00', lineHeight: '1.75' }}>{aiExplanation}</p>
+                </div>
+              </div>
+              <div className="px-5 py-4 border-t flex-shrink-0 flex gap-2" style={{ borderColor: '#e0d4b8' }}>
+                <button onClick={() => { setEditorTab('code'); setShowBuiltPopup(false); }} className="flex-1 py-2.5 rounded-xl text-sm font-bold hover:opacity-90 flex items-center justify-center gap-2" style={{ background: '#2a5a2a', color: 'white' }}>
+                  <FileCode size={13} /> View code
+                </button>
+                <button onClick={() => setShowBuiltPopup(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold border hover:opacity-80" style={{ borderColor: '#c8b890', color: '#5a4a30' }}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Help Popup */}
+        {showHelpPopup && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+            <div className="w-full max-w-md flex flex-col rounded-2xl shadow-2xl border overflow-hidden" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
+              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#f0e8d8' }}>
+                <div className="flex items-center gap-2">
+                  <HelpCircle size={16} style={{ color: '#6040a0' }} />
+                  <p className="text-sm font-bold" style={{ color: '#2a1800' }}>What does this question mean?</p>
+                </div>
+                <button onClick={() => setShowHelpPopup(false)} className="p-1.5 rounded-lg hover:bg-black/10">
+                  <X size={16} style={{ color: '#5a4a30' }} />
+                </button>
+              </div>
+              <div className="px-5 pt-4 pb-2">
+                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#8a6d3b' }}>The question</p>
+                <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>{taskInstruction?.subTasks?.[subTaskIndex]}</p>
+              </div>
+              <div className="px-5 pb-5">
+                <div className="rounded-xl p-4 border mt-3" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
+                  {helpLoading ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin" style={{ color: '#6040a0' }} />
+                      <p className="text-sm" style={{ color: '#6040a0' }}>Getting a plain-English explanation...</p>
+                    </div>
+                  ) : (
+                    <p className="text-sm leading-relaxed" style={{ color: '#2a1a4a', lineHeight: '1.75' }}>{helpResponse}</p>
+                  )}
+                </div>
+              </div>
+              <div className="px-5 pb-5 flex gap-2">
+                <button onClick={() => setShowHelpPopup(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold hover:opacity-90" style={{ background: '#6040a0', color: 'white' }}>
+                  Got it -- I will give it a try
+                </button>
+                <button onClick={() => { setShowHelpPopup(false); handleSkipSubTask(); }} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold border hover:opacity-80" style={{ borderColor: '#c8b890', color: '#5a4a30' }}>
+                  <SkipForward size={13} /> Skip
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
   );
 };
 
