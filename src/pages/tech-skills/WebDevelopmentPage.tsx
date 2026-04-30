@@ -2240,7 +2240,7 @@ Explain what this question is asking in simple terms and give a short example of
                   ) : null}
 
                   {/* Tutorial Script download */}
-                  
+                  <a
                     href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/sign/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV81YTZmOGZhNi1hMTY1LTRlNjYtOTM2Ny1mYzE4NWMzN2YyODUiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJwbGF0Zm9ybS1hc3NldHMvTXlfQ29tbXVuaXR5X015X1ZvaWNlX1R1dG9yaWFsX1NjcmlwdC5wZGYiLCJpYXQiOjE3Nzc1MTMwODYsImV4cCI6MTgwOTA0OTA4Nn0.1sNqQSEAjikBAU-EuqGPbB4wAb_W6CiNIk3jgoNMBzg"
                     target="_blank"
                     rel="noopener noreferrer"
