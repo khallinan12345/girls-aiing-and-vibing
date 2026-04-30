@@ -2091,7 +2091,7 @@ Explain what this question is asking in simple terms and give a short example of
             <a href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/sign/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV81YTZmOGZhNi1hMTY1LTRlNjYtOTM2Ny1mYzE4NWMzN2YyODUiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJwbGF0Zm9ybS1hc3NldHMvTXlfQ29tbXVuaXR5X015X1ZvaWNlX1R1dG9yaWFsX1NjcmlwdC5wZGYiLCJpYXQiOjE3Nzc1MTMwODYsImV4cCI6MTgwOTA0OTA4Nn0.1sNqQSEAjikBAU-EuqGPbB4wAb_W6CiNIk3jgoNMBzg"
               target="_blank" rel="noopener noreferrer"
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-600/30 rounded-lg transition-colors border border-amber-500/30">
-              <FileText size={12} />{' '}Script
+              <FileText size={12} /> Tutorial
             </a>
             <button onClick={() => { loadSessions(); setShowSessionPicker(true); }}
               className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors">
@@ -2238,6 +2238,22 @@ Explain what this question is asking in simple terms and give a short example of
                       </div>
                     </div>
                   ) : null}
+
+                  {/* Tutorial Script download */}
+                  
+                    href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/sign/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV81YTZmOGZhNi1hMTY1LTRlNjYtOTM2Ny1mYzE4NWMzN2YyODUiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJwbGF0Zm9ybS1hc3NldHMvTXlfQ29tbXVuaXR5X015X1ZvaWNlX1R1dG9yaWFsX1NjcmlwdC5wZGYiLCJpYXQiOjE3Nzc1MTMwODYsImV4cCI6MTgwOTA0OTA4Nn0.1sNqQSEAjikBAU-EuqGPbB4wAb_W6CiNIk3jgoNMBzg"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <FileText size={13} className="text-amber-400 flex-shrink-0" />
+                      <div>
+                        <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wide">Tutorial Script</p>
+                        <p className="text-[9px] text-amber-300/70">Download PDF guide</p>
+                      </div>
+                    </div>
+                    <Download size={11} className="text-amber-400 flex-shrink-0" />
+                  </a>
 
                   {/* What was built — popup trigger button */}
                   {aiExplanation && (
