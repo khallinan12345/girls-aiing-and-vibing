@@ -840,7 +840,7 @@ const WebDevelopmentPage: React.FC = () => {
         },
         {
           teaching: 'After the hero, visitors want to know: is this real? Three key facts or statistics in a row is one of the most effective trust-building patterns in web design. Specific, concrete information makes visitors lean forward. Vague claims do not.',
-          question: 'Give three facts, statistics, or highlights about your site's subject that would catch a visitor's attention mid-scroll.',
+          question: "Give three facts, statistics, or highlights about your site's subject that would catch a visitor's attention mid-scroll.",
         },
         {
           teaching: 'The preview section at the bottom of the home page pulls visitors deeper into the site — like a trailer for what is coming. A short sentence and a link for each inner page.',
