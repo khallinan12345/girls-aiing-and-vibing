@@ -2087,14 +2087,11 @@ Explain what this question is asking in simple terms and give a short example of
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors">
               {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} .zip
             </button>
-            
-              href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/public/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf"
-              target="_blank"
-              rel="noopener noreferrer"
-              download="My_Community_My_Voice_Tutorial_Script.pdf"
-              title="Download Tutorial Script (PDF)"
-              className={'flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-600/30 rounded-lg transition-colors border border-amber-500/30'}>
-              <FileText size={12} /> Script
+
+            <a href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/public/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf"
+              target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-600/30 rounded-lg transition-colors border border-amber-500/30">
+              <FileText size={12} />{' '}Script
             </a>
             <button onClick={() => { loadSessions(); setShowSessionPicker(true); }}
               className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors">
