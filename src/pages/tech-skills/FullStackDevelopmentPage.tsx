@@ -1055,12 +1055,6 @@ const FullStackDevelopmentPage: React.FC = () => {
     finally { setHelpLoading(false); }
   }, [taskInstruction, subTaskIndex, currentTask]);
 
-  const handleSkipSubTask = useCallback(() => {
-    if (!taskInstruction) return;
-    const nextIdx = subTaskIndex + 1;
-    if (nextIdx >= taskInstruction.subTasks.length) { handleCompleteTask(); }
-    else { setSubTaskIndex(nextIdx); setSubTaskCritique(null); setPrompt(''); }
-  }, [subTaskIndex, taskInstruction, handleCompleteTask]);
 
 
   // ── Fetch task instruction ────────────────────────────────────────────
@@ -1288,6 +1282,13 @@ const FullStackDevelopmentPage: React.FC = () => {
     await fetchTaskInstruction(1, projectFiles, sessionContext);
     setTimeout(() => persistSession(projectFiles, promptHistory, 1, sessionContext), 100);
   }, [ensureSession, projectFiles, promptHistory, sessionContext, persistSession, fetchTaskInstruction, speakText]);
+
+  const handleSkipSubTask = useCallback(() => {
+    if (!taskInstruction) return;
+    const nextIdx = subTaskIndex + 1;
+    if (nextIdx >= taskInstruction.subTasks.length) { handleCompleteTask(); }
+    else { setSubTaskIndex(nextIdx); setSubTaskCritique(null); setPrompt(''); }
+  }, [subTaskIndex, taskInstruction, handleCompleteTask]);
 
   // ── Save + evaluate ──────────────────────────────────────────────────
   const handleSaveProject = useCallback(async () => {
