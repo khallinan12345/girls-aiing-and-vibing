@@ -6,10 +6,11 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Navbar from '../../components/layout/Navbar';
 import { supabase } from '../../lib/supabaseClient';
 import Editor from '@monaco-editor/react';
+import GitHubPanel from '../../components/GitHubPanel';
 import { useVoice } from '../../hooks/useVoice';
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
-  Code, Sparkles, Loader2, Save, FolderOpen, Download, CheckCircle, ArrowUpCircle, SkipForward, CloudUpload, ImageIcon, ImagePlus, Trash2, MessageSquarePlus, FileText,
+  Code, Sparkles, Loader2, Save, FolderOpen, Download, CheckCircle, ArrowUpCircle, SkipForward, CloudUpload, ImageIcon, ImagePlus, Trash2, MessageSquarePlus, FileText, Github,
   ArrowRight, FileCode, Plus, X, ChevronDown, ChevronUp, Lightbulb,
   RefreshCw, BarChart3, Award, ExternalLink, Star, Wand2, Check, Copy,
   Volume2, VolumeX,
@@ -641,7 +642,7 @@ const WebDevelopmentPage: React.FC = () => {
   const [helpLoading, setHelpLoading]         = useState(false);
   const [helpResponse, setHelpResponse]       = useState<string | null>(null);
   // Right-panel tab: 'teaching' shows explanation/significance; 'code' shows Monaco editor
-  const [editorTab, setEditorTab]             = useState<'teaching' | 'code'>('teaching');
+  const [editorTab, setEditorTab]             = useState<'teaching' | 'code' | 'github'>('teaching');
   // Popup modals
   const [showTeachingPopup, setShowTeachingPopup] = useState(false);
   const [showBuiltPopup, setShowBuiltPopup]   = useState(false);
@@ -1362,6 +1363,7 @@ Explain what this question is asking in simple terms and give a short example of
       }
       setAiExplanation(result.explanation || null);
       if (result.explanation) setEditorTab('teaching'); // auto-switch to Teaching tab after generation
+    if (currentTask?.id === 'deploy_prep') setEditorTab('github');
       if (result.sessionContext) setSessionContext(prev => ({ ...prev, ...result.sessionContext }));
       // Snapshot instruction state — will be stale in async callbacks below
       const snapInstruction = taskInstruction;
@@ -2462,6 +2464,17 @@ Explain what this question is asking in simple terms and give a short example of
                     </span>
                   )}
                 </button>
+                {/* GitHub tab */}
+                <button
+                  onClick={() => setEditorTab('github')}
+                  className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${
+                    editorTab === 'github'
+                      ? 'border-gray-400 text-gray-200 bg-white/5'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}>
+                  <Github size={12} />
+                  GitHub
+                </button>
                 {/* Spacer + copy button shown in code tab */}
                 <div className="flex-1" />
                 {editorTab === 'code' && (
@@ -2610,6 +2623,13 @@ Explain what this question is asking in simple terms and give a short example of
                       automaticLayout: true, tabSize: 2,
                     }}
                   />
+                </div>
+              )}
+
+              {/* ── GitHub tab content ── */}
+              {editorTab === 'github' && (
+                <div className="flex-1 overflow-hidden">
+                  <GitHubPanel projectFiles={projectFiles} sessionName={sessionName} />
                 </div>
               )}
 
