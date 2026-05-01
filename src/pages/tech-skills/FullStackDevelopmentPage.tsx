@@ -14,7 +14,7 @@ import { useVoice } from '../../hooks/useVoice';
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
   Database, Table2, Play, CheckCircle, ArrowRight, FileCode,
-  ChevronDown, ChevronRight, Loader2, Save, FolderOpen, Download,
+  ChevronDown, ChevronRight, Loader2, Save, FolderOpen, Download, FileText,
   ArrowUpCircle, SkipForward, Lightbulb, RefreshCw, BarChart3,
   Award, X, Copy, Check, Volume2, VolumeX, AlertCircle, Star,
   Key, Globe, Link, Eye, EyeOff, Trash2, Plus, Code2,
@@ -1437,6 +1437,14 @@ const FullStackDevelopmentPage: React.FC = () => {
             </button>
             {lastSaved && !isSaving && <span className="text-[10px] text-gray-600 hidden sm:block">Saved {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
             {saveError && <span className="text-[10px] text-red-500 hidden sm:block">Save failed</span>}
+            <a
+              href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/sign/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV81YTZmOGZhNi1hMTY1LTRlNjYtOTM2Ny1mYzE4NWMzN2YyODUiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJwbGF0Zm9ybS1hc3NldHMvTXlfQ29tbXVuaXR5X015X1ZvaWNlX1R1dG9yaWFsX1NjcmlwdC5wZGYiLCJpYXQiOjE3Nzc2NTUyOTUsImV4cCI6MTgwOTE5MTI5NX0.PRMvU75tOURNUpz9iuwc8PXqHTlTdCqr1IrGNdHWyiM"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open Tutorial Script (PDF)"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-600/30 border border-amber-500/30 rounded-lg transition-colors">
+              <FileText size={12} /> Tutorial
+            </a>
             <button onClick={handleSaveProject} disabled={isSaving || !taskHasGeneration}
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-lg transition-colors disabled:opacity-40">
               {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
