@@ -75,14 +75,14 @@ jobs:
 
       # ── 2. Checkout repo ─────────────────────────────────────────────────────
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           token: ${{ secrets.TRIAGE_GITHUB_TOKEN }}
           fetch-depth: 0
 
       # ── 3. Setup Node ────────────────────────────────────────────────────────
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.4.0
         with:
           node-version: '20'
 
