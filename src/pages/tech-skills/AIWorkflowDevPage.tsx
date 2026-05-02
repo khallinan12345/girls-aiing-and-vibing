@@ -15,6 +15,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Navbar from '../../components/layout/Navbar';
 import { supabase } from '../../lib/supabaseClient';
 import Editor from '@monaco-editor/react';
+import GitHubPanel from '../../components/GitHubPanel';
 import { useVoice } from '../../hooks/useVoice';
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
@@ -25,6 +26,7 @@ import {
   Trash2, Plus, FileCode, Package, Play, Key, ExternalLink,
   Zap, GitBranch, RefreshCw, Eye, Terminal, Wand2,
   Database, Table2, Bot, Send, User as UserIcon, Code2, Sparkles as SparklesIcon,
+  HelpCircle, FileText, ChevronRight, Github, SkipForward,
   Bot, Send, User as UserIcon, MessageCircle,
 } from 'lucide-react';
 
@@ -59,7 +61,7 @@ interface SessionRecord {
 interface ApiCredentials { anthropicKey: string; useProxy: boolean; }
 interface SupaCredentials { url: string; anonKey: string; }
 
-type RightTab = 'code' | 'test' | 'agent';
+type RightTab = 'teaching' | 'code' | 'test' | 'github';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -968,7 +970,7 @@ const AIWorkflowDevPage: React.FC = () => {
   const activeFile = projectFiles.find(f => f.path === activeFilePath) ?? projectFiles[0];
 
   // ── Right panel ──────────────────────────────────────────────────────
-  const [rightTab, setRightTab] = useState<RightTab>('code');
+  const [rightTab, setRightTab] = useState<RightTab>('teaching');
 
   // ── Task ─────────────────────────────────────────────────────────────
   const [taskIndex, setTaskIndex]               = useState(0);
@@ -1000,6 +1002,12 @@ const AIWorkflowDevPage: React.FC = () => {
   const [evalError, setEvalError]           = useState<string | null>(null);
   const [downloading, setDownloading]       = useState(false);
   const [copied, setCopied]                 = useState(false);
+  const [stepperOpen, setStepperOpen]       = useState(false);
+  const [showTeachingPopup, setShowTeachingPopup] = useState(false);
+  const [showBuiltPopup, setShowBuiltPopup] = useState(false);
+  const [showHelpPopup, setShowHelpPopup]   = useState(false);
+  const [helpLoading, setHelpLoading]       = useState(false);
+  const [helpResponse, setHelpResponse]     = useState<string | null>(null);
   const [showStackBlitzModal, setShowStackBlitzModal] = useState(false);
 
   const currentTask  = TASKS[taskIndex];
@@ -1219,7 +1227,7 @@ const AIWorkflowDevPage: React.FC = () => {
     } else if (currentTask?.id === 'deploy_prep') {
       setRightTab('github');
     } else {
-      setRightTab('code');
+      setRightTab('teaching');
     }
   }, [currentTask?.id]);
 
@@ -1291,6 +1299,31 @@ const AIWorkflowDevPage: React.FC = () => {
       if (res.ok) { const d = await res.json(); if (d?.feedback) setSubTaskCritique({ hasSuggestions: !!d.hasSuggestions, feedback: d.feedback }); }
     } catch {} finally { setIsCritiquing(false); }
   }, [prompt, isCritiquing, currentTask, taskInstruction, subTaskIndex, communicationStrategy, learningStrategy]);
+
+  const handleHelpRequest = async () => {
+    if (!taskInstruction?.subTasks?.[subTaskIndex]) return;
+    setShowHelpPopup(true); setHelpLoading(true); setHelpResponse(null);
+    try {
+      const res = await fetch('/api/ai-proxy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6', max_tokens: 400,
+          system: 'You are a friendly coding coach. Explain what the question is asking in plain English. Give one short concrete example of a good answer. Under 120 words. No jargon.',
+          messages: [{ role: 'user', content: 'Task: "' + (currentTask?.label ?? '') + '". Question: "' + taskInstruction.subTasks[subTaskIndex] + '". Explain what this is asking and give an example answer.' }],
+        }),
+      });
+      const data = await res.json();
+      setHelpResponse(data.content?.[0]?.text || 'Could not load help right now.');
+    } catch { setHelpResponse('Could not load help right now.'); }
+    finally { setHelpLoading(false); }
+  };
+
+  const handleSkipSubTask = useCallback(() => {
+    if (!taskInstruction) return;
+    const nextIdx = subTaskIndex + 1;
+    if (nextIdx >= taskInstruction.subTasks.length) { handleCompleteTask(); }
+    else { setSubTaskIndex(nextIdx); setSubTaskCritique(null); setPrompt(''); }
+  }, [subTaskIndex, taskInstruction, handleCompleteTask]);
 
   const handleMoveToNextStep = () => {
     const next = subTaskIndex + 1;
@@ -1624,22 +1657,32 @@ const AIWorkflowDevPage: React.FC = () => {
               </div>
             ) : (
               <>
-                <div className={`flex-shrink-0 flex items-center gap-2.5 px-4 py-3 border-b ${pm.border} ${pm.bg}`}>
-                  <span className="text-lg">{currentTask?.icon}</span>
-                  <div className="min-w-0">
-                    <p className={`text-[9px] font-bold uppercase tracking-wider ${pm.color}`}>{pm.label}</p>
-                    <p className="text-sm font-bold text-white truncate">{currentTask?.label}</p>
-                  </div>
-                  {taskInstruction?.subTasks && taskInstruction.subTasks.length > 1 && (
-                    <div className="flex gap-1 ml-auto flex-shrink-0">
-                      {taskInstruction.subTasks.map((_, i) => (
-                        <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${i < subTaskIndex ? 'bg-emerald-400' : i === subTaskIndex ? 'bg-violet-400' : 'bg-gray-700'}`} />
-                      ))}
+                <div className="flex-shrink-0 border-b border-gray-700">
+                  <button onClick={() => setStepperOpen(prev => !prev)}
+                    className={`w-full flex items-center gap-2.5 px-4 py-3 text-left transition-colors ${pm.bg} hover:opacity-90`}>
+                    <span className="text-lg flex-shrink-0">{currentTask?.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[9px] font-bold uppercase tracking-wider ${pm.color}`}>{pm.label}</p>
+                      <p className="text-sm font-bold text-white truncate">{currentTask?.label}</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {taskInstruction?.subTasks && taskInstruction.subTasks.length > 1 && (
+                        <div className="flex gap-1">
+                          {taskInstruction.subTasks.map((_, i) => (
+                            <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${i < subTaskIndex ? 'bg-emerald-400' : i === subTaskIndex ? 'bg-violet-400' : 'bg-gray-700'}`} />
+                          ))}
+                        </div>
+                      )}
+                      <ChevronDown size={13} className={`text-gray-500 transition-transform duration-200 ${stepperOpen ? 'rotate-180' : ''}`} />
+                    </div>
+                  </button>
+                  {stepperOpen && (
+                    <div className="border-t border-gray-700/60 bg-gray-900/60">
+                      <TaskStepper tasks={TASKS} taskIndex={taskIndex}
+                        onJump={(idx) => { handleJumpToTask(idx); setStepperOpen(false); }} />
                     </div>
                   )}
                 </div>
-
-                <TaskStepper tasks={TASKS} taskIndex={taskIndex} onJump={idx => { setTaskIndex(idx); setSubTaskIndex(0); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); setErrorMsg(null); }} />
 
                 <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
 
@@ -1685,34 +1728,67 @@ const AIWorkflowDevPage: React.FC = () => {
                   ) : taskInstruction ? (
                     <div className="rounded-xl border border-gray-700 overflow-hidden">
                       {taskInstruction.subTaskTeaching?.[subTaskIndex] && (
-                        <div className="px-3 pt-2.5 pb-2 bg-gray-800/80 border-b border-gray-700">
-                          <p className={`text-[9px] font-bold uppercase tracking-wide mb-1 ${pm.color}`}>
-                            Why this matters — Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
-                          </p>
-                          <p className="text-xs text-gray-300 leading-relaxed italic">{taskInstruction.subTaskTeaching[subTaskIndex]}</p>
-                        </div>
+                        <button onClick={() => setShowTeachingPopup(true)}
+                          className="w-full flex items-center justify-between px-3 py-2 bg-gray-800/80 border-b border-gray-700 hover:bg-gray-800 transition-colors group">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Lightbulb size={12} className={`flex-shrink-0 ${pm.color}`} />
+                            <p className={`text-[10px] font-bold uppercase tracking-wide ${pm.color}`}>Why this matters</p>
+                          </div>
+                          <ChevronRight size={11} className="text-gray-600 group-hover:text-gray-400 flex-shrink-0" />
+                        </button>
                       )}
-                      <div className={`px-3 py-2.5 ${pm.bg}`}>
-                        {!taskInstruction.subTaskTeaching?.[subTaskIndex] && (
-                          <p className={`text-[9px] font-bold uppercase tracking-wide mb-1 ${pm.color}`}>Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}</p>
-                        )}
+                      <div className={`px-3 py-3 ${pm.bg}`}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <p className={`text-[9px] font-bold uppercase tracking-wide ${pm.color}`}>
+                            Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
+                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <button onClick={handleHelpRequest} title="What does this question mean?"
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+                              <HelpCircle size={11} /> Help
+                            </button>
+                            <button onClick={handleSkipSubTask} title="Skip this sub-task"
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors">
+                              <SkipForward size={11} /> Skip
+                            </button>
+                          </div>
+                        </div>
                         <p className="text-sm text-white leading-relaxed font-medium">{taskInstruction.subTasks[subTaskIndex]}</p>
                         {subTaskIndex === 0 && taskInstruction.examplePrompt && (
                           <button onClick={() => { setPrompt(taskInstruction!.examplePrompt); promptRef.current?.focus(); }}
                             className={`mt-2 text-[10px] font-bold ${pm.color} hover:opacity-70 transition-opacity`}>
-                            See example →
+                            See example
                           </button>
                         )}
                       </div>
                     </div>
                   ) : null}
 
+                  {/* What was built — popup trigger */}
                   {aiExplanation && (
-                    <div className="p-2.5 bg-violet-500/10 border border-violet-500/20 rounded-lg">
-                      <p className="text-[9px] font-bold text-violet-400 uppercase mb-1">What was built</p>
-                      <p className="text-xs text-gray-300 leading-relaxed">{aiExplanation}</p>
-                    </div>
+                    <button onClick={() => setShowBuiltPopup(true)}
+                      className="w-full flex items-center justify-between p-2.5 bg-amber-500/10 border border-amber-500/25 rounded-lg hover:bg-amber-500/15 transition-colors group text-left">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <SparklesIcon size={12} className="text-amber-400 flex-shrink-0" />
+                        <p className="text-[10px] font-bold text-amber-400 uppercase">What was built</p>
+                      </div>
+                      <ChevronRight size={11} className="text-gray-600 group-hover:text-amber-400 flex-shrink-0" />
+                    </button>
                   )}
+
+                  {/* Tutorial Script download */}
+                  <a href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/public/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf"
+                    target="_blank" rel="noopener noreferrer"
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <FileText size={13} className="text-amber-400 flex-shrink-0" />
+                      <div>
+                        <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wide">Tutorial Script</p>
+                        <p className="text-[9px] text-amber-300/70">Download PDF guide</p>
+                      </div>
+                    </div>
+                    <Download size={11} className="text-amber-400 flex-shrink-0" />
+                  </a>
 
                   {isCritiquingResponse && (
                     <div className="flex items-center gap-2 py-1">
@@ -1788,34 +1864,35 @@ const AIWorkflowDevPage: React.FC = () => {
             )}
           </div>
 
-          {/* ═══ RIGHT: Code / Test ═══ */}
+          {/* RIGHT: Teaching / Code / Test / GitHub */}
           <div className="flex-1 flex flex-col overflow-hidden">
 
             {/* Tab bar */}
-            <div className="flex items-center gap-1 px-3 py-2 bg-gray-800/80 border-b border-gray-700 flex-shrink-0">
-              {[
-                { id: 'code' as RightTab, label: 'Code', icon: <FileCode size={12} /> },
-                { id: 'test' as RightTab, label: 'Test Workflow', icon: <Play size={12} /> },
-                { id: 'agent' as RightTab, label: 'Agent', icon: <Bot size={12} /> },
-              ].map(tab => (
-                <button key={tab.id} onClick={() => setRightTab(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all
-                    ${rightTab === tab.id ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/40'}`}>
-                  {tab.icon} {tab.label}
-                  {tab.id === 'agent' && currentTask?.id === 'build_agent' && rightTab !== 'agent' && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-0.5" />
-                  )}
-                  {tab.id === 'test' && ['first_ai_call', 'chain_calls', 'prompts_polish'].includes(currentTask?.id ?? '') && rightTab !== 'test' && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-0.5" />
-                  )}
-                </button>
-              ))}
-              {/* File info on code tab */}
+            <div className="flex items-center border-b border-gray-700 flex-shrink-0" style={{ background: '#1e2128' }}>
+              <button onClick={() => setRightTab('teaching')}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${rightTab === 'teaching' ? 'border-amber-400 text-amber-300 bg-amber-500/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+                <Lightbulb size={12} /> Teaching
+              </button>
+              <button onClick={() => setRightTab('code')}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${rightTab === 'code' ? 'border-violet-400 text-violet-300 bg-violet-500/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+                <FileCode size={12} /> Code
+                {activeFilePath && <span className="ml-1 text-[9px] text-gray-600 font-normal truncate max-w-20">{activeFilePath.split('/').pop()}</span>}
+              </button>
+              <button onClick={() => setRightTab('test')}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${rightTab === 'test' ? 'border-emerald-400 text-emerald-300 bg-emerald-500/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+                <Play size={12} /> Test
+                {currentTask?.id === 'build_agent' && rightTab !== 'test' && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-1" />
+                )}
+              </button>
+              <button onClick={() => setRightTab('github')}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${rightTab === 'github' ? 'border-gray-400 text-gray-200 bg-white/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+                <Github size={12} /> GitHub
+              </button>
+              <div className="flex-1" />
               {rightTab === 'code' && (
-                <div className="ml-auto flex items-center gap-2">
-                  <FileCode size={12} className="text-violet-400" />
-                  <span className="text-xs text-gray-400 truncate max-w-40">{activeFilePath}</span>
-                  <span className="text-[10px] text-gray-600">{activeFile?.content.split('\n').length}L</span>
+                <div className="flex items-center gap-2 pr-3">
+                  <span className="text-[10px] text-gray-700">{activeFile?.content.split('\n').length}L</span>
                   <button onClick={handleCopy} className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors">
                     {copied ? <Check size={11} /> : <Copy size={11} />}{copied ? 'Copied' : 'Copy'}
                   </button>
@@ -1826,9 +1903,75 @@ const AIWorkflowDevPage: React.FC = () => {
             {/* Tab content */}
             <div className="flex-1 flex overflow-hidden">
 
+              {/* Teaching tab — warm parchment background */}
+              {rightTab === 'teaching' && (
+                <div className="flex-1 overflow-y-auto" style={{ background: '#f9f6ef' }}>
+                  <div className="px-6 pt-5 pb-3 border-b" style={{ borderColor: '#e8e0d0' }}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-base">{currentTask?.icon}</span>
+                      <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#8a6d3b' }}>{pm.label} — {currentTask?.label}</p>
+                    </div>
+                    <p className="text-xs" style={{ color: '#6b5c45' }}>Step {subTaskIndex + 1} of {taskInstruction?.subTasks?.length ?? 1}</p>
+                  </div>
+                  <div className="px-6 py-5 space-y-5">
+                    {aiExplanation ? (
+                      <div className="rounded-xl p-4 border" style={{ background: '#fff8ed', borderColor: '#f0c060' }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <SparklesIcon size={13} style={{ color: '#c07020' }} />
+                          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#c07020' }}>What was built</p>
+                        </div>
+                        <p className="text-sm leading-relaxed" style={{ color: '#3d2b00' }}>{aiExplanation}</p>
+                        <button onClick={() => setShowBuiltPopup(true)} className="mt-3 text-[10px] font-bold hover:opacity-70 transition-opacity" style={{ color: '#c07020' }}>Read full analysis</button>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl p-4 border border-dashed" style={{ borderColor: '#d4c4a0' }}>
+                        <p className="text-xs text-center" style={{ color: '#a08060' }}>Submit your first response — the AI explanation will appear here.</p>
+                      </div>
+                    )}
+                    {taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
+                      <div className="rounded-xl p-4 border" style={{ background: '#f0f8f0', borderColor: '#7ab87a' }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Lightbulb size={13} style={{ color: '#3a7a3a' }} />
+                          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#3a7a3a' }}>Why this step matters</p>
+                        </div>
+                        <p className="text-sm leading-relaxed italic" style={{ color: '#1a3a1a' }}>{taskInstruction.subTaskTeaching[subTaskIndex]}</p>
+                      </div>
+                    )}
+                    {subTaskCritique && (
+                      <div className="rounded-xl p-4 border" style={{ background: subTaskCritique.hasSuggestions ? '#fffbf0' : '#f0fff4', borderColor: subTaskCritique.hasSuggestions ? '#e8c840' : '#68b868' }}>
+                        <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: subTaskCritique.hasSuggestions ? '#9a7800' : '#2d7a2d' }}>
+                          {subTaskCritique.hasSuggestions ? 'Feedback on your response' : 'Step complete'}
+                        </p>
+                        <p className="text-sm leading-relaxed" style={{ color: '#2a2a1a' }}>{subTaskCritique.feedback}</p>
+                      </div>
+                    )}
+                    {isCritiquingResponse && (
+                      <div className="flex items-center gap-2 py-1">
+                        <Loader2 size={12} className="animate-spin" style={{ color: '#8a6d3b' }} />
+                        <span className="text-xs" style={{ color: '#8a6d3b' }}>Reviewing your response...</span>
+                      </div>
+                    )}
+                    {taskInstruction?.subTasks?.[subTaskIndex] && (
+                      <div className="rounded-xl p-4 border" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
+                        <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: '#6040a0' }}>Your current question</p>
+                        <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>{taskInstruction.subTasks[subTaskIndex]}</p>
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <button onClick={() => setRightTab('code')} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-bold transition-colors hover:opacity-80" style={{ borderColor: '#b0a0d0', color: '#5030a0', background: '#ede8f8' }}>
+                        <FileCode size={12} /> View code
+                      </button>
+                      <button onClick={() => setRightTab('test')} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-bold transition-colors hover:opacity-80" style={{ borderColor: '#b0c8b0', color: '#3a6a3a', background: '#e8f4e8' }}>
+                        <Play size={12} /> Test workflow
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Code tab */}
               {rightTab === 'code' && (
                 <>
-                  {/* File tree */}
                   <div className="w-44 flex-shrink-0 border-r border-gray-700 flex flex-col" style={{ background: '#161820' }}>
                     <div className="px-3 pt-2 pb-1 flex-shrink-0">
                       <p className="text-[9px] font-bold text-gray-700 uppercase tracking-wide">Files</p>
@@ -1837,34 +1980,128 @@ const AIWorkflowDevPage: React.FC = () => {
                       <FileTreePanel files={projectFiles} activeFile={activeFilePath} onSelect={setActiveFilePath} />
                     </div>
                   </div>
-                  {/* Monaco */}
                   <div className="flex-1 flex flex-col min-w-0">
                     <div className="flex-1">
-                      <Editor height="100%" language={getLanguage(activeFilePath)}
-                        value={activeFile?.content || ''} onChange={handleEditorChange}
-                        theme="vs-dark"
-                        options={{ fontSize: 13, minimap: { enabled: false }, padding: { top: 12 }, lineNumbers: 'on', wordWrap: 'on', scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2 }}
-                      />
+                      <Editor height="100%" language={getLanguage(activeFilePath)} value={activeFile?.content || ''} onChange={handleEditorChange} theme="vs-dark"
+                        options={{ fontSize: 13, minimap: { enabled: false }, padding: { top: 12 }, lineNumbers: 'on', wordWrap: 'on', scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2 }} />
                     </div>
                   </div>
                 </>
               )}
 
+              {/* Test tab */}
               {rightTab === 'test' && (
                 <div className="flex-1 overflow-hidden">
                   <TestWorkflowPanel apiKey={creds.anthropicKey} projectFiles={projectFiles} />
                 </div>
               )}
 
-              {/* Agent preview tab */}
-              {rightTab === 'agent' && (
+              {/* GitHub tab */}
+              {rightTab === 'github' && (
                 <div className="flex-1 overflow-hidden">
-                  <AgentPreviewPanel projectFiles={projectFiles} />
+                  <GitHubPanel projectFiles={projectFiles} sessionName={sessionName} />
                 </div>
               )}
             </div>
           </div>
         </div>
+      </main>
+    </div>
+
+        {/* Teaching Popup */}
+        {showTeachingPopup && taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+            <div className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col rounded-2xl shadow-2xl border" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
+              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#f0e8d8' }}>
+                <div className="flex items-center gap-2">
+                  <Lightbulb size={16} style={{ color: '#3a7a3a' }} />
+                  <p className="text-sm font-bold" style={{ color: '#2a1800' }}>Why This Step Matters</p>
+                </div>
+                <button onClick={() => setShowTeachingPopup(false)} className="p-1.5 rounded-lg hover:bg-black/10"><X size={16} style={{ color: '#5a4a30' }} /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
+                <div className="rounded-xl p-4 border" style={{ background: '#f0f8f0', borderColor: '#7ab87a' }}>
+                  <p className="text-sm leading-relaxed italic" style={{ color: '#1a3a1a', lineHeight: '1.75' }}>{taskInstruction.subTaskTeaching[subTaskIndex]}</p>
+                </div>
+                <div className="rounded-xl p-4 border" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: '#6040a0' }}>Your question for this step</p>
+                  <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>{taskInstruction.subTasks[subTaskIndex]}</p>
+                </div>
+              </div>
+              <div className="px-5 py-4 border-t flex-shrink-0" style={{ borderColor: '#e0d4b8' }}>
+                <button onClick={() => setShowTeachingPopup(false)} className="w-full py-2.5 rounded-xl text-sm font-bold hover:opacity-90" style={{ background: '#3a7a3a', color: 'white' }}>
+                  Got it — back to building
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* What Was Built Popup */}
+        {showBuiltPopup && aiExplanation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+            <div className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col rounded-2xl shadow-2xl border" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
+              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#fff8ed' }}>
+                <div className="flex items-center gap-2">
+                  <SparklesIcon size={16} style={{ color: '#c07020' }} />
+                  <p className="text-sm font-bold" style={{ color: '#2a1800' }}>What Was Built</p>
+                </div>
+                <button onClick={() => setShowBuiltPopup(false)} className="p-1.5 rounded-lg hover:bg-black/10"><X size={16} style={{ color: '#5a4a30' }} /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-5">
+                <div className="rounded-xl p-4 border" style={{ background: '#fff8ed', borderColor: '#f0c060' }}>
+                  <p className="text-sm leading-relaxed" style={{ color: '#3d2b00', lineHeight: '1.75' }}>{aiExplanation}</p>
+                </div>
+              </div>
+              <div className="px-5 py-4 border-t flex-shrink-0 flex gap-2" style={{ borderColor: '#e0d4b8' }}>
+                <button onClick={() => { setRightTab('code'); setShowBuiltPopup(false); }} className="flex-1 py-2.5 rounded-xl text-sm font-bold hover:opacity-90 flex items-center justify-center gap-2" style={{ background: '#5030a0', color: 'white' }}>
+                  <FileCode size={13} /> View code
+                </button>
+                <button onClick={() => setShowBuiltPopup(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold border hover:opacity-80" style={{ borderColor: '#c8b890', color: '#5a4a30' }}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Help Popup */}
+        {showHelpPopup && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+            <div className="w-full max-w-md flex flex-col rounded-2xl shadow-2xl border overflow-hidden" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
+              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#f0e8d8' }}>
+                <div className="flex items-center gap-2">
+                  <HelpCircle size={16} style={{ color: '#6040a0' }} />
+                  <p className="text-sm font-bold" style={{ color: '#2a1800' }}>What does this question mean?</p>
+                </div>
+                <button onClick={() => setShowHelpPopup(false)} className="p-1.5 rounded-lg hover:bg-black/10"><X size={16} style={{ color: '#5a4a30' }} /></button>
+              </div>
+              <div className="px-5 pt-4 pb-2">
+                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#8a6d3b' }}>The question</p>
+                <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>{taskInstruction?.subTasks?.[subTaskIndex]}</p>
+              </div>
+              <div className="px-5 pb-5">
+                <div className="rounded-xl p-4 border mt-3" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
+                  {helpLoading ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin" style={{ color: '#6040a0' }} />
+                      <p className="text-sm" style={{ color: '#6040a0' }}>Getting a plain-English explanation...</p>
+                    </div>
+                  ) : (
+                    <p className="text-sm leading-relaxed" style={{ color: '#2a1a4a', lineHeight: '1.75' }}>{helpResponse}</p>
+                  )}
+                </div>
+              </div>
+              <div className="px-5 pb-5 flex gap-2">
+                <button onClick={() => setShowHelpPopup(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold hover:opacity-90" style={{ background: '#6040a0', color: 'white' }}>
+                  Got it — I will give it a try
+                </button>
+                <button onClick={() => { setShowHelpPopup(false); handleSkipSubTask(); }} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold border hover:opacity-80" style={{ borderColor: '#c8b890', color: '#5a4a30' }}>
+                  <SkipForward size={13} /> Skip
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   );
