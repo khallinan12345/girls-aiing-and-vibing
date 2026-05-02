@@ -17,7 +17,6 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Navbar from '../../components/layout/Navbar';
 import { supabase } from '../../lib/supabaseClient';
 import Editor from '@monaco-editor/react';
-import GitHubPanel from '../../components/GitHubPanel';
 import { useVoice } from '../../hooks/useVoice';
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
@@ -27,7 +26,7 @@ import {
   Volume2, VolumeX, AlertCircle, Star, ChevronDown, ChevronUp,
   Trash2, Plus, FileCode, Package, Play, Key, ExternalLink,
   Zap, GitBranch, RefreshCw, Eye, Terminal, Wand2,
-  HelpCircle, FileText, ChevronRight, Github,
+  Bot, Send, User as UserIcon, MessageCircle,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -60,7 +59,7 @@ interface SessionRecord {
 
 interface ApiCredentials { anthropicKey: string; useProxy: boolean; }
 
-type RightTab = 'teaching' | 'code' | 'test' | 'github';
+type RightTab = 'code' | 'test' | 'agent';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -78,6 +77,7 @@ const TASKS: TaskDef[] = [
   { id: 'display_response',  label: 'Display the AI Response',    phase: 2, icon: '📺' },
   { id: 'chain_calls',       label: 'Chain Multiple AI Calls',    phase: 2, icon: '🔗' },
   { id: 'build_ui',          label: 'Build the User Interface',   phase: 2, icon: '🖼️' },
+  { id: 'build_agent',       label: 'Build an AI Agent',          phase: 2, icon: '🤖' },
   { id: 'prompts_polish',    label: 'Polish Your Prompts',        phase: 3, icon: '✨' },
   { id: 'error_handling',    label: 'Error Handling & Loading',   phase: 3, icon: '🛡️' },
   { id: 'deploy_prep',       label: 'Deploy & Share',             phase: 3, icon: '🚀' },
@@ -539,7 +539,7 @@ const TestWorkflowPanel: React.FC<{ apiKey: string; projectFiles: ProjectFile[] 
     if (!apiKey) { setError('Enter your Anthropic API key in the Credentials panel first'); return; }
     setLoading(true); setError(''); setResponse('');
     try {
-      const res = await fetch('/api/ai-proxy', {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -654,6 +654,232 @@ const TestWorkflowPanel: React.FC<{ apiKey: string; projectFiles: ProjectFile[] 
 
 // ─── Voice helper ─────────────────────────────────────────────────────────────
 
+// ─── Agent Preview Panel ─────────────────────────────────────────────────────
+// Shows a live running version of the AI agent the learner is building.
+// The system prompt comes from their project files if they have written one,
+// otherwise it uses a sensible default so learners see the agent working
+// from the very first sub-task.
+// Uses /api/ai-proxy so learners do not need their own API key.
+
+interface AgentMsg { role: 'agent' | 'user'; text: string; }
+type AgentPhase = 'eliciting' | 'reviewing' | 'submitted';
+
+const DEFAULT_AGENT_SYSTEM = `You are a warm, encouraging community storytelling guide named Amara.
+Your job is to help community members share their stories conversationally.
+
+Rules:
+- Ask ONE question at a time. Never ask two questions in one message.
+- Listen carefully and reflect what you hear before moving on.
+- After 3-4 exchanges you have enough — tell the visitor you will draft their story.
+- Write the draft in this exact format (no other text after DRAFT_END):
+
+DRAFT_START
+[Title of the story on this line]
+[Body of the story — 150 to 250 words, written in first person in the visitor's voice]
+DRAFT_END
+
+Opening questions to choose from:
+- What is something that has changed in your community recently that matters to you?
+- Can you tell me about a person in your community who inspires you?
+- What challenge has your community faced, and how did people respond?
+- What do you want the world to know about where you live?`;
+
+const AgentPreviewPanel: React.FC<{ projectFiles: ProjectFile[] }> = ({ projectFiles }) => {
+  const [messages, setMessages]     = useState<AgentMsg[]>([
+    { role: 'agent', text: "Hello! I'm Amara. I'm here to help you share your community's story. What would you like to tell me about today?" }
+  ]);
+  const [input, setInput]           = useState('');
+  const [loading, setLoading]       = useState(false);
+  const [phase, setPhase]           = useState<AgentPhase>('eliciting');
+  const [draftTitle, setDraftTitle] = useState('');
+  const [draftBody, setDraftBody]   = useState('');
+  const [submitted, setSubmitted]   = useState(false);
+  const [error, setError]           = useState('');
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Pull system prompt from learner's files if they have written one
+  const systemPrompt = (() => {
+    const candidates = projectFiles.filter(f =>
+      f.path.toLowerCase().includes('agent') || f.path.toLowerCase().includes('prompt')
+    );
+    for (const f of candidates) {
+      const m = f.content.match(/systemPrompt\s*=\s*[`'"]([\s\S]{80,}?)[`'"]/);
+      if (m) return m[1];
+    }
+    return DEFAULT_AGENT_SYSTEM;
+  })();
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+
+  const send = async () => {
+    if (!input.trim() || loading) return;
+    const userText = input.trim();
+    setInput('');
+    setMessages(p => [...p, { role: 'user', text: userText }]);
+    setLoading(true); setError('');
+    try {
+      const history = [...messages, { role: 'user', text: userText }];
+      const res = await fetch('/api/ai-proxy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6', max_tokens: 700,
+          system: systemPrompt,
+          messages: history.map(m => ({ role: m.role === 'agent' ? 'assistant' : 'user', content: m.text })),
+        }),
+      });
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const data = await res.json();
+      const text: string = data.content?.[0]?.text ?? '';
+
+      if (text.includes('DRAFT_START')) {
+        const match = text.match(/DRAFT_START\n([^\n]+)\n([\s\S]+?)\nDRAFT_END/);
+        if (match) {
+          setDraftTitle(match[1].trim());
+          setDraftBody(match[2].trim());
+          setPhase('reviewing');
+          setMessages(p => [...p, { role: 'agent', text: "I've written a draft of your story. Please review it below — edit anything you like before submitting." }]);
+        } else {
+          setMessages(p => [...p, { role: 'agent', text: text.replace(/DRAFT_START[\s\S]*DRAFT_END/g, '').trim() }]);
+        }
+      } else {
+        setMessages(p => [...p, { role: 'agent', text: text }]);
+      }
+    } catch { setError('Could not reach the AI. Please try again.'); }
+    finally { setLoading(false); }
+  };
+
+  const reset = () => {
+    setMessages([{ role: 'agent', text: "Hello! I'm Amara. I'm here to help you share your community's story. What would you like to tell me about today?" }]);
+    setInput(''); setLoading(false); setPhase('eliciting');
+    setDraftTitle(''); setDraftBody(''); setSubmitted(false); setError('');
+  };
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: '#0d1117' }}>
+
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 flex-shrink-0" style={{ background: '#161b22' }}>
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center flex-shrink-0">
+            <Bot size={15} className="text-white" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-white">Amara — Story Agent</p>
+            <p className="text-[10px] text-gray-500">
+              {phase === 'eliciting'  && 'Listening...'}
+              {phase === 'reviewing'  && 'Draft ready — review below'}
+              {phase === 'submitted'  && 'Story submitted ✓'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className={`w-2 h-2 rounded-full ${phase === 'submitted' ? 'bg-emerald-400' : 'bg-violet-400 animate-pulse'}`} />
+          <button onClick={reset} className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors px-2 py-1 rounded border border-gray-700 hover:border-gray-600">
+            Reset
+          </button>
+        </div>
+      </div>
+
+      {/* Info strip */}
+      <div className="flex-shrink-0 px-4 py-1.5 border-b border-gray-800 text-[10px] text-violet-400" style={{ background: '#1c2128' }}>
+        Live agent preview — visitors to your app see this. Edit the system prompt in Code tab to change Amara's behaviour.
+      </div>
+
+      {/* Submitted */}
+      {phase === 'submitted' ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
+          <div className="w-14 h-14 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">
+            <CheckCircle size={28} className="text-emerald-400" />
+          </div>
+          <div>
+            <p className="text-white font-bold mb-1">Story submitted!</p>
+            <p className="text-gray-400 text-sm italic">"{draftTitle}"</p>
+            <p className="text-gray-600 text-xs mt-2">In your app this calls supabase.from('stories').insert()</p>
+          </div>
+          <button onClick={reset} className="px-5 py-2 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-700 text-white transition-colors">
+            Try again
+          </button>
+        </div>
+
+      /* Draft review */
+      ) : phase === 'reviewing' ? (
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+          <div className="rounded-xl border border-violet-500/30 overflow-hidden" style={{ background: '#1c2128' }}>
+            <div className="px-4 py-2.5 border-b border-gray-700/60 flex items-center gap-2">
+              <Sparkles size={12} className="text-violet-400" />
+              <p className="text-[10px] font-bold text-violet-400 uppercase tracking-wide">Your story draft — edit freely</p>
+            </div>
+            <div className="px-4 py-3 space-y-2">
+              <input value={draftTitle} onChange={e => setDraftTitle(e.target.value)}
+                className="w-full bg-transparent text-white font-bold text-sm border-b border-gray-700 pb-2 mb-1 outline-none focus:border-violet-500 transition-colors"
+                placeholder="Story title..." />
+              <textarea value={draftBody} onChange={e => setDraftBody(e.target.value)}
+                rows={9} className="w-full bg-transparent text-gray-300 text-xs leading-relaxed resize-none outline-none"
+                placeholder="Story content..." />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => { setPhase('submitted'); setSubmitted(true); }}
+              disabled={!draftTitle.trim() || !draftBody.trim()}
+              className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-1.5">
+              <CheckCircle size={13} /> Submit Story
+            </button>
+            <button onClick={() => setPhase('eliciting')}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors">
+              Keep talking
+            </button>
+          </div>
+        </div>
+
+      /* Conversation */
+      ) : (
+        <>
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+            {messages.map((m, i) => (
+              <div key={i} className={`flex gap-2.5 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  m.role === 'agent' ? 'bg-gradient-to-br from-violet-500 to-purple-700' : 'bg-gray-700'}`}>
+                  {m.role === 'agent' ? <Bot size={13} className="text-white" /> : <UserIcon size={13} className="text-gray-300" />}
+                </div>
+                <div className={`max-w-[78%] px-3.5 py-2.5 text-sm leading-relaxed rounded-2xl ${
+                  m.role === 'agent' ? 'bg-gray-800 text-gray-200 rounded-tl-sm' : 'bg-violet-600 text-white rounded-tr-sm'}`}>
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div className="flex gap-2.5">
+                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center">
+                  <Bot size={13} className="text-white" />
+                </div>
+                <div className="bg-gray-800 rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1 items-center">
+                  {[0,1,2].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />)}
+                </div>
+              </div>
+            )}
+            {error && <p className="text-xs text-red-400 text-center">{error}</p>}
+            <div ref={bottomRef} />
+          </div>
+          <div className="flex-shrink-0 px-4 pb-4">
+            <div className="flex gap-2 items-end bg-gray-800 rounded-2xl border border-gray-700 focus-within:border-violet-500 transition-colors px-3 py-2">
+              <textarea value={input} onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }}}
+                placeholder="Type your message... (Enter to send)"
+                rows={2}
+                className="flex-1 bg-transparent text-sm text-white placeholder-gray-600 resize-none outline-none leading-relaxed" />
+              <button onClick={send} disabled={loading || !input.trim()}
+                className="flex-shrink-0 w-8 h-8 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-40 flex items-center justify-center transition-colors">
+                <Send size={13} className="text-white" />
+              </button>
+            </div>
+            <p className="text-[9px] text-gray-700 mt-1 text-center">Shift+Enter for new line</p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Main Component
 // ═══════════════════════════════════════════════════════════════════════════
@@ -722,7 +948,7 @@ const AIWorkflowDevPage: React.FC = () => {
     if (!creds.anthropicKey) return;
     setCredTestStatus('testing');
     try {
-      const res = await fetch('/api/ai-proxy', {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -752,7 +978,7 @@ const AIWorkflowDevPage: React.FC = () => {
   const activeFile = projectFiles.find(f => f.path === activeFilePath) ?? projectFiles[0];
 
   // ── Right panel ──────────────────────────────────────────────────────
-  const [rightTab, setRightTab] = useState<RightTab>('teaching');
+  const [rightTab, setRightTab] = useState<RightTab>('code');
 
   // ── Task ─────────────────────────────────────────────────────────────
   const [taskIndex, setTaskIndex]               = useState(0);
@@ -784,12 +1010,6 @@ const AIWorkflowDevPage: React.FC = () => {
   const [evalError, setEvalError]           = useState<string | null>(null);
   const [downloading, setDownloading]       = useState(false);
   const [copied, setCopied]                 = useState(false);
-  const [stepperOpen, setStepperOpen]       = useState(false);
-  const [showTeachingPopup, setShowTeachingPopup] = useState(false);
-  const [showBuiltPopup, setShowBuiltPopup] = useState(false);
-  const [showHelpPopup, setShowHelpPopup]   = useState(false);
-  const [helpLoading, setHelpLoading]       = useState(false);
-  const [helpResponse, setHelpResponse]     = useState<string | null>(null);
   const [showStackBlitzModal, setShowStackBlitzModal] = useState(false);
 
   const currentTask  = TASKS[taskIndex];
@@ -875,105 +1095,10 @@ const AIWorkflowDevPage: React.FC = () => {
     } finally { setDeletingSessionId(null); }
   }, [userId]);
 
-  // ── SCRIPT_SEEDS — canonical questions ──────────────────────────────────────
-  const SCRIPT_SEEDS: Record<string, { teaching: string; question: string }[]> = {
-    choose_idea: [
-      { teaching: "The best AI workflows solve a real problem that someone actually has. The most successful ones save time on a boring, repetitive task — or do something a person cannot do at all without AI.",
-        question: "What problem would you like your AI workflow to solve? Describe who has this problem, what they currently do without AI, and how AI could help." },
-      { teaching: "A workflow idea should be specific enough that you can describe the exact input and output. 'AI helps with writing' is too vague. 'User pastes a job description, AI writes a cover letter' is a workflow.",
-        question: "Describe your workflow input and output. Fill in: 'A user gives the AI ___ and gets back ___.' Be as specific as you can." },
-      { teaching: "The best workflow ideas for beginners have one clear AI call with a defined input and a useful output. Complexity comes later. Start with one thing that works perfectly.",
-        question: "Can you reduce your idea to a single AI call? What is the one most valuable thing the AI does in your workflow?" },
-    ],
-    map_steps: [
-      { teaching: "Every AI workflow is a sequence of steps. Before writing any code, mapping the steps in plain English prevents confusion later and helps you spot problems early — including steps that do not need AI at all.",
-        question: "List every step in your workflow in order. Start with 'User types/uploads/selects...' and end with 'App shows/saves/sends...'. Number each step." },
-      { teaching: "Some steps in your workflow do not need AI — they are just JavaScript or React state management. Identifying which steps need AI and which do not helps you build faster and keeps the AI cost low.",
-        question: "Go through your steps. Mark each one AI or NO-AI. For each AI step, write the exact job the AI is doing in one sentence." },
-      { teaching: "A good workflow handles the case where the AI response is wrong, slow, or empty. Planning error paths before building means you will not be surprised by them later.",
-        question: "What could go wrong in your workflow? For each AI step, describe what the app should show the user if the AI call fails or returns an unexpected response." },
-    ],
-    plan_io: [
-      { teaching: "The system prompt is the most important part of an AI workflow. It tells the AI who it is, what its job is, and how to format its response. A precise system prompt produces a consistent, usable output every time.",
-        question: "Write the system prompt for your main AI step. Start with 'You are...' and describe exactly what the AI should do and what format it should return." },
-      { teaching: "The user message is the input that changes with every workflow run. It should contain exactly the information the AI needs — no more, no less. Think of it as filling a template.",
-        question: "What does the user message look like for your main AI step? Write a realistic example of the exact text that will be sent to the AI." },
-      { teaching: "The output of an AI step is either shown directly to the user or passed into the next step. Defining the expected output format now — plain text, JSON, a list, a score — prevents parsing problems later.",
-        question: "What format should the AI return? Plain text, a numbered list, JSON, a score out of 10? Write a realistic example of what a good AI response looks like for your workflow." },
-    ],
-    setup_ai_client: [
-      { teaching: "The AI client is the bridge between your React app and the Claude API. It lives in one file — src/lib/aiClient.js — and every component that needs AI imports from there. This keeps your API key in one place and makes switching models easy.",
-        question: "Look at src/lib/aiClient.js in your file tree. Describe what the callAI function does and what parameters it accepts." },
-      { teaching: "API keys must never appear in your component code or be pushed to GitHub. The .env file keeps the key out of source code. The aiClient.js reads it at runtime. This is the pattern used by every production application.",
-        question: "Where does your Anthropic API key live in this project? How does aiClient.js access it without exposing it in your components?" },
-      { teaching: "A test call verifies the API connection before building the full workflow. It should be the simplest possible call — one message, one response — so you know the plumbing works before adding complexity.",
-        question: "Describe the simplest possible test call you could make to verify your API key is working. What system prompt and user message would you send?" },
-    ],
-    first_ai_call: [
-      { teaching: "The first AI call is the most important moment in building a workflow. Everything before this was planning. This is where the AI actually does something. The callAI function handles the HTTP request — you just provide the system prompt, user message, and model.",
-        question: "Build your first working AI call using callAI(). What system prompt and user message are you sending? What do you expect the response to contain?" },
-      { teaching: "Async/await is the pattern for handling AI calls in JavaScript. The call takes time — maybe one or two seconds. During that time, the UI should show a loading state so the user knows something is happening.",
-        question: "How does your component handle the time between sending the AI call and receiving the response? Describe the loading state and what the user sees while waiting." },
-      { teaching: "The AI response arrives as a string inside data.content[0].text. Before displaying it, you should check that the response is not empty and does not contain an error. Never assume the response is always well-formed.",
-        question: "How does your component store and display the AI response? Where in state does it live and how do you handle an empty or malformed response?" },
-    ],
-    display_response: [
-      { teaching: "How you display an AI response shapes whether users trust it. A wall of unformatted text is hard to read. Breaking it into sections, using bold for key points, or rendering it as a list makes the output feel designed — not dumped.",
-        question: "How should the AI response be visually displayed to the user? Describe the layout — headings, sections, colors, cards — and explain why that format matches the content." },
-      { teaching: "Markdown rendering converts AI-generated markdown — asterisks for bold, hyphens for lists, # for headings — into formatted HTML. If your AI returns markdown, you need a renderer. If it returns plain text, you can display it directly.",
-        question: "Does your AI return markdown or plain text? If markdown, describe how you will render it. If plain text, describe how you will style and structure it." },
-      { teaching: "A copy button on AI output is one of the highest-value UI additions you can make. Users who can copy the output in one click are far more likely to use the workflow in real situations.",
-        question: "What actions should users be able to take on the AI response — copy it, save it, share it, refine it? Add at least one action button to your response display." },
-    ],
-    chain_calls: [
-      { teaching: "Chaining AI calls means the output of one call becomes the input of the next. This is what separates a single AI call from a real workflow. Each step refines, transforms, or builds on the previous result.",
-        question: "Describe your chain of AI calls in order. For each step, write: input comes from ___, system prompt is ___, output goes to ___." },
-      { teaching: "State management for chained calls requires tracking the result of each step separately. Using an array of results — results[0], results[1] — is cleaner than separate variables and makes it easy to display progress through the chain.",
-        question: "How does your app store the intermediate results from each step in the chain? Show the state structure and how each step updates it." },
-      { teaching: "Running AI calls sequentially — waiting for each one to finish before starting the next — is the simplest pattern but the slowest. Running independent calls in parallel with Promise.all() is faster but requires careful error handling.",
-        question: "Do your AI calls run sequentially or in parallel? If sequential, is there a reason each step must wait for the previous one? If parallel, what makes them independent?" },
-    ],
-    build_ui: [
-      { teaching: "The UI of a workflow app has three zones: the input zone where the user provides data, the action zone where they trigger the workflow, and the output zone where results appear. Keeping these three zones visually distinct makes the workflow easy to understand at a glance.",
-        question: "Describe your three UI zones — input, action, and output. What does each zone contain and how are they visually separated?" },
-      { teaching: "Forms in React use controlled inputs — the value is stored in state and updated on every keystroke. This gives you full control over validation, formatting, and submission. Uncontrolled inputs cause bugs in AI workflow apps because the AI response needs to update the displayed value.",
-        question: "How do your input fields work? Are they controlled (value from state) or uncontrolled? If the AI pre-fills a field, how does the state update?" },
-      { teaching: "Progress indicators — step numbers, progress bars, status messages — tell users where they are in a multi-step workflow. Without them, users do not know if the app is working, finished, or broken.",
-        question: "How does the user know where they are in the workflow at any point? Describe the progress or status indicators you are using." },
-    ],
-    prompts_polish: [
-      { teaching: "Prompt engineering is the skill of writing system prompts that produce consistent, high-quality AI responses. The most important variables are specificity (tell the AI exactly what you want), format (specify the output structure), and constraints (tell the AI what NOT to do).",
-        question: "Rewrite your main system prompt to be more specific. Add a format instruction and at least one constraint. Compare the AI output before and after — what changed?" },
-      { teaching: "Few-shot prompting means including one or two examples of good input/output pairs in the system prompt. It is the single most effective technique for improving AI output quality for structured tasks.",
-        question: "Add a few-shot example to your system prompt — one example of a user message and the ideal AI response for your workflow. How does the output quality change?" },
-      { teaching: "Temperature controls how creative or deterministic the AI response is. For workflows that need consistent, structured output — extraction, classification, scoring — lower temperature (0.1–0.3) is better. For creative tasks — writing, brainstorming — higher temperature (0.7–1.0) is better.",
-        question: "What temperature setting is right for your workflow? Justify your choice. If your AI client does not set temperature, add it now with the right value." },
-    ],
-    error_handling: [
-      { teaching: "Production AI workflows fail in predictable ways: the API key is wrong, the API is slow, the response is empty, or the response is not in the expected format. Building error handling for each of these before deployment prevents a frustrating user experience.",
-        question: "List the four most likely failure modes in your workflow. For each one, describe exactly what the app shows the user — not a console.log, a real UI message." },
-      { teaching: "Loading states are not just spinners — they are a promise to the user that something is happening. The most effective loading states tell the user what is happening, not just that something is. 'Analysing your text...' is better than a generic spinner.",
-        question: "Rewrite your loading states to be specific. Instead of 'Loading...' what does the app say for each step of your workflow?" },
-      { teaching: "Rate limiting and timeout errors are the most common API errors in production. A retry button is the minimum; an automatic retry with exponential backoff is better. At minimum, the user should be able to try again without refreshing the page.",
-        question: "How does your app handle a failed AI call? Add a retry mechanism — either a button or automatic retry. Show the code pattern you are using." },
-    ],
-    deploy_prep: [
-      { teaching: "Before deploying an AI workflow app, you must ensure the API key is not in your source code or git history. It goes in a .env file, in .gitignore, and as an environment variable in your deployment platform. Any key committed to git is compromised.",
-        question: "Walk through your API key security checklist: Is the key in .env only? Is .env in .gitignore? Is there an .env.example with a placeholder? Has the key ever appeared in any committed file?" },
-      { teaching: "Deploying a Vite + React AI workflow app to Vercel takes under five minutes. The API key goes in Vercel's Environment Variables dashboard — not in the code. Push to GitHub first, then import the repo in Vercel.",
-        question: "Walk through the deployment steps. What environment variables does Vercel need and where do you set them? What does the final deployed URL look like?" },
-      { teaching: "A README file explains your workflow to anyone who opens it — what it does, how to run it, what API key is needed, and what the workflow steps are. On GitHub, the README appears automatically below the code.",
-        question: "Write the opening paragraph of your README — what the workflow does, who it is for, what AI model it uses, and how to run it locally." },
-    ],
-  };
-
   // ── Fetch task instruction ────────────────────────────────────────────
   const fetchTaskInstruction = useCallback(async (idx: number, files: ProjectFile[], ctx: Record<string, any>) => {
     const task = TASKS[idx]; if (!task || task.isOnboarding) return;
     setLoadingInstruction(true); setTaskInstruction(null);
-    const canonicalSeeds = SCRIPT_SEEDS[task.id] ?? [
-      { teaching: `This task builds a core AI workflow skill: ${task.label}.`, question: `Describe what you want to achieve in this step: ${task.label}` },
-    ];
     try {
       const fileSummary = files.filter(f => f.content.length > 10).map(f => ({ path: f.path, preview: f.content.substring(0, 400) }));
       const result = await callInstructionAPI({
@@ -982,19 +1107,13 @@ const AIWorkflowDevPage: React.FC = () => {
         completedTasks: TASKS.slice(0, idx).map(t => t.id),
         communicationStrategy, learningStrategy,
         hasApiKey: !!creds.anthropicKey,
-        scriptSubTasks: canonicalSeeds.map((s: any) => s.question),
-        scriptTeaching: canonicalSeeds.map((s: any) => s.teaching),
       });
-      setTaskInstruction({
-        headline: result.headline || task.label,
-        context: result.context || `Working on: ${task.label}`,
-        subTasks: canonicalSeeds.map((s: any) => s.question),
-        subTaskTeaching: canonicalSeeds.map((s: any) => s.teaching),
-        examplePrompt: canonicalSeeds[0].question,
-      });
-      speakTextRef.current(canonicalSeeds[0].teaching + ' ' + canonicalSeeds[0].question);
-      setRightTab('teaching');
-      if (task.id === 'deploy_prep') setRightTab('github');
+      setTaskInstruction(result as TaskInstruction);
+      if (result?.subTaskTeaching?.[0] && result?.subTasks?.[0]) {
+        speakTextRef.current(result.subTaskTeaching[0] + ' ' + result.subTasks[0]);
+      } else if (result?.subTasks?.[0]) {
+        speakTextRef.current(result.subTasks[0]);
+      }
     } catch {
       const fallbacks: Record<string, { teaching: string; question: string }[]> = {
         choose_idea: [
@@ -1057,6 +1176,14 @@ const AIWorkflowDevPage: React.FC = () => {
           { teaching: 'Loading states should disable inputs while the AI is working. Otherwise users type more text, click the button again, and create confusing parallel requests.',
             question: 'Is your submit button disabled while the AI is running? Is the input field disabled or locked? Describe the current behaviour and how you want it to work.' },
         ],
+        build_agent: [
+          { teaching: "An AI agent is different from a single AI call. A call takes one input and returns one output. An agent maintains a conversation, remembers what was said, and changes its behaviour based on the exchange. The system prompt is the agent's brain — it defines its persona, its goals, and the rules for how it behaves in every situation.",
+            question: "Design your agent. What is its name and persona? What is its single job? Write the opening system prompt — start with 'You are...' and describe what the agent does, what it asks, and how it behaves." },
+          { teaching: "A conversational agent needs a state machine — a way to track where it is in the conversation. Three phases work well: eliciting (gathering information through questions), drafting (producing output from the conversation), and reviewing (letting the user confirm before saving). Each phase changes what the UI shows and what the agent is allowed to do.",
+            question: "Build the conversation UI. Show chat bubbles for agent and user messages, a typing indicator while the AI responds, and a state machine that moves through eliciting, drafting, reviewing, and submitted. Describe what each phase looks like on screen." },
+          { teaching: "The agent's output needs to go somewhere permanent. After the visitor reviews and confirms the draft, the app inserts it into Supabase. The author_id comes from the authenticated session. The entire conversation — the elicitation, the draft, the review — leads to this single database insert. The agent is the front door. The database is the permanent home.",
+            question: "Connect the agent output to your database. When the visitor confirms their draft, insert it with the correct author_id from the authenticated user. Show a confirmation and clear the conversation. What does the success state look like?" },
+        ],
         deploy_prep: [
           { teaching: 'Deploying to Vercel is the same process as any React/Vite app — but workflow apps have one extra step: adding your API key as an environment variable in the Vercel dashboard, not in your code.',
             question: 'Is your project in a GitHub repository? If yes, paste the URL. If not, describe the steps you have taken to get ready to deploy.' },
@@ -1085,6 +1212,10 @@ const AIWorkflowDevPage: React.FC = () => {
   useEffect(() => {
     if (['first_ai_call', 'chain_calls', 'prompts_polish'].includes(currentTask?.id ?? '')) {
       setRightTab('test');
+    } else if (currentTask?.id === 'build_agent') {
+      setRightTab('agent');
+    } else if (currentTask?.id === 'deploy_prep') {
+      setRightTab('github');
     } else {
       setRightTab('code');
     }
@@ -1174,42 +1305,6 @@ const AIWorkflowDevPage: React.FC = () => {
     setSubTaskIndex(0); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); setErrorMsg(null);
     await persistSession(projectFiles, promptHistory, nextIdx, sessionContext);
   }, [taskIndex, projectFiles, promptHistory, sessionContext, persistSession]);
-
-
-  const handleJumpToTask = useCallback(async (idx: number) => {
-    if (idx === taskIndex || idx >= taskIndex) return;
-    setTaskIndex(idx); setSubTaskIndex(0); setSubTaskCritique(null);
-    setPrompt(''); setAiExplanation(null); setErrorMsg(null);
-    setRightTab('teaching'); setStepperOpen(false);
-    const lastEntry = [...promptHistory].reverse().find((e: any) => e.taskId === TASKS[idx]?.id);
-    if (lastEntry?.aiExplanation) setAiExplanation(lastEntry.aiExplanation);
-    await fetchTaskInstruction(idx, projectFiles, sessionContext);
-  }, [taskIndex, projectFiles, promptHistory, sessionContext, fetchTaskInstruction]);
-
-  const handleHelpRequest = useCallback(async () => {
-    if (!taskInstruction?.subTasks?.[subTaskIndex]) return;
-    setShowHelpPopup(true); setHelpLoading(true); setHelpResponse(null);
-    try {
-      const res = await fetch('/api/ai-proxy', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6', max_tokens: 600,
-          system: 'You are a friendly AI workflow development coach. Explain what the question is asking in simple terms. Give a short concrete example of a good answer. Under 150 words. No jargon.',
-          messages: [{ role: 'user', content: 'Task: "' + currentTask?.label + '". Question: "' + taskInstruction.subTasks[subTaskIndex] + '". Explain what this is asking and give an example answer.' }],
-        }),
-      });
-      const data = await res.json();
-      setHelpResponse(data.content?.[0]?.text || 'Sorry, could not load help right now.');
-    } catch { setHelpResponse('Sorry, could not load help right now.'); }
-    finally { setHelpLoading(false); }
-  }, [taskInstruction, subTaskIndex, currentTask]);
-
-  const handleSkipSubTask = useCallback(() => {
-    if (!taskInstruction) return;
-    const nextIdx = subTaskIndex + 1;
-    if (nextIdx >= taskInstruction.subTasks.length) { handleCompleteTask(); }
-    else { setSubTaskIndex(nextIdx); setSubTaskCritique(null); setPrompt(''); }
-  }, [subTaskIndex, taskInstruction, handleCompleteTask]);
 
   const handleOnboardingComplete = useCallback(async () => {
     await ensureSession();
@@ -1527,33 +1622,22 @@ const AIWorkflowDevPage: React.FC = () => {
               </div>
             ) : (
               <>
-                {/* Task header — collapsible stepper */}
-                <div className="flex-shrink-0 border-b border-gray-700">
-                  <button onClick={() => setStepperOpen(prev => !prev)}
-                    className={`w-full flex items-center gap-2.5 px-4 py-3 text-left transition-colors ${pm.bg} hover:opacity-90`}>
-                    <span className="text-lg flex-shrink-0">{currentTask?.icon}</span>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-[9px] font-bold uppercase tracking-wider ${pm.color}`}>{pm.label}</p>
-                      <p className="text-sm font-bold text-white truncate">{currentTask?.label}</p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {taskInstruction?.subTasks && taskInstruction.subTasks.length > 1 && (
-                        <div className="flex gap-1">
-                          {taskInstruction.subTasks.map((_, i) => (
-                            <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${i < subTaskIndex ? 'bg-emerald-400' : i === subTaskIndex ? 'bg-violet-400' : 'bg-gray-700'}`} />
-                          ))}
-                        </div>
-                      )}
-                      <ChevronDown size={13} className={`text-gray-500 transition-transform duration-200 ${stepperOpen ? 'rotate-180' : ''}`} />
-                    </div>
-                  </button>
-                  {stepperOpen && (
-                    <div className="border-t border-gray-700/60 bg-gray-900/60">
-                      <TaskStepper tasks={TASKS} taskIndex={taskIndex}
-                        onJump={(idx) => { handleJumpToTask(idx); setStepperOpen(false); }} />
+                <div className={`flex-shrink-0 flex items-center gap-2.5 px-4 py-3 border-b ${pm.border} ${pm.bg}`}>
+                  <span className="text-lg">{currentTask?.icon}</span>
+                  <div className="min-w-0">
+                    <p className={`text-[9px] font-bold uppercase tracking-wider ${pm.color}`}>{pm.label}</p>
+                    <p className="text-sm font-bold text-white truncate">{currentTask?.label}</p>
+                  </div>
+                  {taskInstruction?.subTasks && taskInstruction.subTasks.length > 1 && (
+                    <div className="flex gap-1 ml-auto flex-shrink-0">
+                      {taskInstruction.subTasks.map((_, i) => (
+                        <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${i < subTaskIndex ? 'bg-emerald-400' : i === subTaskIndex ? 'bg-violet-400' : 'bg-gray-700'}`} />
+                      ))}
                     </div>
                   )}
                 </div>
+
+                <TaskStepper tasks={TASKS} taskIndex={taskIndex} onJump={idx => { setTaskIndex(idx); setSubTaskIndex(0); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); setErrorMsg(null); }} />
 
                 <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
 
@@ -1570,70 +1654,35 @@ const AIWorkflowDevPage: React.FC = () => {
                     </div>
                   ) : taskInstruction ? (
                     <div className="rounded-xl border border-gray-700 overflow-hidden">
-                      {/* Teaching button — opens popup */}
                       {taskInstruction.subTaskTeaching?.[subTaskIndex] && (
-                        <button onClick={() => setShowTeachingPopup(true)}
-                          className="w-full flex items-center justify-between px-3 py-2 bg-gray-800/80 border-b border-gray-700 hover:bg-gray-800 transition-colors group">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Lightbulb size={12} className={`flex-shrink-0 ${pm.color}`} />
-                            <p className={`text-[10px] font-bold uppercase tracking-wide ${pm.color}`}>Why this matters</p>
-                          </div>
-                          <ChevronRight size={11} className="text-gray-600 group-hover:text-gray-400 flex-shrink-0" />
-                        </button>
-                      )}
-                      {/* Question with Help/Skip */}
-                      <div className={`px-3 py-3 ${pm.bg}`}>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <p className={`text-[9px] font-bold uppercase tracking-wide ${pm.color}`}>
-                            Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
+                        <div className="px-3 pt-2.5 pb-2 bg-gray-800/80 border-b border-gray-700">
+                          <p className={`text-[9px] font-bold uppercase tracking-wide mb-1 ${pm.color}`}>
+                            Why this matters — Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
                           </p>
-                          <div className="flex items-center gap-1.5">
-                            <button onClick={handleHelpRequest} title="What does this question mean?"
-                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
-                              <HelpCircle size={11} /> Help
-                            </button>
-                            <button onClick={handleSkipSubTask} title="Skip this question"
-                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors">
-                              <SkipForward size={11} /> Skip
-                            </button>
-                          </div>
+                          <p className="text-xs text-gray-300 leading-relaxed italic">{taskInstruction.subTaskTeaching[subTaskIndex]}</p>
                         </div>
+                      )}
+                      <div className={`px-3 py-2.5 ${pm.bg}`}>
+                        {!taskInstruction.subTaskTeaching?.[subTaskIndex] && (
+                          <p className={`text-[9px] font-bold uppercase tracking-wide mb-1 ${pm.color}`}>Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}</p>
+                        )}
                         <p className="text-sm text-white leading-relaxed font-medium">{taskInstruction.subTasks[subTaskIndex]}</p>
                         {subTaskIndex === 0 && taskInstruction.examplePrompt && (
                           <button onClick={() => { setPrompt(taskInstruction!.examplePrompt); promptRef.current?.focus(); }}
                             className={`mt-2 text-[10px] font-bold ${pm.color} hover:opacity-70 transition-opacity`}>
-                            See example
+                            See example →
                           </button>
                         )}
                       </div>
                     </div>
                   ) : null}
 
-                  {/* What was built — popup trigger */}
                   {aiExplanation && (
-                    <button onClick={() => setShowBuiltPopup(true)}
-                      className="w-full flex items-center justify-between p-2.5 bg-violet-500/10 border border-violet-500/25 rounded-lg hover:bg-violet-500/15 transition-colors group text-left">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Sparkles size={12} className="text-violet-400 flex-shrink-0" />
-                        <p className="text-[10px] font-bold text-violet-400 uppercase">What was built</p>
-                      </div>
-                      <ChevronRight size={11} className="text-gray-600 group-hover:text-violet-400 flex-shrink-0" />
-                    </button>
-                  )}
-
-                  {/* Tutorial Script download */}
-                  <a href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/public/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf"
-                    target="_blank" rel="noopener noreferrer"
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition-colors">
-                    <div className="flex items-center gap-2">
-                      <FileText size={13} className="text-amber-400 flex-shrink-0" />
-                      <div>
-                        <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wide">Tutorial Script</p>
-                        <p className="text-[9px] text-amber-300/70">Download PDF guide</p>
-                      </div>
+                    <div className="p-2.5 bg-violet-500/10 border border-violet-500/20 rounded-lg">
+                      <p className="text-[9px] font-bold text-violet-400 uppercase mb-1">What was built</p>
+                      <p className="text-xs text-gray-300 leading-relaxed">{aiExplanation}</p>
                     </div>
-                    <Download size={11} className="text-amber-400 flex-shrink-0" />
-                  </a>
+                  )}
 
                   {isCritiquingResponse && (
                     <div className="flex items-center gap-2 py-1">
@@ -1709,35 +1758,34 @@ const AIWorkflowDevPage: React.FC = () => {
             )}
           </div>
 
-          {/* RIGHT: Teaching / Code / Test / GitHub */}
+          {/* ═══ RIGHT: Code / Test ═══ */}
           <div className="flex-1 flex flex-col overflow-hidden">
 
             {/* Tab bar */}
-            <div className="flex items-center border-b border-gray-700 flex-shrink-0" style={{ background: '#1e2128' }}>
-              <button onClick={() => setRightTab('teaching')}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${rightTab === 'teaching' ? 'border-amber-400 text-amber-300 bg-amber-500/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
-                <Lightbulb size={12} /> Teaching
-              </button>
-              <button onClick={() => setRightTab('code')}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${rightTab === 'code' ? 'border-violet-400 text-violet-300 bg-violet-500/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
-                <FileCode size={12} /> Code
-                {activeFilePath && <span className="ml-1 text-[9px] text-gray-600 font-normal truncate max-w-24">{activeFilePath.split('/').pop()}</span>}
-              </button>
-              <button onClick={() => setRightTab('test')}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${rightTab === 'test' ? 'border-emerald-400 text-emerald-300 bg-emerald-500/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
-                <Play size={12} /> Test
-                {['first_ai_call', 'chain_calls', 'prompts_polish'].includes(currentTask?.id ?? '') && rightTab !== 'test' && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-0.5" />
-                )}
-              </button>
-              <button onClick={() => setRightTab('github')}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${rightTab === 'github' ? 'border-gray-400 text-gray-200 bg-white/5' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
-                <Github size={12} /> GitHub
-              </button>
-              <div className="flex-1" />
+            <div className="flex items-center gap-1 px-3 py-2 bg-gray-800/80 border-b border-gray-700 flex-shrink-0">
+              {[
+                { id: 'code' as RightTab, label: 'Code', icon: <FileCode size={12} /> },
+                { id: 'test' as RightTab, label: 'Test Workflow', icon: <Play size={12} /> },
+                { id: 'agent' as RightTab, label: 'Agent', icon: <Bot size={12} /> },
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setRightTab(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all
+                    ${rightTab === tab.id ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/40'}`}>
+                  {tab.icon} {tab.label}
+                  {tab.id === 'agent' && currentTask?.id === 'build_agent' && rightTab !== 'agent' && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-0.5" />
+                  )}
+                  {tab.id === 'test' && ['first_ai_call', 'chain_calls', 'prompts_polish'].includes(currentTask?.id ?? '') && rightTab !== 'test' && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-0.5" />
+                  )}
+                </button>
+              ))}
+              {/* File info on code tab */}
               {rightTab === 'code' && (
-                <div className="flex items-center gap-2 pr-3">
-                  <span className="text-[10px] text-gray-700">{activeFile?.content.split('\n').length}L</span>
+                <div className="ml-auto flex items-center gap-2">
+                  <FileCode size={12} className="text-violet-400" />
+                  <span className="text-xs text-gray-400 truncate max-w-40">{activeFilePath}</span>
+                  <span className="text-[10px] text-gray-600">{activeFile?.content.split('\n').length}L</span>
                   <button onClick={handleCopy} className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors">
                     {copied ? <Check size={11} /> : <Copy size={11} />}{copied ? 'Copied' : 'Copy'}
                   </button>
@@ -1748,75 +1796,9 @@ const AIWorkflowDevPage: React.FC = () => {
             {/* Tab content */}
             <div className="flex-1 flex overflow-hidden">
 
-              {/* Teaching tab */}
-              {rightTab === 'teaching' && (
-                <div className="flex-1 overflow-y-auto" style={{ background: '#f9f6ef' }}>
-                  <div className="px-6 pt-5 pb-3 border-b" style={{ borderColor: '#e8e0d0' }}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-base">{currentTask?.icon}</span>
-                      <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#8a6d3b' }}>{pm.label} {currentTask?.label}</p>
-                    </div>
-                    <p className="text-xs" style={{ color: '#6b5c45' }}>Step {subTaskIndex + 1} of {taskInstruction?.subTasks?.length ?? 1}</p>
-                  </div>
-                  <div className="px-6 py-5 space-y-5">
-                    {aiExplanation ? (
-                      <div className="rounded-xl p-4 border" style={{ background: '#fff8ed', borderColor: '#f0c060' }}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <Sparkles size={13} style={{ color: '#c07020' }} />
-                          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#c07020' }}>What was built</p>
-                        </div>
-                        <p className="text-sm leading-relaxed" style={{ color: '#3d2b00' }}>{aiExplanation}</p>
-                        <button onClick={() => setShowBuiltPopup(true)} className="mt-3 text-[10px] font-bold hover:opacity-70 transition-opacity" style={{ color: '#c07020' }}>Read full analysis</button>
-                      </div>
-                    ) : (
-                      <div className="rounded-xl p-4 border border-dashed" style={{ borderColor: '#d4c4a0' }}>
-                        <p className="text-xs text-center" style={{ color: '#a08060' }}>Submit your first response -- the AI explanation will appear here.</p>
-                      </div>
-                    )}
-                    {taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
-                      <div className="rounded-xl p-4 border" style={{ background: '#f0f8f0', borderColor: '#7ab87a' }}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <Lightbulb size={13} style={{ color: '#3a7a3a' }} />
-                          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#3a7a3a' }}>Why this step matters</p>
-                        </div>
-                        <p className="text-sm leading-relaxed italic" style={{ color: '#1a3a1a' }}>{taskInstruction.subTaskTeaching[subTaskIndex]}</p>
-                      </div>
-                    )}
-                    {subTaskCritique && (
-                      <div className="rounded-xl p-4 border" style={{ background: subTaskCritique.hasSuggestions ? '#fffbf0' : '#f0fff4', borderColor: subTaskCritique.hasSuggestions ? '#e8c840' : '#68b868' }}>
-                        <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: subTaskCritique.hasSuggestions ? '#9a7800' : '#2d7a2d' }}>
-                          {subTaskCritique.hasSuggestions ? 'Feedback on your response' : 'Step complete'}
-                        </p>
-                        <p className="text-sm leading-relaxed" style={{ color: '#2a2a1a' }}>{subTaskCritique.feedback}</p>
-                      </div>
-                    )}
-                    {isCritiquingResponse && (
-                      <div className="flex items-center gap-2 py-1">
-                        <Loader2 size={12} className="animate-spin" style={{ color: '#8a6d3b' }} />
-                        <span className="text-xs" style={{ color: '#8a6d3b' }}>Reviewing your response...</span>
-                      </div>
-                    )}
-                    {taskInstruction?.subTasks?.[subTaskIndex] && (
-                      <div className="rounded-xl p-4 border" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
-                        <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: '#6040a0' }}>Your current question</p>
-                        <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>{taskInstruction.subTasks[subTaskIndex]}</p>
-                      </div>
-                    )}
-                    <div className="flex gap-2">
-                      <button onClick={() => setRightTab('code')} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-bold transition-colors hover:opacity-80" style={{ borderColor: '#b0a0d0', color: '#5030a0', background: '#ede8f8' }}>
-                        <FileCode size={12} /> View code
-                      </button>
-                      <button onClick={() => setRightTab('test')} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-bold transition-colors hover:opacity-80" style={{ borderColor: '#b0c8b0', color: '#3a6a3a', background: '#e8f4e8' }}>
-                        <Play size={12} /> Test workflow
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Code tab */}
               {rightTab === 'code' && (
                 <>
+                  {/* File tree */}
                   <div className="w-44 flex-shrink-0 border-r border-gray-700 flex flex-col" style={{ background: '#161820' }}>
                     <div className="px-3 pt-2 pb-1 flex-shrink-0">
                       <p className="text-[9px] font-bold text-gray-700 uppercase tracking-wide">Files</p>
@@ -1825,134 +1807,34 @@ const AIWorkflowDevPage: React.FC = () => {
                       <FileTreePanel files={projectFiles} activeFile={activeFilePath} onSelect={setActiveFilePath} />
                     </div>
                   </div>
+                  {/* Monaco */}
                   <div className="flex-1 flex flex-col min-w-0">
                     <div className="flex-1">
-                      <Editor height="100%" language={getLanguage(activeFilePath)} value={activeFile?.content || ''} onChange={handleEditorChange} theme="vs-dark"
-                        options={{ fontSize: 13, minimap: { enabled: false }, padding: { top: 12 }, lineNumbers: 'on', wordWrap: 'on', scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2 }} />
+                      <Editor height="100%" language={getLanguage(activeFilePath)}
+                        value={activeFile?.content || ''} onChange={handleEditorChange}
+                        theme="vs-dark"
+                        options={{ fontSize: 13, minimap: { enabled: false }, padding: { top: 12 }, lineNumbers: 'on', wordWrap: 'on', scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2 }}
+                      />
                     </div>
                   </div>
                 </>
               )}
 
-              {/* Test tab */}
               {rightTab === 'test' && (
                 <div className="flex-1 overflow-hidden">
                   <TestWorkflowPanel apiKey={creds.anthropicKey} projectFiles={projectFiles} />
                 </div>
               )}
 
-              {/* GitHub tab */}
-              {rightTab === 'github' && (
+              {/* Agent preview tab */}
+              {rightTab === 'agent' && (
                 <div className="flex-1 overflow-hidden">
-                  <GitHubPanel projectFiles={projectFiles} sessionName={sessionName} />
+                  <AgentPreviewPanel projectFiles={projectFiles} />
                 </div>
               )}
             </div>
           </div>
         </div>
-
-        {/* Teaching Popup */}
-        {showTeachingPopup && taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
-            <div className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col rounded-2xl shadow-2xl border" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
-              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#f0e8d8' }}>
-                <div className="flex items-center gap-2">
-                  <Lightbulb size={16} style={{ color: '#3a7a3a' }} />
-                  <p className="text-sm font-bold" style={{ color: '#2a1800' }}>Why This Step Matters</p>
-                </div>
-                <button onClick={() => setShowTeachingPopup(false)} className="p-1.5 rounded-lg hover:bg-black/10">
-                  <X size={16} style={{ color: '#5a4a30' }} />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
-                <div className="rounded-xl p-4 border" style={{ background: '#f0f8f0', borderColor: '#7ab87a' }}>
-                  <p className="text-sm leading-relaxed italic" style={{ color: '#1a3a1a', lineHeight: '1.75' }}>{taskInstruction.subTaskTeaching[subTaskIndex]}</p>
-                </div>
-                <div className="rounded-xl p-4 border" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
-                  <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: '#6040a0' }}>Your question for this step</p>
-                  <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>{taskInstruction.subTasks[subTaskIndex]}</p>
-                </div>
-              </div>
-              <div className="px-5 py-4 border-t flex-shrink-0" style={{ borderColor: '#e0d4b8' }}>
-                <button onClick={() => setShowTeachingPopup(false)} className="w-full py-2.5 rounded-xl text-sm font-bold hover:opacity-90" style={{ background: '#3a7a3a', color: 'white' }}>
-                  Got it -- back to building
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* What Was Built Popup */}
-        {showBuiltPopup && aiExplanation && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
-            <div className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col rounded-2xl shadow-2xl border" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
-              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#fff8ed' }}>
-                <div className="flex items-center gap-2">
-                  <Sparkles size={16} style={{ color: '#c07020' }} />
-                  <p className="text-sm font-bold" style={{ color: '#2a1800' }}>What Was Built</p>
-                </div>
-                <button onClick={() => setShowBuiltPopup(false)} className="p-1.5 rounded-lg hover:bg-black/10">
-                  <X size={16} style={{ color: '#5a4a30' }} />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-5 py-5">
-                <div className="rounded-xl p-4 border" style={{ background: '#fff8ed', borderColor: '#f0c060' }}>
-                  <p className="text-sm leading-relaxed" style={{ color: '#3d2b00', lineHeight: '1.75' }}>{aiExplanation}</p>
-                </div>
-              </div>
-              <div className="px-5 py-4 border-t flex-shrink-0 flex gap-2" style={{ borderColor: '#e0d4b8' }}>
-                <button onClick={() => { setRightTab('code'); setShowBuiltPopup(false); }} className="flex-1 py-2.5 rounded-xl text-sm font-bold hover:opacity-90 flex items-center justify-center gap-2" style={{ background: '#5030a0', color: 'white' }}>
-                  <FileCode size={13} /> View code
-                </button>
-                <button onClick={() => setShowBuiltPopup(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold border hover:opacity-80" style={{ borderColor: '#c8b890', color: '#5a4a30' }}>
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Help Popup */}
-        {showHelpPopup && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
-            <div className="w-full max-w-md flex flex-col rounded-2xl shadow-2xl border overflow-hidden" style={{ background: '#f9f6ef', borderColor: '#d4c4a0' }}>
-              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#e0d4b8', background: '#f0e8d8' }}>
-                <div className="flex items-center gap-2">
-                  <HelpCircle size={16} style={{ color: '#6040a0' }} />
-                  <p className="text-sm font-bold" style={{ color: '#2a1800' }}>What does this question mean?</p>
-                </div>
-                <button onClick={() => setShowHelpPopup(false)} className="p-1.5 rounded-lg hover:bg-black/10">
-                  <X size={16} style={{ color: '#5a4a30' }} />
-                </button>
-              </div>
-              <div className="px-5 pt-4 pb-2">
-                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#8a6d3b' }}>The question</p>
-                <p className="text-sm font-medium leading-relaxed" style={{ color: '#2a1a4a' }}>{taskInstruction?.subTasks?.[subTaskIndex]}</p>
-              </div>
-              <div className="px-5 pb-5">
-                <div className="rounded-xl p-4 border mt-3" style={{ background: '#f5f0ff', borderColor: '#b090e0' }}>
-                  {helpLoading ? (
-                    <div className="flex items-center gap-2">
-                      <Loader2 size={14} className="animate-spin" style={{ color: '#6040a0' }} />
-                      <p className="text-sm" style={{ color: '#6040a0' }}>Getting a plain-English explanation...</p>
-                    </div>
-                  ) : (
-                    <p className="text-sm leading-relaxed" style={{ color: '#2a1a4a', lineHeight: '1.75' }}>{helpResponse}</p>
-                  )}
-                </div>
-              </div>
-              <div className="px-5 pb-5 flex gap-2">
-                <button onClick={() => setShowHelpPopup(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold hover:opacity-90" style={{ background: '#6040a0', color: 'white' }}>
-                  Got it -- I will give it a try
-                </button>
-                <button onClick={() => { setShowHelpPopup(false); handleSkipSubTask(); }} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold border hover:opacity-80" style={{ borderColor: '#c8b890', color: '#5a4a30' }}>
-                  <SkipForward size={13} /> Skip
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
       </main>
     </div>
   );
