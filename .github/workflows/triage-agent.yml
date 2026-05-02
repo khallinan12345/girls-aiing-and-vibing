@@ -103,40 +103,25 @@ jobs:
           EVENT_TYPE="${{ steps.parse.outputs.event_type }}"
           FUNCTION_NAME="${{ steps.parse.outputs.function_name }}"
           PAYLOAD="${{ steps.parse.outputs.payload }}"
-          BRANCH="triage/fix-${EVENT_TYPE}-$(date +%Y%m%d-%H%M%S)"
+          BRANCH="triage/${EVENT_TYPE}-$(date +%Y%m%d-%H%M%S)"
+
           git config user.email "triage@girlsaiing.com"
           git config user.name  "Girls AIing Triage Bot"
           git checkout -b "$BRANCH"
 
-          cat > /tmp/prompt-template.txt << 'PROMPT'
-You are the Girls AIing triage agent. A production error needs diagnosis.
+          cp .github/triage/autofix-prompt.txt /tmp/prompt.txt
+          sed -i "s|FILE_PLACEHOLDER|api/${FUNCTION_NAME}.ts|g" /tmp/prompt.txt
+          sed -i "s|EVENT_TYPE_PLACEHOLDER|$EVENT_TYPE|g"       /tmp/prompt.txt
+          sed -i "s|FUNCTION_PLACEHOLDER|$FUNCTION_NAME|g"      /tmp/prompt.txt
+          sed -i "s|PAYLOAD_PLACEHOLDER|$PAYLOAD|g"             /tmp/prompt.txt
 
-Read the relevant file(s) in the api/ directory.
-Diagnose the root cause of this error.
-Propose a minimal, targeted fix and apply it.
-Then commit:
-  git add .
-  git commit -m "fix(FUNCTION_PLACEHOLDER): diagnose EVENT_TYPE_PLACEHOLDER [triage-bot needs review]"
+          claude --print < /tmp/prompt.txt
 
-Do not push. Kevin will review this PR.
-Do not change any prompt text or learning content.
-
-ERROR DETAILS:
-- Event type: EVENT_TYPE_PLACEHOLDER
-- Function:   FUNCTION_PLACEHOLDER
-- Payload:    PAYLOAD_PLACEHOLDER
-PROMPT
-
-          sed -i "s|EVENT_TYPE_PLACEHOLDER|$EVENT_TYPE|g"  /tmp/prompt-template.txt
-          sed -i "s|FUNCTION_PLACEHOLDER|$FUNCTION_NAME|g" /tmp/prompt-template.txt
-          sed -i "s|PAYLOAD_PLACEHOLDER|$PAYLOAD|g"        /tmp/prompt-template.txt
-
-          claude --print < /tmp/prompt-template.txt
           git push origin "$BRANCH"
 
           gh pr create \
             --title "[Triage] $EVENT_TYPE in $FUNCTION_NAME needs review" \
-            --body "Auto-diagnosed by Triage Agent. Error: $EVENT_TYPE in $FUNCTION_NAME. Payload: $PAYLOAD. Requires review before merging." \
+            --body "Auto-diagnosed. Error: $EVENT_TYPE in $FUNCTION_NAME. Requires review before merging." \
             --base main \
             --head "$BRANCH"
 
