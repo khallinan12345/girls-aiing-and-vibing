@@ -71,12 +71,11 @@ jobs:
         if: steps.parse.outputs.action == 'auto_fix'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GIT_AUTHOR_NAME: 'Girls AIing Triage Bot'
-          GIT_AUTHOR_EMAIL: 'triage@girlsaiing.com'
         run: |
           EVENT_TYPE="${{ steps.parse.outputs.event_type }}"
           FUNCTION_NAME="${{ steps.parse.outputs.function_name }}"
           PAYLOAD="${{ steps.parse.outputs.payload }}"
+
           case "$FUNCTION_NAME" in
             "chat-stream")         FILE="api/chat-stream.js" ;;
             "generate-site-code")  FILE="api/generate-site-code.ts" ;;
@@ -87,71 +86,13 @@ jobs:
             *)                     FILE="api/${FUNCTION_NAME}.ts" ;;
           esac
 
-          # Quoted heredoc — bash will NOT interpret special chars inside
-          cat > /tmp/prompt-template.txt << 'PROMPT'
-You are the Girls AIing triage agent. A production error has been detected.
+          cp .github/triage/autofix-prompt.txt /tmp/prompt.txt
+          sed -i "s|FILE_PLACEHOLDER|$FILE|g"              /tmp/prompt.txt
+          sed -i "s|EVENT_TYPE_PLACEHOLDER|$EVENT_TYPE|g"  /tmp/prompt.txt
+          sed -i "s|FUNCTION_PLACEHOLDER|$FUNCTION_NAME|g" /tmp/prompt.txt
+          sed -i "s|PAYLOAD_PLACEHOLDER|$PAYLOAD|g"        /tmp/prompt.txt
 
-YOUR TASK:
-Read the file FILE_PLACEHOLDER and apply EXACTLY ONE fix based on event type EVENT_TYPE_PLACEHOLDER.
-Do not make any other changes. Do not touch any other files.
-
-ALLOWED FIXES BY ERROR TYPE:
-
-max_tokens_hit:
-  - Find the max_tokens value in the Anthropic API call
-  - If max_tokens < 8000, increase to 8000
-  - If max_tokens >= 8000 and < 16000, increase to 16000
-  - If max_tokens >= 16000, add comment: // TODO: response truncating at max limit
-
-rate_limit:
-  - Find the fetch() call to api.anthropic.com
-  - Wrap in retry loop with exponential backoff (max 3 retries, delays 1s 2s 4s)
-  - Check res.status !== 429, sleep Math.pow(2,i)*1000ms between retries
-
-api_overloaded:
-  - Same retry pattern as rate_limit but also handle status 529
-
-stream_read_error:
-  - Find the reader.read() call in the stream processing loop
-  - Wrap in try/catch if not already wrapped
-  - On catch: await new Promise(r => setTimeout(r, 1000)); continue;
-
-json_parse_failure:
-  - Find the JSON.parse() call
-  - Add an extractJSON helper before it if not present
-  - Helper strips markdown fences and finds outermost curly braces
-
-sse_parse_errors:
-  - Find the SSE parse error catch block
-  - Ensure it counts errors and logs via logEvent after 5 consecutive failures
-
-CONSTRAINTS:
-1. Only modify: FILE_PLACEHOLDER
-2. Only fix event type: EVENT_TYPE_PLACEHOLDER
-3. Do not refactor or restructure anything else
-4. Do not change any prompt text or learning content
-5. After fix:
-   git config user.email "triage@girlsaiing.com"
-   git config user.name "Girls AIing Triage Bot"
-   git add FILE_PLACEHOLDER
-   git commit -m "fix(FUNCTION_PLACEHOLDER): auto-fix EVENT_TYPE_PLACEHOLDER [triage-bot]"
-   git push origin main
-
-ERROR DETAILS:
-- Event type: EVENT_TYPE_PLACEHOLDER
-- Function:   FUNCTION_PLACEHOLDER
-- File:       FILE_PLACEHOLDER
-- Payload:    PAYLOAD_PLACEHOLDER
-
-If you cannot confidently apply the fix, do NOT make changes and explain why.
-PROMPT
-
-          sed -i "s|FILE_PLACEHOLDER|$FILE|g"              /tmp/prompt-template.txt
-          sed -i "s|EVENT_TYPE_PLACEHOLDER|$EVENT_TYPE|g"  /tmp/prompt-template.txt
-          sed -i "s|FUNCTION_PLACEHOLDER|$FUNCTION_NAME|g" /tmp/prompt-template.txt
-          sed -i "s|PAYLOAD_PLACEHOLDER|$PAYLOAD|g"        /tmp/prompt-template.txt
-
-          claude --print < /tmp/prompt-template.txt
+          claude --print < /tmp/prompt.txt
 
       - name: Create diagnostic branch and PR
         if: steps.parse.outputs.action == 'open_pr'
