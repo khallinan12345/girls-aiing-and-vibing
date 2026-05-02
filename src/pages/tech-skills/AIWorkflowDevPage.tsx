@@ -539,7 +539,7 @@ const TestWorkflowPanel: React.FC<{ apiKey: string; projectFiles: ProjectFile[] 
     if (!apiKey) { setError('Enter your Anthropic API key in the Credentials panel first'); return; }
     setLoading(true); setError(''); setResponse('');
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/ai-proxy', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -722,7 +722,7 @@ const AIWorkflowDevPage: React.FC = () => {
     if (!creds.anthropicKey) return;
     setCredTestStatus('testing');
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/ai-proxy', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1190,7 +1190,7 @@ const AIWorkflowDevPage: React.FC = () => {
     if (!taskInstruction?.subTasks?.[subTaskIndex]) return;
     setShowHelpPopup(true); setHelpLoading(true); setHelpResponse(null);
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/ai-proxy', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'claude-sonnet-4-6', max_tokens: 600,
