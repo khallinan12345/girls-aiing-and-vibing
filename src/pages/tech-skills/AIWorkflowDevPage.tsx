@@ -211,7 +211,6 @@ function App() {
     }
   }
 
-  const showCredPanel = currentTask?.id === 'supabase_setup';
 
   return (
     <div className="app">
@@ -1418,6 +1417,8 @@ const AIWorkflowDevPage: React.FC = () => {
   // ─────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────
+
+  const showCredPanel = currentTask?.id === 'supabase_setup';
 
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-white overflow-hidden">
