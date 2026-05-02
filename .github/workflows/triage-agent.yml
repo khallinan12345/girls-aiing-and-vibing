@@ -1,17 +1,4 @@
 # .github/workflows/triage-agent.yml
-#
-# Girls AIing Triage Agent — Autonomous API Error Fixer
-#
-# Triggered by:
-#   1. Supabase webhook POST to /api/triage-webhook (which calls repository_dispatch)
-#   2. Manual trigger for testing
-#
-# Behavior:
-#   - API errors (rate_limit, max_tokens_hit, api_overloaded, stream_read_error,
-#     json_parse_failure) → Claude Code writes fix → auto-merges to main
-#   - All other errors → opens a diagnostic PR for Kevin to review
-#   - auth_error / missing_api_key → cannot fix code; opens urgent issue instead
-
 name: Triage Agent
 
 on:
@@ -38,11 +25,9 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      # ── 1. Parse the incoming event ──────────────────────────────────────────
       - name: Parse event
         id: parse
         run: |
-          # Support both repository_dispatch and workflow_dispatch
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
             EVENT_TYPE="${{ github.event.client_payload.event_type }}"
             FUNCTION_NAME="${{ github.event.client_payload.function_name }}"
@@ -54,15 +39,11 @@ jobs:
             SEVERITY="error"
             PAYLOAD='${{ github.event.inputs.payload }}'
           fi
-
           echo "event_type=$EVENT_TYPE"       >> $GITHUB_OUTPUT
           echo "function_name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
           echo "severity=$SEVERITY"           >> $GITHUB_OUTPUT
-
-          # Classify: auto-fix vs PR vs urgent issue
           AUTO_FIX_TYPES="rate_limit max_tokens_hit api_overloaded stream_read_error json_parse_failure sse_parse_errors"
           NO_CODE_FIX_TYPES="auth_error missing_api_key"
-
           if echo "$AUTO_FIX_TYPES" | grep -qw "$EVENT_TYPE"; then
             echo "action=auto_fix"   >> $GITHUB_OUTPUT
           elif echo "$NO_CODE_FIX_TYPES" | grep -qw "$EVENT_TYPE"; then
@@ -70,39 +51,32 @@ jobs:
           else
             echo "action=open_pr"    >> $GITHUB_OUTPUT
           fi
-
           echo "payload=$PAYLOAD" >> $GITHUB_OUTPUT
 
-      # ── 2. Checkout repo ─────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4.2.2
         with:
           token: ${{ secrets.TRIAGE_GITHUB_TOKEN }}
           fetch-depth: 0
 
-      # ── 3. Setup Node ────────────────────────────────────────────────────────
       - name: Setup Node
         uses: actions/setup-node@v4.4.0
         with:
           node-version: '20'
 
-      # ── 4. Install Claude Code CLI ───────────────────────────────────────────
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
-      # ── 5a. AUTO-FIX path — Claude Code writes and commits the fix ──────────
       - name: Auto-fix API error
         if: steps.parse.outputs.action == 'auto_fix'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GIT_AUTHOR_NAME:  'Girls AIing Triage Bot'
+          GIT_AUTHOR_NAME: 'Girls AIing Triage Bot'
           GIT_AUTHOR_EMAIL: 'triage@girlsaiing.com'
         run: |
           EVENT_TYPE="${{ steps.parse.outputs.event_type }}"
           FUNCTION_NAME="${{ steps.parse.outputs.function_name }}"
           PAYLOAD="${{ steps.parse.outputs.payload }}"
-
-          # Map function name to file path
           case "$FUNCTION_NAME" in
             "chat-stream")         FILE="api/chat-stream.js" ;;
             "generate-site-code")  FILE="api/generate-site-code.ts" ;;
@@ -113,80 +87,72 @@ jobs:
             *)                     FILE="api/${FUNCTION_NAME}.ts" ;;
           esac
 
-          # Write the agent prompt to a temp file
-          cat > /tmp/agent-prompt.txt << PROMPT
-          You are the Girls AIing triage agent. A production error has been detected.
+          # Quoted heredoc — bash will NOT interpret special chars inside
+          cat > /tmp/prompt-template.txt << 'PROMPT'
+You are the Girls AIing triage agent. A production error has been detected.
 
-          ERROR DETAILS:
-          - Event type:    $EVENT_TYPE
-          - Function:      $FUNCTION_NAME
-          - File:          $FILE
-          - Payload:       $PAYLOAD
+YOUR TASK:
+Read the file FILE_PLACEHOLDER and apply EXACTLY ONE fix based on event type EVENT_TYPE_PLACEHOLDER.
+Do not make any other changes. Do not touch any other files.
 
-          YOUR TASK:
-          Read the file $FILE and apply EXACTLY ONE of the following fixes based on the event type.
-          Do not make any other changes. Do not touch any other files.
+ALLOWED FIXES BY ERROR TYPE:
 
-          ALLOWED FIXES BY ERROR TYPE:
+max_tokens_hit:
+  - Find the max_tokens value in the Anthropic API call
+  - If max_tokens < 8000, increase to 8000
+  - If max_tokens >= 8000 and < 16000, increase to 16000
+  - If max_tokens >= 16000, add comment: // TODO: response truncating at max limit
 
-          max_tokens_hit:
-            - Find the max_tokens value in the Anthropic API call
-            - If max_tokens < 8000, increase to 8000
-            - If max_tokens >= 8000 and < 16000, increase to 16000
-            - If max_tokens >= 16000, add a comment: // TODO: response truncating at max limit — split request
+rate_limit:
+  - Find the fetch() call to api.anthropic.com
+  - Wrap in retry loop with exponential backoff (max 3 retries, delays 1s 2s 4s)
+  - Check res.status !== 429, sleep Math.pow(2,i)*1000ms between retries
 
-          rate_limit:
-            - Find the fetch() call to api.anthropic.com
-            - Wrap it in a retry loop with exponential backoff (max 3 retries, delays: 1s, 2s, 4s)
-            - Use this exact pattern:
-              async function fetchWithRetry(url, options, maxRetries = 3) {
-                for (let i = 0; i < maxRetries; i++) {
-                  const res = await fetch(url, options);
-                  if (res.status !== 429) return res;
-                  await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
-                }
-                return fetch(url, options);
-              }
+api_overloaded:
+  - Same retry pattern as rate_limit but also handle status 529
 
-          api_overloaded:
-            - Same retry pattern as rate_limit but also handle status 529
+stream_read_error:
+  - Find the reader.read() call in the stream processing loop
+  - Wrap in try/catch if not already wrapped
+  - On catch: await new Promise(r => setTimeout(r, 1000)); continue;
 
-          stream_read_error:
-            - Find the reader.read() call in the stream processing loop
-            - Wrap in try/catch if not already wrapped
-            - On catch, add: await new Promise(r => setTimeout(r, 1000)); continue;
+json_parse_failure:
+  - Find the JSON.parse() call
+  - Add an extractJSON helper before it if not present
+  - Helper strips markdown fences and finds outermost curly braces
 
-          json_parse_failure:
-            - Find the JSON.parse() call
-            - Ensure it uses the extractJSON() helper that strips markdown fences
-            - If extractJSON() is not present, add it before the parse call:
-              function extractJSON(text) {
-                const stripped = text.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
-                const start = stripped.indexOf('{');
-                const end = stripped.lastIndexOf('}');
-                if (start !== -1 && end !== -1 && end > start) return stripped.slice(start, end + 1);
-                return stripped;
-              }
+sse_parse_errors:
+  - Find the SSE parse error catch block
+  - Ensure it counts errors and logs via logEvent after 5 consecutive failures
 
-          sse_parse_errors:
-            - Find the SSE parse error catch block
-            - Ensure it counts errors and logs via logEvent() after 5 consecutive failures
+CONSTRAINTS:
+1. Only modify: FILE_PLACEHOLDER
+2. Only fix event type: EVENT_TYPE_PLACEHOLDER
+3. Do not refactor or restructure anything else
+4. Do not change any prompt text or learning content
+5. After fix:
+   git config user.email "triage@girlsaiing.com"
+   git config user.name "Girls AIing Triage Bot"
+   git add FILE_PLACEHOLDER
+   git commit -m "fix(FUNCTION_PLACEHOLDER): auto-fix EVENT_TYPE_PLACEHOLDER [triage-bot]"
+   git push origin main
 
-          CONSTRAINTS — you MUST follow these:
-          1. Only modify the single file: $FILE
-          2. Only apply the fix listed above for $EVENT_TYPE
-          3. Do not refactor, rename, or restructure anything else
-          4. Do not change any prompt text, system prompts, or learning content
-          5. After making the fix, run: git config user.email "triage@girlsaiing.com" && git config user.name "Girls AIing Triage Bot"
-          6. Then commit with: git add $FILE && git commit -m "fix($FUNCTION_NAME): auto-fix $EVENT_TYPE [triage-bot]"
-          7. Then push: git push origin main
+ERROR DETAILS:
+- Event type: EVENT_TYPE_PLACEHOLDER
+- Function:   FUNCTION_PLACEHOLDER
+- File:       FILE_PLACEHOLDER
+- Payload:    PAYLOAD_PLACEHOLDER
 
-          If you cannot confidently apply the fix, do NOT make any changes and exit with a clear explanation.
-          PROMPT
+If you cannot confidently apply the fix, do NOT make changes and explain why.
+PROMPT
 
-          claude --print < /tmp/agent-prompt.txt
+          sed -i "s|FILE_PLACEHOLDER|$FILE|g"              /tmp/prompt-template.txt
+          sed -i "s|EVENT_TYPE_PLACEHOLDER|$EVENT_TYPE|g"  /tmp/prompt-template.txt
+          sed -i "s|FUNCTION_PLACEHOLDER|$FUNCTION_NAME|g" /tmp/prompt-template.txt
+          sed -i "s|PAYLOAD_PLACEHOLDER|$PAYLOAD|g"        /tmp/prompt-template.txt
 
-      # ── 5b. OPEN PR path — diagnostic PR for Kevin to review ────────────────
+          claude --print < /tmp/prompt-template.txt
+
       - name: Create diagnostic branch and PR
         if: steps.parse.outputs.action == 'open_pr'
         env:
@@ -197,52 +163,42 @@ jobs:
           FUNCTION_NAME="${{ steps.parse.outputs.function_name }}"
           PAYLOAD="${{ steps.parse.outputs.payload }}"
           BRANCH="triage/fix-${EVENT_TYPE}-$(date +%Y%m%d-%H%M%S)"
-
           git config user.email "triage@girlsaiing.com"
           git config user.name  "Girls AIing Triage Bot"
           git checkout -b "$BRANCH"
 
-          # Ask Claude Code to diagnose and propose a fix
-          cat > /tmp/agent-prompt.txt << PROMPT
-          You are the Girls AIing triage agent. A production error needs diagnosis.
+          cat > /tmp/prompt-template.txt << 'PROMPT'
+You are the Girls AIing triage agent. A production error needs diagnosis.
 
-          ERROR DETAILS:
-          - Event type:  $EVENT_TYPE
-          - Function:    $FUNCTION_NAME
-          - Payload:     $PAYLOAD
+Read the relevant file(s) in the api/ directory.
+Diagnose the root cause of this error.
+Propose a minimal, targeted fix and apply it.
+Then commit:
+  git add .
+  git commit -m "fix(FUNCTION_PLACEHOLDER): diagnose EVENT_TYPE_PLACEHOLDER [triage-bot needs review]"
 
-          Read the relevant file(s) in the api/ directory.
-          Diagnose the root cause of this error.
-          Propose a minimal, targeted fix.
-          Apply the fix to the file.
-          Then commit: git add . && git commit -m "fix($FUNCTION_NAME): diagnose $EVENT_TYPE [triage-bot — needs review]"
+Do not push. Kevin will review this PR.
+Do not change any prompt text or learning content.
 
-          Do not push. Do not auto-merge. Kevin will review this PR.
-          Do not change any prompt text, system prompts, or learning content.
-          PROMPT
+ERROR DETAILS:
+- Event type: EVENT_TYPE_PLACEHOLDER
+- Function:   FUNCTION_PLACEHOLDER
+- Payload:    PAYLOAD_PLACEHOLDER
+PROMPT
 
-          claude --print < /tmp/agent-prompt.txt
+          sed -i "s|EVENT_TYPE_PLACEHOLDER|$EVENT_TYPE|g"  /tmp/prompt-template.txt
+          sed -i "s|FUNCTION_PLACEHOLDER|$FUNCTION_NAME|g" /tmp/prompt-template.txt
+          sed -i "s|PAYLOAD_PLACEHOLDER|$PAYLOAD|g"        /tmp/prompt-template.txt
 
+          claude --print < /tmp/prompt-template.txt
           git push origin "$BRANCH"
 
           gh pr create \
-            --title "🔧 [Triage] $EVENT_TYPE in $FUNCTION_NAME — needs review" \
-            --body "## Auto-diagnosed by Triage Agent
-
-          **Error type:** \`$EVENT_TYPE\`
-          **Function:** \`$FUNCTION_NAME\`
-          **Payload:**
-          \`\`\`json
-          $PAYLOAD
-          \`\`\`
-
-          This PR was opened automatically. The fix has been proposed by Claude Code but **requires your review before merging** — this error type is outside the auto-fix safe list.
-
-          Please review the diff carefully before merging." \
+            --title "[Triage] $EVENT_TYPE in $FUNCTION_NAME needs review" \
+            --body "Auto-diagnosed by Triage Agent. Error: $EVENT_TYPE in $FUNCTION_NAME. Payload: $PAYLOAD. Requires review before merging." \
             --base main \
             --head "$BRANCH"
 
-      # ── 5c. OPEN ISSUE path — env/key problems that code can't fix ──────────
       - name: Open urgent issue
         if: steps.parse.outputs.action == 'open_issue'
         env:
@@ -251,25 +207,7 @@ jobs:
           EVENT_TYPE="${{ steps.parse.outputs.event_type }}"
           FUNCTION_NAME="${{ steps.parse.outputs.function_name }}"
           PAYLOAD="${{ steps.parse.outputs.payload }}"
-
           gh issue create \
-            --title "🚨 URGENT: $EVENT_TYPE in $FUNCTION_NAME — manual fix required" \
-            --body "## Production Alert — Cannot Auto-Fix
-
-          **Error type:** \`$EVENT_TYPE\`
-          **Function:** \`$FUNCTION_NAME\`
-          **Time:** $(date -u)
-
-          **Payload:**
-          \`\`\`json
-          $PAYLOAD
-          \`\`\`
-
-          ## Required Action
-          This error requires a manual fix — it is an environment/credentials issue, not a code issue.
-
-          - \`auth_error\` → Check ANTHROPIC_API_KEY in Vercel dashboard. It may be expired or invalid.
-          - \`missing_api_key\` → ANTHROPIC_API_KEY is not set in Vercel environment variables.
-
-          **All AI features are currently down for all cohorts until this is resolved.**" \
-            --label "urgent,triage-bot"
+            --title "URGENT: $EVENT_TYPE in $FUNCTION_NAME manual fix required" \
+            --body "Production Alert. Error: $EVENT_TYPE in $FUNCTION_NAME. Time: $(date -u). Payload: $PAYLOAD. Check ANTHROPIC_API_KEY in Vercel dashboard. All AI features may be down." \
+            --label "bug"
