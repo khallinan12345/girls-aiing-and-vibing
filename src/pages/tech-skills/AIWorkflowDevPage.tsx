@@ -1,17 +1,15 @@
 // src/pages/tech-skills/AIWorkflowDevPage.tsx
 //
-// AI Workflow Development Workshop
-// Builds on WebDevelopmentPage patterns — same Monaco editor / coach / task flow.
-// Key additions:
-//   • API credentials panel (Anthropic key, stored in localStorage)
-//   • "Test Workflow" right tab — students run live AI calls inside the platform
-//   • Starter files include a pre-wired AI client (calls through proxy or direct)
-//   • Curriculum focused on building apps that contain AI agents and chained calls
+// Full-Stack App + AI Agent Development
+// Learners build a complete full-stack React + Supabase app that includes
+// an AI agent as a core interactive feature. The agent is planned in Phase 1,
+// built in Phase 2 alongside the database, and secured + deployed in Phase 3.
 //
 // API routes needed:
 //   /api/generate-workflow-code
 //   /api/workflow-task-instruction
 //   /api/evaluate-workflow-session
+//   /api/ai-proxy  (for agent live testing)
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Navbar from '../../components/layout/Navbar';
@@ -26,6 +24,7 @@ import {
   Volume2, VolumeX, AlertCircle, Star, ChevronDown, ChevronUp,
   Trash2, Plus, FileCode, Package, Play, Key, ExternalLink,
   Zap, GitBranch, RefreshCw, Eye, Terminal, Wand2,
+  Database, Table2, Bot, Send, User as UserIcon, Code2, Sparkles as SparklesIcon,
   Bot, Send, User as UserIcon, MessageCircle,
 } from 'lucide-react';
 
@@ -58,6 +57,7 @@ interface SessionRecord {
 }
 
 interface ApiCredentials { anthropicKey: string; useProxy: boolean; }
+interface SupaCredentials { url: string; anonKey: string; }
 
 type RightTab = 'code' | 'test' | 'agent';
 
@@ -66,21 +66,21 @@ type RightTab = 'code' | 'test' | 'agent';
 const makeId = () => Math.random().toString(36).substring(2, 9);
 const WORKFLOW_ACTIVITY = 'ai_workflow_development';
 const LS_CREDS_KEY = 'workflow_dev_api_creds';
+const LS_SUPA_KEY  = 'workflow_dev_supa_creds';
 
 const TASKS: TaskDef[] = [
-  { id: 'intro_workflow',    label: 'What is an AI Workflow?',    phase: 1, icon: '⚡', isOnboarding: true },
-  { id: 'choose_idea',       label: 'Choose Your Workflow Idea',  phase: 1, icon: '💡' },
-  { id: 'map_steps',         label: 'Map Your Workflow Steps',    phase: 1, icon: '🗺️' },
-  { id: 'plan_io',           label: 'Plan Inputs & Outputs',      phase: 1, icon: '📐' },
-  { id: 'setup_ai_client',   label: 'Set Up the AI Client',       phase: 2, icon: '🔑' },
-  { id: 'first_ai_call',     label: 'Make Your First AI Call',    phase: 2, icon: '📡' },
-  { id: 'display_response',  label: 'Display the AI Response',    phase: 2, icon: '📺' },
-  { id: 'chain_calls',       label: 'Chain Multiple AI Calls',    phase: 2, icon: '🔗' },
-  { id: 'build_ui',          label: 'Build the User Interface',   phase: 2, icon: '🖼️' },
-  { id: 'build_agent',       label: 'Build an AI Agent',          phase: 2, icon: '🤖' },
-  { id: 'prompts_polish',    label: 'Polish Your Prompts',        phase: 3, icon: '✨' },
-  { id: 'error_handling',    label: 'Error Handling & Loading',   phase: 3, icon: '🛡️' },
-  { id: 'deploy_prep',       label: 'Deploy & Share',             phase: 3, icon: '🚀' },
+  { id: 'intro_agent',      label: 'Overview',                    phase: 1, icon: '🏗️', isOnboarding: true },
+  { id: 'define_app',       label: 'Define Your App & Agent',     phase: 1, icon: '🎯' },
+  { id: 'schema_design',    label: 'Design Your Schema',          phase: 1, icon: '📐' },
+  { id: 'supabase_setup',   label: 'Set Up Supabase',             phase: 1, icon: '🔑' },
+  { id: 'create_tables',    label: 'Create Tables',               phase: 2, icon: '🗄️' },
+  { id: 'connect_react',    label: 'Connect React to Supabase',   phase: 2, icon: '🔗' },
+  { id: 'read_data',        label: 'Read Data (SELECT)',           phase: 2, icon: '📖' },
+  { id: 'write_data',       label: 'Write Data (INSERT/UPDATE)',   phase: 2, icon: '✏️' },
+  { id: 'auth',             label: 'User Authentication',         phase: 2, icon: '🔐' },
+  { id: 'build_agent',      label: 'Build Your AI Agent',         phase: 2, icon: '🤖' },
+  { id: 'rls',              label: 'Row Level Security',          phase: 3, icon: '🛡️' },
+  { id: 'deploy_prep',      label: 'Deploy & Share',              phase: 3, icon: '🚀' },
 ];
 
 const PHASE_META: Record<number, { label: string; color: string; bg: string; border: string }> = {
@@ -331,23 +331,24 @@ const ScoreBadge: React.FC<{ score: number; max?: number }> = ({ score, max = 3 
 const WorkflowOnboarding: React.FC<{ onComplete: () => void }> = ({ onComplete }) => (
   <div className="flex-1 overflow-y-auto p-4 space-y-4">
     <div className="p-4 bg-violet-500/10 border border-violet-500/25 rounded-xl">
-      <p className="text-xs font-bold text-violet-400 uppercase mb-3">⚡ Welcome to AI Workflow Development</p>
+      <p className="text-xs font-bold text-violet-400 uppercase mb-3">🤖 Full-Stack App + AI Agent Development</p>
       <p className="text-sm text-gray-300 leading-relaxed mb-3">
-        You're going to build a <strong className="text-white">real app that uses AI as a working part of it</strong> — not just a chatbot, but a workflow where AI automatically does jobs: summarising, translating, classifying, generating, extracting, or deciding.
+        You are going to build a <strong className="text-white">complete full-stack app</strong> — with a real database, user authentication, and an AI agent that interacts with your visitors. This is not a demo. It is a real app you will deploy and share.
       </p>
       <p className="text-sm text-gray-300 leading-relaxed">
-        Companies everywhere are paying for people who can do this. Every business tool, app, and website in the world is being rebuilt right now to include AI. You are learning the skill that makes that happen.
+        The AI agent is not a chatbot bolted on at the end. It is a core feature of your app — planned in Phase 1, built alongside the database in Phase 2, and secured and deployed in Phase 3.
       </p>
     </div>
 
     <div className="p-3 bg-gray-800/40 rounded-lg border border-gray-700">
-      <p className="text-xs font-bold text-gray-300 mb-2">🤔 What is an AI Workflow?</p>
+      <p className="text-xs font-bold text-gray-300 mb-2">What you will build:</p>
       <div className="space-y-2">
         {[
-          { icon: '📄', ex: 'A user pastes a document → AI summarises it → user sees a 3-bullet summary' },
-          { icon: '🌍', ex: 'A user types in Yoruba → AI translates it → AI improves the English → output shown' },
-          { icon: '📸', ex: 'A user describes a problem → AI generates 3 solutions → AI scores each one' },
-          { icon: '📋', ex: 'A user submits a form → AI checks it → AI writes a personalised response' },
+          { icon: '🗄️', ex: 'A real PostgreSQL database on Supabase — tables, relationships, indexes, triggers' },
+          { icon: '🔐', ex: 'User authentication — sign up, sign in, protected routes, session management' },
+          { icon: '🤖', ex: 'An AI agent — a conversational interface that guides visitors and saves their output to your database' },
+          { icon: '🛡️', ex: 'Row Level Security — so each user only sees and edits their own data' },
+          { icon: '🚀', ex: 'A deployed live app on Vercel — with a real URL you can share with your community' },
         ].map((item, i) => (
           <div key={i} className="flex items-start gap-2 text-xs text-gray-400">
             <span className="text-base flex-shrink-0">{item.icon}</span>
@@ -358,35 +359,24 @@ const WorkflowOnboarding: React.FC<{ onComplete: () => void }> = ({ onComplete }
     </div>
 
     <div className="bg-gray-900 rounded-lg p-3 font-mono text-xs leading-relaxed space-y-1">
-      <div className="text-violet-300 font-bold mb-1">⚡ A workflow in code:</div>
-      <div className="text-gray-400">1. <span className="text-cyan-300">User</span> types a description of a business problem</div>
+      <div className="text-violet-300 font-bold mb-1">How the agent fits in:</div>
+      <div className="text-gray-400">1. <span className="text-cyan-300">Visitor</span> arrives at your app</div>
       <div className="text-gray-400 ml-4">↓</div>
-      <div className="text-gray-400">2. <span className="text-violet-300">callAI()</span> sends it to Claude with a system prompt</div>
+      <div className="text-gray-400">2. <span className="text-violet-300">AI Agent</span> starts a conversation — asks questions, listens, drafts</div>
       <div className="text-gray-400 ml-4">↓</div>
-      <div className="text-gray-400">3. Claude returns a structured analysis</div>
+      <div className="text-gray-400">3. <span className="text-cyan-300">Visitor</span> reviews and confirms the agent output</div>
       <div className="text-gray-400 ml-4">↓</div>
-      <div className="text-gray-400">4. <span className="text-violet-300">chainAICalls()</span> sends that to a second AI step</div>
+      <div className="text-gray-400">4. <span className="text-emerald-300">Supabase</span> stores it permanently in your database</div>
       <div className="text-gray-400 ml-4">↓</div>
-      <div className="text-gray-400">5. <span className="text-cyan-300">React</span> displays the final result beautifully</div>
-    </div>
-
-    <div className="p-3 bg-gray-800/40 rounded-lg border border-gray-700">
-      <p className="text-xs font-bold text-gray-300 mb-1.5">🔑 About the API Key</p>
-      <p className="text-xs text-gray-400 leading-relaxed">
-        To call Claude from your code, you need an API key from{' '}
-        <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" className="text-violet-400 underline">console.anthropic.com</a>.
-        Your instructor may provide one, or you can create a free account. You'll enter it in the
-        <strong className="text-white"> Credentials panel</strong> during the next task.
-        The key stays in your browser — it is never sent to this platform.
-      </p>
+      <div className="text-gray-400">5. <span className="text-cyan-300">Other visitors</span> can read it on your public pages</div>
     </div>
 
     <div className="grid grid-cols-2 gap-2">
       {[
-        { icon: <GitBranch size={14}/>, title: 'Chain AI calls', desc: 'Output of one becomes input of next', col: 'text-violet-400' },
-        { icon: <Zap size={14}/>,       title: 'Automate tasks', desc: 'AI does the work, humans review it',  col: 'text-amber-400'  },
-        { icon: <Cpu size={14}/>,       title: 'System prompts', desc: 'Shape how AI thinks and responds',    col: 'text-cyan-400'   },
-        { icon: <Play size={14}/>,      title: 'Test live',      desc: 'Run your workflow right in this page', col: 'text-emerald-400'},
+        { icon: <Database size={14}/>, title: 'Real database',   desc: 'PostgreSQL on Supabase — not localStorage', col: 'text-blue-400'   },
+        { icon: <Bot size={14}/>,      title: 'AI agent',        desc: 'Converses, drafts, saves to database',     col: 'text-violet-400' },
+        { icon: <CheckCircle size={14}/>, title: 'Auth + RLS',   desc: 'Users own their own data',                col: 'text-emerald-400'},
+        { icon: <Zap size={14}/>,      title: 'Live deploy',     desc: 'Real URL on Vercel you can share',         col: 'text-amber-400'  },
       ].map((item, i) => (
         <div key={i} className="p-3 bg-gray-800/60 rounded-lg border border-gray-700">
           <div className={`flex items-center gap-1.5 mb-1 ${item.col}`}>{item.icon}<span className="text-xs font-bold">{item.title}</span></div>
@@ -397,7 +387,7 @@ const WorkflowOnboarding: React.FC<{ onComplete: () => void }> = ({ onComplete }
 
     <button onClick={onComplete}
       className="w-full flex items-center justify-center gap-2 py-3 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl transition-colors">
-      Let's build an AI workflow! <ArrowRight size={16} />
+      {"Let's build! "}<ArrowRight size={16} />
     </button>
   </div>
 );
@@ -1116,79 +1106,93 @@ const AIWorkflowDevPage: React.FC = () => {
       }
     } catch {
       const fallbacks: Record<string, { teaching: string; question: string }[]> = {
-        choose_idea: [
-          { teaching: 'The best AI workflows solve a real problem that someone actually has. The most successful ones save time on a boring, repetitive task — or do something a person cannot do at all.',
-            question: 'What problem would you like your AI workflow to solve? Describe in 2–3 sentences: who has this problem, what do they currently do without AI, and how could AI help?' },
-          { teaching: 'A workflow idea should be specific enough that you can describe the exact input and output. "AI helps with writing" is too vague. "User pastes a job description → AI writes a cover letter" is a workflow.',
-            question: 'Describe your workflow input and output. Fill in: "A user gives the AI ___ and gets back ___."' },
+        define_app: [
+          { teaching: "Every successful app starts with a clear statement of purpose. If you cannot describe what your app does in one sentence, you cannot build it. Write this first and check every decision that follows against it. The AI agent is not an add-on — plan what it does, who it talks to, and what it produces right now.",
+            question: "What does your app do and why would someone use it? Describe it in 1-2 sentences — who it is for, what problem it solves, and what they can do with it." },
+          { teaching: "Knowing your users shapes every design decision — what pages you need, what data you store, what the agent says. Be specific about who will actually use this app.",
+            question: "Who are your users? Describe your primary audience and what they are trying to accomplish when they visit your app." },
+          { teaching: "An AI agent is a conversational component that interacts with your users and connects to your database. Planning the agent now means your database schema will be designed with the agent in mind from the start.",
+            question: "What role will your AI agent play in this app? Describe what it does, who it talks to, and what it produces." },
         ],
-        map_steps: [
-          { teaching: 'Every AI workflow is a sequence of steps. Before writing any code, mapping the steps on paper (or in plain English) prevents confusion later and helps you spot problems early.',
-            question: 'List every step in your workflow in order. Start with "User types/uploads/selects..." and end with "App shows/saves/sends...". Number each step.' },
-          { teaching: 'Some steps in your workflow do not need AI at all — they are just JavaScript or React state management. Identifying which steps need AI and which do not helps you build faster.',
-            question: 'For each step you listed, mark it as AI (uses Claude) or Code (just JavaScript/React). This is your workflow blueprint.' },
+        schema_design: [
+          { teaching: "A schema is the blueprint of your database. You design it now, after knowing what your app does, because every table flows from the app purpose. The most expensive mistake in full-stack development is building the wrong schema.",
+            question: "Based on your app purpose, what are the 2-4 main things it needs to store? List each entity — these will become your tables. For each one describe its single job." },
+          { teaching: "Every table needs a clear single purpose. Columns define what each row holds. Primary keys uniquely identify rows. Foreign keys connect tables. Getting this right before touching Supabase means you will not have to migrate your data later.",
+            question: "For your most important table, list every column with its data type. Include id (uuid), any foreign keys, required fields, and timestamps. Also describe how this table connects to your other tables." },
+          { teaching: "Your AI agent produces output that must be stored somewhere. Design the connection between agent and database now — which table the agent writes to, which columns it fills, and who the author_id is set to.",
+            question: "How does your agent output connect to your database schema? Which table does it write to, which columns does it fill, and how is the author identified?" },
         ],
-        plan_io: [
-          { teaching: 'Data types matter. An AI call that receives a long unstructured text needs a different approach than one that receives a short command. Planning inputs and outputs before coding prevents wasted effort.',
-            question: 'For each AI step in your workflow, describe: (1) what exact text goes into the AI call, (2) what format you expect the AI to return (paragraph, list, JSON, etc.).' },
-          { teaching: 'System prompts are the instructions you give the AI — they define how it behaves, what format it uses, and what constraints to follow. A good system prompt is the difference between a useful workflow and an unpredictable one.',
-            question: 'Write a draft system prompt for your main AI call. What persona should the AI have? What format should it return? What should it never do?' },
+        supabase_setup: [
+          { teaching: "You set up Supabase now — after defining your app and designing your schema — because you know exactly what you are building. Supabase gives you a real PostgreSQL database, authentication, and an API without writing server code.",
+            question: "Go to supabase.com and create a free project. Give it a name that matches your app. Once created, paste your Project URL here — it looks like https://xxxx.supabase.co." },
+          { teaching: "The anon key is a public key — safe to use in the browser. It identifies your project and works with Row Level Security to control what users can access.",
+            question: "Find your anon key in Supabase Settings → API → anon public. Paste it into the Credentials panel and click Test Connection. What status does it show?" },
+          { teaching: "Environment variables keep credentials out of your source code. The .env file is never pushed to GitHub. The .env.example file documents what variables are needed without exposing values.",
+            question: "Confirm your .env file has VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY set correctly. Is your .env file listed in .gitignore?" },
         ],
-        setup_ai_client: [
-          { teaching: 'The aiClient.js file in your starter project already has the callAI() function ready. Your task is to add your API key via a .env file — never hardcode a key directly in your component code.',
-            question: 'Look at src/lib/aiClient.js in your file tree. Describe what callAI() does in your own words. What are the three parameters it takes?' },
-          { teaching: 'Environment variables (VITE_ANTHROPIC_API_KEY) keep secrets safe. They are loaded at build time and are never visible in your source code. This is how every professional app handles API keys.',
-            question: 'Have you entered your API key in the Credentials panel? Click Test Workflow tab, enter your key, and click Test Key. What result do you get?' },
+        create_tables: [
+          { teaching: "CREATE TABLE is the SQL command that makes your schema real. UUID primary keys are better than auto-increment integers — globally unique and generatable client-side. DEFAULT NOW() records the timestamp automatically.",
+            question: "Generate the SQL to create your main content table with all columns from your schema design — id, foreign keys, required fields, status fields, and timestamp columns with DEFAULT NOW()." },
+          { teaching: "Indexes make queries fast. Without an index on a column, fetching rows by that column requires scanning every row. Index the columns your app filters and sorts by most often.",
+            question: "What queries will your app run most often? Which columns should have indexes? Generate CREATE INDEX statements for those columns." },
+          { teaching: "A trigger automatically runs a function when something happens — like updating updated_at whenever a row changes. Written once, it works everywhere.",
+            question: "Create a trigger that automatically updates the updated_at column whenever a row is modified. Show the function definition and the trigger statement." },
         ],
-        first_ai_call: [
-          { teaching: 'The fastest way to learn is to make your first AI call as simple as possible — one input, one output, no fancy logic. You can add complexity once the basic call works.',
-            question: 'Using the aiClient.js pattern, describe what your first AI call should do. What will the user type in? What system prompt will you use? What will the response look like?' },
-          { teaching: 'Always test in the Test Workflow panel before putting a call into your React code. This separates two problems: "is my API call correct" and "is my React code correct."',
-            question: 'Use the Test Workflow tab (right panel) to test your system prompt and a sample input. What response do you get? Does it match what you expected?' },
+        connect_react: [
+          { teaching: "The Supabase client is a JavaScript object that knows how to talk to your database. You create it once in src/lib/supabase.js and import it anywhere you need database access.",
+            question: "Look at src/lib/supabase.js in the Code tab. Describe what createClient does and how you would import and use the client in a React component." },
+          { teaching: "A custom hook encapsulates data-fetching logic. Instead of writing the same useEffect and useState pattern in every component, you write it once in a hook and call it anywhere.",
+            question: "Design a custom hook for your main data type. What state does it manage, what query does it run, and what does it return?" },
+          { teaching: "A connection test component verifies the database is reachable before building the full UI. A failed test tells you immediately if credentials are wrong or a table does not exist yet.",
+            question: "Build a DatabaseStatus component that tests the connection and shows how many rows are in your main table." },
         ],
-        display_response: [
-          { teaching: 'useState is how React remembers the AI response between renders. You need at least three states: the input the user typed, the AI response, and a loading boolean.',
-            question: 'What three useState variables will you need in your component? Describe each one: its name, initial value, and what it tracks.' },
-          { teaching: 'The loading state prevents the user from submitting again while the AI is thinking, and lets you show a spinner. Without it, users click the button multiple times and get confused.',
-            question: 'Describe how you want the UI to look while the AI is generating a response. Should it show a spinner, a message, or disable the button? Describe the before/during/after states.' },
+        read_data: [
+          { teaching: "Reading data from Supabase uses the select method. Real queries filter with .eq(), sort with .order(), and join related tables by naming them in the select string.",
+            question: "Build your main listing page. Fetch all active records from your primary table and display them as cards. Include loading and error states." },
+          { teaching: "Filtering narrows results to only what the component needs. .eq() for exact matches, .ilike() for partial matches, .in() for a list of values.",
+            question: "Add at least one filter to your listing page. What does the user filter by? Describe the filter UI and what query it generates." },
+          { teaching: "A detail page shows the full content of one record, fetched by ID from the URL. React Router useParams() extracts the ID. .single() returns one object instead of an array.",
+            question: "Build the single record detail page. How does it get the ID from the URL and what does the full detail view show?" },
         ],
-        chain_calls: [
-          { teaching: 'Chaining means the output of one AI call becomes part of the input for the next. This is what separates a "chatbot" from a true workflow — the AI is doing several intelligent jobs in sequence.',
-            question: 'For your workflow, describe the chain. Step 1: AI does ___. The output is ___. Step 2: AI takes that output and also ___. The final result is ___.' },
-          { teaching: 'The chainAICalls() function in your starter project handles this for you — you just pass in an array of steps. Each step automatically receives the previous step\'s output as context.',
-            question: 'How many AI steps does your workflow chain? Describe each step\'s system prompt in one sentence. I will generate the chainAICalls() code for you.' },
+        write_data: [
+          { teaching: "INSERT adds a new row. The user_id or author_id comes from the authenticated session — always read it from supabase.auth.getUser() and attach it to the insert.",
+            question: "Build the submission form. What fields does it have, how does it validate, and what happens on successful submission?" },
+          { teaching: "UPDATE modifies an existing row. Always chain .update() with a .eq() filter on the primary key — without a filter it updates every row.",
+            question: "Build the edit interface. How does a user reach their own records and what can they change? Show the update query with the ownership check." },
+          { teaching: "Optimistic updates improve perceived performance — update the UI immediately and roll back if the database call fails.",
+            question: "Add a status change action. How does optimistic update work here? What happens in the UI if the database call fails?" },
         ],
-        build_ui: [
-          { teaching: 'Your UI has one job: make the workflow so simple that anyone can use it without reading instructions. The best workflow UIs have three parts: input, a clear action button, and a clean output display.',
-            question: 'Describe your ideal UI. What does the user see when they first arrive? What do they type or select? What does the result look like? Sketch it in words.' },
-          { teaching: 'Error messages should tell the user what went wrong and what they can do about it. "Something went wrong" is useless. "Your input was too long — try a shorter version" is helpful.',
-            question: 'What could go wrong in your workflow? List the 2–3 most likely errors and describe how you would explain each one to a non-technical user.' },
-        ],
-        prompts_polish: [
-          { teaching: 'Prompt engineering is iterative. Your first system prompt will almost never be your best one. Professional developers test 5–10 variations before settling on the final version.',
-            question: 'Share your current system prompt. Run it 3 times with different inputs in the Test Workflow tab. Paste the best and worst responses — I will help you improve the prompt.' },
-          { teaching: 'Output formatting instructions in your system prompt dramatically improve how easy it is to display the AI\'s response. "Respond in exactly 3 bullet points" or "Respond in JSON format" removes ambiguity.',
-            question: 'Does your system prompt specify the output format? If not, add a clear format instruction and test it again. What format works best for your use case?' },
-        ],
-        error_handling: [
-          { teaching: 'A workflow without error handling will break in production. Network failures, API rate limits, empty inputs, and unexpected AI responses are all normal — your code needs to handle them gracefully.',
-            question: 'Find the try/catch block in your current code. What happens right now if the API call fails? Describe how you want to improve the error handling.' },
-          { teaching: 'Loading states should disable inputs while the AI is working. Otherwise users type more text, click the button again, and create confusing parallel requests.',
-            question: 'Is your submit button disabled while the AI is running? Is the input field disabled or locked? Describe the current behaviour and how you want it to work.' },
+        auth: [
+          { teaching: "Supabase Auth handles email/password signup, login, and session management with no server code. supabase.auth.getUser() works anywhere. onAuthStateChange fires whenever someone signs in or out.",
+            question: "Build the sign-up and sign-in forms. What fields do they have and what happens after successful authentication?" },
+          { teaching: "Auth context makes the current user available everywhere without prop drilling. A React context wraps the entire app, listens for auth state changes, and exposes the current user to any component.",
+            question: "Build an AuthContext and ProtectedRoute component. Which pages require authentication and which are public?" },
+          { teaching: "The navigation bar should reflect auth state without a page reload. When signed out show Sign In. When signed in show the user name and a dropdown.",
+            question: "Update your Navbar to show different options based on auth state. What does the signed-in navigation look like?" },
         ],
         build_agent: [
-          { teaching: "An AI agent is different from a single AI call. A call takes one input and returns one output. An agent maintains a conversation, remembers what was said, and changes its behaviour based on the exchange. The system prompt is the agent's brain — it defines its persona, its goals, and the rules for how it behaves in every situation.",
-            question: "Design your agent. What is its name and persona? What is its single job? Write the opening system prompt — start with 'You are...' and describe what the agent does, what it asks, and how it behaves." },
-          { teaching: "A conversational agent needs a state machine — a way to track where it is in the conversation. Three phases work well: eliciting (gathering information through questions), drafting (producing output from the conversation), and reviewing (letting the user confirm before saving). Each phase changes what the UI shows and what the agent is allowed to do.",
-            question: "Build the conversation UI. Show chat bubbles for agent and user messages, a typing indicator while the AI responds, and a state machine that moves through eliciting, drafting, reviewing, and submitted. Describe what each phase looks like on screen." },
-          { teaching: "The agent's output needs to go somewhere permanent. After the visitor reviews and confirms the draft, the app inserts it into Supabase. The author_id comes from the authenticated session. The entire conversation — the elicitation, the draft, the review — leads to this single database insert. The agent is the front door. The database is the permanent home.",
-            question: "Connect the agent output to your database. When the visitor confirms their draft, insert it with the correct author_id from the authenticated user. Show a confirmation and clear the conversation. What does the success state look like?" },
+          { teaching: "An AI agent maintains a conversation — remembering what was said across turns and changing its behaviour based on the exchange. The system prompt is the agent brain. It defines its persona, its goal, its rules, and the format of its output. Getting the system prompt right is the most important part.",
+            question: "Design your agent. What is its name and persona? What is its single job? Write the system prompt — start with 'You are...' and describe what it does, what questions it asks, how it behaves, and what format it produces its output in." },
+          { teaching: "A conversational agent needs a state machine — three phases work well: eliciting (gathering information), drafting (producing structured output), and reviewing (letting the user confirm before saving). Each phase changes what the UI shows.",
+            question: "Build the conversation UI. Show chat bubbles, a typing indicator, and a state machine that moves through your agent phases. Describe what each phase looks like on screen." },
+          { teaching: "The agent output needs to go somewhere permanent. After the user confirms the draft, your app calls supabase.from(your_table).insert() with the correct author_id from the authenticated session. The agent is the front door. The database is the permanent home.",
+            question: "Connect your agent to Supabase. When the user confirms the output, insert it with author_id from the authenticated user. Show a confirmation and clear the conversation." },
+        ],
+        rls: [
+          { teaching: "Row Level Security is the most important security step. Without RLS anyone with your anon key can read or write every row. Enable RLS on every table. Default deny. Explicit allow.",
+            question: "Enable RLS on all your tables and write the first policy — the one that allows the right users to read your public content." },
+          { teaching: "Write policies control INSERT, UPDATE, and DELETE. auth.uid() returns the current user ID. A policy using auth.uid() = user_id means each user can only touch rows they created.",
+            question: "Write the INSERT, UPDATE, and DELETE policies for your main table using auth.uid() checks. Test them — confirm another user cannot access your data." },
+          { teaching: "Your AI agent inserts rows on behalf of authenticated users. The insert policy must allow this. Test the full agent flow after enabling RLS.",
+            question: "Test your complete agent flow with RLS enabled. Does the agent insert succeed? If it fails what does the error say and how do you fix the policy?" },
         ],
         deploy_prep: [
-          { teaching: 'Deploying to Vercel is the same process as any React/Vite app — but workflow apps have one extra step: adding your API key as an environment variable in the Vercel dashboard, not in your code.',
-            question: 'Is your project in a GitHub repository? If yes, paste the URL. If not, describe the steps you have taken to get ready to deploy.' },
-          { teaching: 'NEVER commit your .env file to git. Add it to .gitignore before your first commit. Your API key exposed in a public GitHub repository can be used by anyone in the world within minutes.',
-            question: 'Check your project files. Does .env.example exist? Is .env listed in .gitignore? Tell me your deployment plan — where will this workflow live and who will use it?' },
+          { teaching: "Deploying a Vite + React + Supabase app to Vercel takes under five minutes. Push to GitHub first using the GitHub tab. Import the repo in Vercel. Add environment variables in Vercel dashboard.",
+            question: "Walk through the deployment steps. What environment variables does Vercel need? Where do you set them? What is the live URL of your deployed app?" },
+          { teaching: "Supabase needs to know which URLs are allowed to make requests. After deployment add your Vercel URL to Supabase allowed redirect URLs and CORS origins.",
+            question: "Update your Supabase settings for production. What did you add to Authentication → URL Configuration and Settings → API → CORS?" },
+          { teaching: "A production checklist prevents the most common deployment mistakes — RLS enabled, no sensitive keys in source code, .env in .gitignore, user-friendly error messages, every protected route redirects, and the agent tested on the live URL.",
+            question: "Walk through the production readiness checklist. Confirm RLS, environment variables, error handling, protected routes, and test your agent on the live deployed URL." },
         ],
       };
       const seeds = fallbacks[task.id] ?? [
@@ -1212,8 +1216,6 @@ const AIWorkflowDevPage: React.FC = () => {
   useEffect(() => {
     if (['first_ai_call', 'chain_calls', 'prompts_polish'].includes(currentTask?.id ?? '')) {
       setRightTab('test');
-    } else if (currentTask?.id === 'build_agent') {
-      setRightTab('agent');
     } else if (currentTask?.id === 'deploy_prep') {
       setRightTab('github');
     } else {
@@ -1374,7 +1376,7 @@ const AIWorkflowDevPage: React.FC = () => {
     navigator.clipboard.writeText(activeFile?.content || '').then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
   };
 
-  const showCredPanel = currentTask?.id === 'setup_ai_client';
+
   const scoreColor = (s: number) => s >= 2.5 ? 'text-emerald-400' : s >= 1.5 ? 'text-amber-400' : 'text-red-400';
   const skillLabel = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
@@ -1641,9 +1643,37 @@ const AIWorkflowDevPage: React.FC = () => {
 
                 <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
 
-                  {/* API credentials panel on setup task */}
+                  {/* Supabase credentials panel on supabase_setup task */}
                   {showCredPanel && (
-                    <ApiCredentialsPanel creds={creds} onChange={updateCreds} testStatus={credTestStatus} testMsg={credTestMsg} onTest={testApiKey} />
+                    <div className="p-3 bg-gray-800/60 border border-blue-500/20 rounded-xl space-y-3">
+                      <p className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
+                        <Database size={12} /> Supabase Credentials
+                      </p>
+                      <div>
+                        <label className="text-[10px] text-gray-500 uppercase font-bold block mb-1">Project URL</label>
+                        <input type="text" value={supaCreds.url}
+                          onChange={e => updateSupaCreds({ ...supaCreds, url: e.target.value })}
+                          placeholder="https://xxxx.supabase.co"
+                          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500 font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-500 uppercase font-bold block mb-1">Anon Key</label>
+                        <input type="password" value={supaCreds.anonKey}
+                          onChange={e => updateSupaCreds({ ...supaCreds, anonKey: e.target.value })}
+                          placeholder="eyJhbGci…"
+                          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500 font-mono" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={testSupaConnection} disabled={!supaCreds.url || !supaCreds.anonKey || supaTestStatus === 'testing'}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-40">
+                          {supaTestStatus === 'testing' ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+                          Test Connection
+                        </button>
+                        {supaTestStatus === 'ok'   && <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle size={11} /> {supaTestMsg}</span>}
+                        {supaTestStatus === 'fail' && <span className="text-xs text-red-400 flex items-center gap-1"><AlertCircle size={11} /> {supaTestMsg}</span>}
+                      </div>
+                      <p className="text-[9px] text-gray-600">Get these from supabase.com → your project → Settings → API</p>
+                    </div>
                   )}
 
                   {/* Instruction card */}
