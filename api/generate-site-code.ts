@@ -1,22 +1,11 @@
 // api/generate-site-code.ts
 // Generates / iterates Vite + React static website code (no database).
 //
-// Request body:
-//   action: 'generate' | 'iterate' | 'critique'
-//   prompt: string
-//   taskId: string
-//   projectFiles: { path: string; content: string }[]
-//   sessionContext: { siteName?, sitePurpose?, audience?, pages?, components? }
-//   communicationStrategy?: any
-//   learningStrategy?: any
-//
-// Response (generate/iterate):
-//   { files: { path, content }[], explanation: string, sessionContext? }
-// Response (critique):
-//   { critique: string, feedback: string }
+// TRIAGE PATCH: all Anthropic errors now logged to system_events + email alert.
+// Uses shared anthropicFetch + checkUsage + logEvent from lib/api-logger.
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+import { anthropicFetch, checkUsage, logEvent } from '../lib/api-logger';
 
 // ─── Per-task guidance ────────────────────────────────────────────────────────
 
@@ -103,12 +92,7 @@ Test every page at each breakpoint.`,
   deploy_prep: `
 Prepare the project for deployment.
 Return:
-- README.md — full setup and deployment instructions:
-  1. Clone / unzip
-  2. npm install
-  3. npm run dev  (local preview)
-  4. npm run build  (production build)
-  5. Deploy dist/ folder to Netlify, Vercel, or GitHub Pages
+- README.md — full setup and deployment instructions
 - vite.config.js — ensure base path is configurable for subdirectory hosting
 - src/components/Navbar.jsx — verify all links use react-router-dom <Link>, not <a href>
 Add a brief comment at the top of App.jsx explaining the project structure.`,
@@ -124,7 +108,6 @@ function buildSystemPrompt(
   learningStrategy?: any,
   freeFormInstruction?: string,
 ): string {
-  // Personality block — shapes explanation tone
   const commStr  = communicationStrategy ? JSON.stringify(communicationStrategy) : null;
   const learnStr = learningStrategy      ? JSON.stringify(learningStrategy)      : null;
   const personalityBlock = (commStr || learnStr)
@@ -190,17 +173,20 @@ Return only the JSON object — no extra text, no backticks.`;
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { action, prompt, taskId, projectFiles, sessionContext, communicationStrategy, learningStrategy,
-          imageData, imageMediaType, imageName,
-          freeFormFeedback, freeFormInstruction } = req.body;
+  const {
+    action, prompt, taskId, projectFiles, sessionContext,
+    communicationStrategy, learningStrategy,
+    imageData, imageMediaType, imageName,
+    freeFormFeedback, freeFormInstruction,
+    user_id, cohort,                         // pass through for triage context
+  } = req.body;
 
   if (!prompt?.trim()) return res.status(400).json({ error: 'Prompt is required' });
 
-  try {
-    // For content_pages, existing files can already be 150+ lines each.
-    // Truncate more aggressively so the input payload doesn't crowd out the output budget.
-    const contentCap = taskId === 'content_pages' ? 250 : 600;
+  const meta = { user_id, cohort };           // forwarded to every logEvent call
 
+  try {
+    const contentCap = taskId === 'content_pages' ? 250 : 600;
     const relevantFiles = (projectFiles || [])
       .filter((f: any) => f.content?.length > 10)
       .slice(0, 8)
@@ -213,7 +199,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           relevantFiles ? `Current project files:\n${relevantFiles}` : ''
         }`;
 
-    // Build user message — plain text, or multimodal when a screenshot is attached
     const userContent: any = imageData
       ? [
           { type: 'image', source: { type: 'base64', media_type: imageMediaType || 'image/jpeg', data: imageData } },
@@ -221,55 +206,56 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ]
       : userMessage;
 
-    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
-
-    // Phase 1 planning tasks return a single markdown file — 4000 tokens is enough.
-    // Phase 2+ tasks generate multiple JSX files simultaneously (App + Navbar + Footer + pages).
-    // Those routinely exceed 4000 tokens, causing silent JSON truncation → empty files response.
     const SINGLE_FILE_TASKS = new Set(['define_site', 'plan_pages']);
     const maxTokens = (action === 'critique' || SINGLE_FILE_TASKS.has(taskId)) ? 4000 : 8000;
 
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
+    // ── TRIAGE: use wrapped fetch instead of raw fetch ────────────────────────
+    const response = await anthropicFetch(
+      {
         model: 'claude-sonnet-4-6',
         max_tokens: maxTokens,
-        system: buildSystemPrompt(action, taskId, sessionContext, communicationStrategy, learningStrategy, freeFormFeedback ? freeFormInstruction : undefined),
+        system: buildSystemPrompt(
+          action, taskId, sessionContext,
+          communicationStrategy, learningStrategy,
+          freeFormFeedback ? freeFormInstruction : undefined,
+        ),
         messages: [{ role: 'user', content: userContent }],
-      }),
-    });
+      },
+      'generate-site-code',
+      meta,
+    );
 
     if (!response.ok) {
+      // anthropicFetch already logged it; just return to the client
       const err = await response.json().catch(() => ({}));
-      throw new Error(`Anthropic API error (${response.status}): ${(err as any)?.error?.message || 'Unknown'}`);
+      return res.status(response.status).json({
+        error: (err as any)?.error?.message || `Anthropic API error (${response.status})`,
+      });
     }
+
     const completion = await response.json();
     const raw: string = completion.content?.[0]?.text || '{}';
+    const stopReason  = completion.stop_reason;
 
-    // Log stop_reason — 'max_tokens' means the response was truncated (the primary cause of
-    // silent empty-files failures in Phase 2). Surface it immediately rather than swallowing it.
-    const stopReason = completion.stop_reason;
     console.log(`[generate-site-code] taskId=${taskId} stop_reason=${stopReason} raw_len=${raw.length} max_tokens=${maxTokens}`);
+
+    // ── TRIAGE: log max_tokens truncation ─────────────────────────────────────
+    await checkUsage(
+      { stop_reason: stopReason, usage: completion.usage },
+      'generate-site-code',
+      'claude-sonnet-4-6',
+      meta,
+    );
+
     if (stopReason === 'max_tokens') {
-      console.error('[generate-site-code] Response truncated — JSON will be malformed. Increase max_tokens or reduce file scope.');
       return res.status(200).json({
         files: [],
         explanation: `The AI ran out of space generating code for "${taskId}". Try asking for one file at a time, or break this task into smaller steps.`,
       });
     }
 
-    // Robustly extract the JSON object even when Claude adds preamble or closing text.
-    // Strategy: find the outermost { ... } block in the response.
     function extractJSON(text: string): string {
-      // 1. Strip markdown fences
       const stripped = text.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
-      // 2. Find first { and last } to isolate the JSON object
       const start = stripped.indexOf('{');
       const end   = stripped.lastIndexOf('}');
       if (start !== -1 && end !== -1 && end > start) return stripped.slice(start, end + 1);
@@ -279,19 +265,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let result: any;
     try {
       result = JSON.parse(extractJSON(raw));
-    } catch (parseErr: any) {
-      // JSON parse failure after stop_reason=end_turn is unexpected — log the raw output for debugging
-      console.error('[generate-site-code] JSON parse failed. stop_reason:', stopReason, 'raw (first 500):', raw.slice(0, 500));
+    } catch {
+      // ── TRIAGE: JSON parse failure after a successful API call ───────────────
+      await logEvent({
+        function_name: 'generate-site-code',
+        event_type:    'json_parse_failure',
+        severity:      'error',
+        payload: {
+          taskId,
+          stopReason,
+          raw_length:  raw.length,
+          raw_sample:  raw.slice(0, 300),
+          maxTokens,
+          note: 'Response was not valid JSON despite stop_reason=end_turn',
+        },
+        ...meta,
+      });
+
       if (action === 'critique') return res.status(200).json({ critique: raw, feedback: raw });
-      return res.status(500).json({ error: `AI response could not be parsed. Raw output (first 200 chars): ${raw.slice(0, 200)}` });
+      return res.status(500).json({
+        error: `AI response could not be parsed. Raw output (first 200 chars): ${raw.slice(0, 200)}`,
+      });
     }
 
     if (action === 'critique') {
       return res.status(200).json({
-        critique:        result.critique  || result.feedback || raw,
-        feedback:        result.feedback  || result.critique || raw,
-        improvedPrompt:  result.improvedPrompt,
-        score:           result.score,
+        critique:       result.critique  || result.feedback || raw,
+        feedback:       result.feedback  || result.critique || raw,
+        improvedPrompt: result.improvedPrompt,
+        score:          result.score,
       });
     }
 
@@ -300,7 +302,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       explanation:    result.explanation    || '',
       sessionContext: result.sessionContext,
     });
+
   } catch (err: any) {
+    // ── TRIAGE: unexpected thrown error (network, env issue, etc.) ────────────
+    await logEvent({
+      function_name: 'generate-site-code',
+      event_type:    'unhandled_exception',
+      severity:      'critical',
+      payload: {
+        message: err.message,
+        stack:   err.stack?.slice(0, 500),
+        taskId,
+        action,
+      },
+      ...meta,
+    });
+
     console.error('[generate-site-code]', err);
     return res.status(500).json({ error: err.message || 'Generation failed' });
   }
