@@ -61,13 +61,15 @@ Update src/index.css with any new styles needed.
 Make it feel real — not a placeholder.`,
 
   content_pages: `
-Build the remaining content pages of the site.
-Based on the planned pages (from sessionContext.pages), create one file per page in src/pages/.
-Each page should:
-- Have real, relevant content (not just "Lorem ipsum")
+Build EXACTLY ONE content page based on the student's instruction.
+Do NOT generate multiple pages in a single response — create only the page described in this prompt.
+The page should:
+- Have real, relevant content drawn from what the student wrote (not Lorem ipsum)
 - Use consistent styling from index.css
-- Import and use reusable components (Navbar, Footer, any shared components)
-Update App.jsx routes if any new pages are added.`,
+- Import and use Navbar and Footer from src/components/
+- Live at src/pages/<PageName>.jsx
+Also return ONLY the updated src/App.jsx if and only if a new route needs to be added for this page.
+Return at most 2 files total: the new page + App.jsx (if needed). Nothing else.`,
 
   interactivity: `
 Add meaningful interactivity using React state and events.
@@ -195,10 +197,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!prompt?.trim()) return res.status(400).json({ error: 'Prompt is required' });
 
   try {
+    // For content_pages, existing files can already be 150+ lines each.
+    // Truncate more aggressively so the input payload doesn't crowd out the output budget.
+    const contentCap = taskId === 'content_pages' ? 250 : 600;
+
     const relevantFiles = (projectFiles || [])
       .filter((f: any) => f.content?.length > 10)
       .slice(0, 8)
-      .map((f: any) => `=== ${f.path} ===\n${f.content.substring(0, 600)}`)
+      .map((f: any) => `=== ${f.path} ===\n${f.content.substring(0, contentCap)}`)
       .join('\n\n');
 
     const userMessage = action === 'critique'
