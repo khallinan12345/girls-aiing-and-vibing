@@ -967,34 +967,6 @@ const AIWorkflowDevPage: React.FC = () => {
     ],
   };
 
-  const handleJumpToTask = useCallback(async (idx: number) => {
-    if (idx === taskIndex || idx >= taskIndex) return;
-    setTaskIndex(idx); setSubTaskIndex(0); setSubTaskCritique(null);
-    setPrompt(''); setAiExplanation(null); setErrorMsg(null);
-    setRightTab('teaching'); setStepperOpen(false);
-    const lastEntry = [...promptHistory].reverse().find((e: any) => e.taskId === TASKS[idx]?.id);
-    if (lastEntry?.aiExplanation) setAiExplanation(lastEntry.aiExplanation);
-    await fetchTaskInstruction(idx, projectFiles, sessionContext);
-  }, [taskIndex, projectFiles, promptHistory, sessionContext]);
-
-  const handleHelpRequest = useCallback(async () => {
-    if (!taskInstruction?.subTasks?.[subTaskIndex]) return;
-    setShowHelpPopup(true); setHelpLoading(true); setHelpResponse(null);
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6', max_tokens: 600,
-          system: 'You are a friendly AI workflow development coach. Explain what the question is asking in simple terms. Give a short concrete example of a good answer. Under 150 words. No jargon.',
-          messages: [{ role: 'user', content: 'Task: "' + currentTask?.label + '". Question: "' + taskInstruction.subTasks[subTaskIndex] + '". Explain what this is asking and give an example answer.' }],
-        }),
-      });
-      const data = await res.json();
-      setHelpResponse(data.content?.[0]?.text || 'Sorry, could not load help right now.');
-    } catch { setHelpResponse('Sorry, could not load help right now.'); }
-    finally { setHelpLoading(false); }
-  }, [taskInstruction, subTaskIndex, currentTask]);
-
   // ── Fetch task instruction ────────────────────────────────────────────
   const fetchTaskInstruction = useCallback(async (idx: number, files: ProjectFile[], ctx: Record<string, any>) => {
     const task = TASKS[idx]; if (!task || task.isOnboarding) return;
@@ -1210,7 +1182,36 @@ const AIWorkflowDevPage: React.FC = () => {
     await persistSession(projectFiles, promptHistory, nextIdx, sessionContext);
   }, [taskIndex, projectFiles, promptHistory, sessionContext, persistSession]);
 
-  const handleOnboardingComplete = useCallback(async () => {
+
+  const handleJumpToTask = useCallback(async (idx: number) => {
+    if (idx === taskIndex || idx >= taskIndex) return;
+    setTaskIndex(idx); setSubTaskIndex(0); setSubTaskCritique(null);
+    setPrompt(''); setAiExplanation(null); setErrorMsg(null);
+    setRightTab('teaching'); setStepperOpen(false);
+    const lastEntry = [...promptHistory].reverse().find((e: any) => e.taskId === TASKS[idx]?.id);
+    if (lastEntry?.aiExplanation) setAiExplanation(lastEntry.aiExplanation);
+    await fetchTaskInstruction(idx, projectFiles, sessionContext);
+  }, [taskIndex, projectFiles, promptHistory, sessionContext, fetchTaskInstruction]);
+
+  const handleHelpRequest = useCallback(async () => {
+    if (!taskInstruction?.subTasks?.[subTaskIndex]) return;
+    setShowHelpPopup(true); setHelpLoading(true); setHelpResponse(null);
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6', max_tokens: 600,
+          system: 'You are a friendly AI workflow development coach. Explain what the question is asking in simple terms. Give a short concrete example of a good answer. Under 150 words. No jargon.',
+          messages: [{ role: 'user', content: 'Task: "' + currentTask?.label + '". Question: "' + taskInstruction.subTasks[subTaskIndex] + '". Explain what this is asking and give an example answer.' }],
+        }),
+      });
+      const data = await res.json();
+      setHelpResponse(data.content?.[0]?.text || 'Sorry, could not load help right now.');
+    } catch { setHelpResponse('Sorry, could not load help right now.'); }
+    finally { setHelpLoading(false); }
+  }, [taskInstruction, subTaskIndex, currentTask]);
+
+    const handleOnboardingComplete = useCallback(async () => {
     await ensureSession();
     setTaskIndex(1); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
     speakText("Welcome! Let's start by choosing your workflow idea.");
