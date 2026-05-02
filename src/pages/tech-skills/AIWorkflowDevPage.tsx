@@ -1318,13 +1318,6 @@ const AIWorkflowDevPage: React.FC = () => {
     finally { setHelpLoading(false); }
   };
 
-  const handleSkipSubTask = useCallback(() => {
-    if (!taskInstruction) return;
-    const nextIdx = subTaskIndex + 1;
-    if (nextIdx >= taskInstruction.subTasks.length) { handleCompleteTask(); }
-    else { setSubTaskIndex(nextIdx); setSubTaskCritique(null); setPrompt(''); }
-  }, [subTaskIndex, taskInstruction, handleCompleteTask]);
-
   const handleMoveToNextStep = () => {
     const next = subTaskIndex + 1;
     if (next < (taskInstruction?.subTasks?.length ?? 1)) {
@@ -1340,6 +1333,13 @@ const AIWorkflowDevPage: React.FC = () => {
     setSubTaskIndex(0); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); setErrorMsg(null);
     await persistSession(projectFiles, promptHistory, nextIdx, sessionContext);
   }, [taskIndex, projectFiles, promptHistory, sessionContext, persistSession]);
+
+  const handleSkipSubTask = useCallback(() => {
+    if (!taskInstruction) return;
+    const nextIdx = subTaskIndex + 1;
+    if (nextIdx >= taskInstruction.subTasks.length) { handleCompleteTask(); }
+    else { setSubTaskIndex(nextIdx); setSubTaskCritique(null); setPrompt(''); }
+  }, [subTaskIndex, taskInstruction, handleCompleteTask]);
 
   const handleOnboardingComplete = useCallback(async () => {
     await ensureSession();
