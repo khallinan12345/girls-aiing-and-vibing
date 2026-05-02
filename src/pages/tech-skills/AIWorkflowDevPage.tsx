@@ -1849,8 +1849,6 @@ const AIWorkflowDevPage: React.FC = () => {
             </div>
           </div>
         </div>
-      </main>
-    </div>
 
         {/* Teaching Popup */}
         {showTeachingPopup && taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
