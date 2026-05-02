@@ -211,6 +211,8 @@ function App() {
     }
   }
 
+  const showCredPanel = currentTask?.id === 'supabase_setup';
+
   return (
     <div className="app">
       <h1>My AI Workflow</h1>
