@@ -1159,13 +1159,6 @@ const AIWorkflowDevPage: React.FC = () => {
     } catch {} finally { setIsCritiquing(false); }
   }, [prompt, isCritiquing, currentTask, taskInstruction, subTaskIndex, communicationStrategy, learningStrategy]);
 
-  const handleSkipSubTask = useCallback(() => {
-    if (!taskInstruction) return;
-    const nextIdx = subTaskIndex + 1;
-    if (nextIdx >= taskInstruction.subTasks.length) { handleCompleteTask(); }
-    else { setSubTaskIndex(nextIdx); setSubTaskCritique(null); setPrompt(''); }
-  }, [subTaskIndex, taskInstruction, handleCompleteTask]);
-
   const handleMoveToNextStep = () => {
     const next = subTaskIndex + 1;
     if (next < (taskInstruction?.subTasks?.length ?? 1)) {
@@ -1211,7 +1204,14 @@ const AIWorkflowDevPage: React.FC = () => {
     finally { setHelpLoading(false); }
   }, [taskInstruction, subTaskIndex, currentTask]);
 
-    const handleOnboardingComplete = useCallback(async () => {
+  const handleSkipSubTask = useCallback(() => {
+    if (!taskInstruction) return;
+    const nextIdx = subTaskIndex + 1;
+    if (nextIdx >= taskInstruction.subTasks.length) { handleCompleteTask(); }
+    else { setSubTaskIndex(nextIdx); setSubTaskCritique(null); setPrompt(''); }
+  }, [subTaskIndex, taskInstruction, handleCompleteTask]);
+
+  const handleOnboardingComplete = useCallback(async () => {
     await ensureSession();
     setTaskIndex(1); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
     speakText("Welcome! Let's start by choosing your workflow idea.");
