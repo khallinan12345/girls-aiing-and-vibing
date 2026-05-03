@@ -615,7 +615,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const maxTokens = action === 'critique'           ? 4000
                     : SINGLE_FILE_TASKS.has(taskId)   ? 4000
                     : taskId === 'content_pages'      ? 12000
-                    : 8000;
+                    : 16000;
 
     const systemPrompt = buildSystemPrompt(
       action,
