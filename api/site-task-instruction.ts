@@ -4,9 +4,9 @@
 // "why this matters" teaching commentary shown before the question.
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Migrated from OpenAI → Anthropic direct fetch
+const ANTHROPIC_URL   = 'https://api.anthropic.com/v1/messages';
+const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 
 interface SubTaskSeed { teaching: string; question: string; }
 interface TaskSeed { focus: string; steps: [SubTaskSeed, SubTaskSeed, SubTaskSeed]; }
@@ -247,18 +247,30 @@ ${seedText ? `Seed content to adapt and personalise:\n\n${seedText}` : ''}
 Write the full instruction with teaching commentary for all 3 steps.`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 1000,
-      temperature: 0.35,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user',   content: user   },
-      ],
+    const _apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!_apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
+    const _response = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type':      'application/json',
+        'x-api-key':         _apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model:       ANTHROPIC_MODEL,
+        max_tokens:  1000,
+        temperature: 0.35,
+        system:      system,
+        messages:    [{ role: 'user', content: user }],
+      }),
     });
-
-    const raw     = completion.choices[0]?.message?.content || '{}';
-    const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    if (!_response.ok) {
+      const _err = await _response.json().catch(() => ({}));
+      throw new Error(`Anthropic API error (${_response.status}): ${(_err as any)?.error?.message || 'Unknown'}`);
+    }
+    const _completion = await _response.json();
+    const raw     = _completion.content?.[0]?.text || '{}';
+    const cleaned = raw.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
 
     let result: any;
     try {

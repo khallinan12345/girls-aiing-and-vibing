@@ -15,9 +15,9 @@
 //   { critique: string, feedback: string }
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Migrated from OpenAI → Anthropic direct fetch
+const ANTHROPIC_URL   = 'https://api.anthropic.com/v1/messages';
+const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 
 // ─── Task context strings (guide the AI per task) ────────────────────────────
 
@@ -207,17 +207,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           relevantFiles ? `Current project files:\n${relevantFiles}` : ''
         }`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 4000,
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: buildSystemPrompt(action, taskId, sessionContext, communicationStrategy, learningStrategy) },
-        { role: 'user', content: userMessage },
-      ],
+    const _apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!_apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
+    const _response = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type':      'application/json',
+        'x-api-key':         _apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model:       ANTHROPIC_MODEL,
+        max_tokens:  4000,
+        temperature: 0.2,
+        system:      buildSystemPrompt(action, taskId, sessionContext, communicationStrategy, learningStrategy),
+        messages:    [{ role: 'user', content: userMessage }],
+      }),
     });
-
-    const raw = completion.choices[0]?.message?.content || '{}';
+    if (!_response.ok) {
+      const _err = await _response.json().catch(() => ({}));
+      throw new Error(`Anthropic API error (${_response.status}): ${(_err as any)?.error?.message || 'Unknown'}`);
+    }
+    const _completion = await _response.json();
+    const raw = _completion.content?.[0]?.text || '{}';
 
     // Strip markdown fences if present
     const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();

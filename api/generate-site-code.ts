@@ -612,7 +612,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Phase 2+ tasks generate JSX files. With per-chunk splitting each call stays
     // well under 8000 tokens, but we keep 8000 as the per-call budget.
     const SINGLE_FILE_TASKS = new Set(['define_site', 'plan_pages']);
-    const maxTokens = (action === 'critique' || SINGLE_FILE_TASKS.has(taskId)) ? 4000 : 8000;
+    const maxTokens = action === 'critique'           ? 4000
+                    : SINGLE_FILE_TASKS.has(taskId)   ? 4000
+                    : taskId === 'content_pages'      ? 12000
+                    : 8000;
 
     const systemPrompt = buildSystemPrompt(
       action,
