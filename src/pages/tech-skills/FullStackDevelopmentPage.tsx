@@ -194,7 +194,6 @@ const ScoreBadge: React.FC<{ score: number; max?: number }> = ({ score, max = 3 
 // ─── Onboarding card ──────────────────────────────────────────────────────────
 
 // Web Project Loader - Phase 0
-interface WebProject { id: string; name: string; files: ProjectFile[]; pageCount: number; }
 
 const WebProjectLoader: React.FC<{
   userId: string | null;
