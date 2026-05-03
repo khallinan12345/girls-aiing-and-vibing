@@ -11,8 +11,8 @@ import { supabase } from '../../lib/supabaseClient';
 import Editor from '@monaco-editor/react';
 import GitHubPanel from '../../components/GitHubPanel';
 import { useVoice } from '../../hooks/useVoice';
-import { useHelpMeAnswer } from '../../hooks/useHelpMeAnswer';
-import HelpMeAnswerPopup from '../../components/HelpMeAnswerPopup';
+
+
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
   Database, Table2, Play, CheckCircle, ArrowRight, FileCode,
@@ -972,14 +972,70 @@ const FullStackDevelopmentPage: React.FC = () => {
   const currentPhase = currentTask?.phase ?? 1;
   const pm           = PHASE_META[currentPhase];
 
-  const helpMe = useHelpMeAnswer({
-    question:           taskInstruction?.subTasks?.[subTaskIndex]        ?? '',
-    teaching:           taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '',
-    taskLabel:          currentTask?.label ?? '',
-    sessionContext,
-    chatPage:           'WebDevelopmentPage',
-    systemPromptPreset: 'web-dev',
-  });
+  // Help Me Answer — inline state (no external hook to avoid TDZ)
+  const [showHelpMe, setShowHelpMe]         = useState(false);
+  const [helpMeMessages, setHelpMeMessages] = useState<{role:'assistant'|'user';text:string}[]>([]);
+  const [helpMeInput, setHelpMeInput]       = useState('');
+  const [helpMeLoading, setHelpMeLoading]   = useState(false);
+  const [helpMeDraft, setHelpMeDraft]       = useState<string|null>(null);
+  const helpMeInputRef = useRef<HTMLInputElement>(null);
+
+  const openHelpMe = useCallback(() => {
+    const q = taskInstruction?.subTasks?.[subTaskIndex] ?? '';
+    const t = taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '';
+    const opening = 'Let me help you answer this question about ' + (currentTask?.label ?? '') + '.\n\n'
+      + 'The question is asking: "' + q + '"\n\n'
+      + 'Here is what to think about: ' + t + '\n\n'
+      + 'What would you like me to explain? You can ask what specific terms mean, ask for options, or say "give me some options".';
+    setHelpMeMessages([{role:'assistant',text:opening}]);
+    setHelpMeInput(''); setHelpMeDraft(null); setShowHelpMe(true);
+    setTimeout(() => helpMeInputRef.current?.focus(), 80);
+  }, [taskInstruction, subTaskIndex, currentTask]);
+
+  const sendHelpMe = useCallback(async () => {
+    const text = helpMeInput.trim();
+    if (!text || helpMeLoading) return;
+    const q = taskInstruction?.subTasks?.[subTaskIndex] ?? '';
+    const t = taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '';
+    const newMsgs = [...helpMeMessages, {role:'user' as const, text}];
+    setHelpMeMessages(newMsgs); setHelpMeInput(''); setHelpMeLoading(true);
+    try {
+      const res = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ page:'WebDevelopmentPage', max_tokens:800,
+          system: 'You are a friendly helper for a first-generation digital learner. They are answering: "' + q + '". Background: ' + t + '. Explain in plain language, use real-world analogies for technical terms, offer 3-4 concrete options when asked. When you have enough info end with READY_TO_DRAFT. Max 6 sentences. No bullet points.',
+          messages: newMsgs.map(m => ({role:m.role, content:m.text})) }) });
+      const data = await res.json();
+      const reply = data.choices?.[0]?.message?.content ?? 'Sorry, something went wrong.';
+      const isReady = reply.includes('READY_TO_DRAFT');
+      const clean = reply.replace('READY_TO_DRAFT','').trim();
+      const withReply = [...newMsgs, {role:'assistant' as const, text:clean}];
+      setHelpMeMessages(withReply);
+      if (isReady) {
+        const r2 = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ page:'WebDevelopmentPage', max_tokens:300,
+            system: 'Write a complete 2-4 sentence answer in first person the learner can submit. Question: "' + q + '". Be specific, use details from the conversation. Plain English only.',
+            messages: [...withReply.map(m=>({role:m.role,content:m.text})), {role:'user',content:'Write my complete answer.'}] }) });
+        const d2 = await r2.json();
+        const draft = d2.choices?.[0]?.message?.content ?? '';
+        if (draft) setHelpMeDraft(draft);
+      }
+    } catch { setHelpMeMessages(p => [...p, {role:'assistant',text:'Sorry, something went wrong.'}]); }
+    finally { setHelpMeLoading(false); setTimeout(() => helpMeInputRef.current?.focus(), 80); }
+  }, [helpMeInput, helpMeLoading, helpMeMessages, taskInstruction, subTaskIndex]);
+
+  const requestHelpMeDraft = useCallback(async () => {
+    const q = taskInstruction?.subTasks?.[subTaskIndex] ?? '';
+    const t = taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '';
+    try {
+      const r = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ page:'WebDevelopmentPage', max_tokens:300,
+          system: 'Write a complete 2-4 sentence answer in first person. Question: "' + q + '". Context: ' + t + '. Plain English only.',
+          messages: [...helpMeMessages.map(m=>({role:m.role,content:m.text})), {role:'user',content:'Write my complete answer.'}] }) });
+      const d = await r.json();
+      const draft = d.choices?.[0]?.message?.content ?? '';
+      if (draft) setHelpMeDraft(draft);
+    } catch {}
+  }, [helpMeMessages, taskInstruction, subTaskIndex]);
 
   // ── Load sessions ─────────────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
@@ -1379,7 +1435,49 @@ const FullStackDevelopmentPage: React.FC = () => {
         </div>
       )}
 
-      <HelpMeAnswerPopup {...helpMe} onUseDraft={draft => { setPrompt(draft); setTimeout(() => promptRef.current?.focus(), 80); }} phaseLabel={pm.label} />
+      {showHelpMe && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:'rgba(0,0,0,0.75)',backdropFilter:'blur(5px)'}}>
+          <div className="w-full max-w-lg flex flex-col rounded-2xl shadow-2xl border overflow-hidden" style={{background:'#1a1025',borderColor:'#6040a0',maxHeight:'85vh'}}>
+            <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{borderColor:'#3a2060',background:'#12081a'}}>
+              <div className="flex items-center gap-2">
+                <HelpCircle size={16} style={{color:'#a080e0'}} />
+                <div><p className="text-[9px] font-bold uppercase tracking-widest" style={{color:'#a080e0'}}>{pm.label}</p>
+                <p className="text-sm font-bold text-white">Help Me Answer</p></div>
+              </div>
+              <button onClick={() => setShowHelpMe(false)} className="p-1.5 rounded-lg hover:bg-white/10"><X size={16} style={{color:'#a080e0'}} /></button>
+            </div>
+            <div className="px-5 pt-4 pb-2 flex-shrink-0">
+              <div className="rounded-xl p-3 border" style={{background:'#2a1845',borderColor:'#6040a0'}}>
+                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{color:'#a080e0'}}>Your question</p>
+                <p className="text-xs text-white leading-relaxed">{taskInstruction?.subTasks?.[subTaskIndex]}</p>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3 min-h-0">
+              {helpMeMessages.map((msg,i) => (
+                <div key={i} className={`flex ${msg.role==='user'?'justify-end':'justify-start'}`}>
+                  <div className="rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap" style={{maxWidth:'85%',background:msg.role==='user'?'#4a20a0':'#2a1845',color:msg.role==='user'?'white':'#e0d0ff',borderRadius:msg.role==='user'?'18px 18px 4px 18px':'18px 18px 18px 4px'}}>{msg.text}</div>
+                </div>
+              ))}
+              {helpMeLoading && (<div className="flex justify-start"><div className="rounded-2xl px-4 py-3" style={{background:'#2a1845'}}><div className="flex gap-1">{[0,1,2].map(i=><div key={i} className="w-2 h-2 rounded-full animate-bounce" style={{background:'#a080e0',animationDelay:`${i*0.15}s`}} />)}</div></div></div>)}
+            </div>
+            {helpMeDraft && (
+              <div className="mx-5 mb-3 rounded-xl border flex-shrink-0" style={{background:'#0f2a0f',borderColor:'#3a7a3a'}}>
+                <div className="px-4 pt-3 pb-1"><p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{color:'#7aba7a'}}>Your answer - ready to use</p><p className="text-xs leading-relaxed" style={{color:'#c0e8c0'}}>{helpMeDraft}</p></div>
+                <div className="px-4 pb-3 pt-2"><button onClick={() => { setPrompt(helpMeDraft!); setShowHelpMe(false); setTimeout(() => promptRef.current?.focus(), 80); }} className="w-full py-2 rounded-xl text-sm font-bold hover:opacity-90" style={{background:'#3a7a3a',color:'white'}}>Use this answer</button></div>
+              </div>
+            )}
+            <div className="px-5 pb-4 pt-2 flex gap-2 flex-shrink-0">
+              <input ref={helpMeInputRef} value={helpMeInput} onChange={e=>setHelpMeInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey)sendHelpMe();}} placeholder="Ask me anything..." disabled={helpMeLoading} className="flex-1 rounded-xl px-3 py-2 text-sm outline-none disabled:opacity-50" style={{background:'#2a1845',border:'1px solid #6040a0',color:'white'}} />
+              <button onClick={sendHelpMe} disabled={helpMeLoading||!helpMeInput.trim()} className="px-4 py-2 rounded-xl text-sm font-bold disabled:opacity-40" style={{background:'#6040a0',color:'white'}}>Send</button>
+            </div>
+            {!helpMeDraft && helpMeMessages.length >= 3 && (
+              <div className="px-5 pb-5 flex-shrink-0 border-t pt-3" style={{borderColor:'#3a2060'}}>
+                <button onClick={requestHelpMeDraft} disabled={helpMeLoading} className="w-full py-2.5 rounded-xl text-sm font-bold hover:opacity-90 disabled:opacity-40" style={{background:'#3a7a3a',color:'white'}}>Get an AI response you can use</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Session picker */}
       {showSessionPicker && (
@@ -1671,7 +1769,7 @@ const FullStackDevelopmentPage: React.FC = () => {
                           </button>
                         )}
                         <div className="flex items-center gap-2 mt-2">
-                          <button onClick={helpMe.open} className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium rounded-lg border border-purple-500/40 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors"><HelpCircle size={11} /> Help Me Answer</button>
+                          <button onClick={openHelpMe} className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium rounded-lg border border-purple-500/40 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors"><HelpCircle size={11} /> Help Me Answer</button>
                           {subTaskIndex < (taskInstruction?.subTasks?.length ?? 1) - 1 && (
                             <button onClick={() => { setSubTaskIndex(subTaskIndex + 1); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); }} className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg border border-gray-600 text-gray-400 hover:text-white hover:border-gray-400 transition-colors"><SkipForward size={11} /> Skip</button>
                           )}
