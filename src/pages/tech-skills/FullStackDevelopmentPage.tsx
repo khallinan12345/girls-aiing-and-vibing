@@ -11,6 +11,12 @@ import { supabase } from '../../lib/supabaseClient';
 import Editor from '@monaco-editor/react';
 import GitHubPanel from '../../components/GitHubPanel';
 import { useVoice } from '../../hooks/useVoice';
+import { useHelpMeAnswer } from '../../hooks/useHelpMeAnswer';
+import HelpMeAnswerPopup from '../../components/HelpMeAnswerPopup';
+import { HelpCircle, SkipForward as SkipIcon } from 'lucide-react';
+import { useHelpMeAnswer } from '../../hooks/useHelpMeAnswer';
+import HelpMeAnswerPopup from '../../components/HelpMeAnswerPopup';
+import { HelpCircle, SkipForward as SkipIcon } from 'lucide-react';
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
   Database, Table2, Play, CheckCircle, ArrowRight, FileCode,
@@ -51,7 +57,7 @@ interface SessionRecord {
 
 interface SupaCredentials { url: string; anonKey: string; }
 
-type RightTab = 'code' | 'tables' | 'sql' | 'github';
+type RightTab = 'teaching' | 'code' | 'tables' | 'sql' | 'github';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -856,15 +862,49 @@ const FullStackDevelopmentPage: React.FC = () => {
   const [evalError, setEvalError]           = useState<string | null>(null);
 
   // ── Right panel ──────────────────────────────────────────────────────
-  const [rightTab, setRightTab]       = useState<RightTab>('code');
+  const [rightTab, setRightTab]       = useState<RightTab>('teaching');
   const [generatedSql, setGeneratedSql] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [copied, setCopied]           = useState(false);
+  // Teaching tab — mirrors WebDev teaching panel
+  const [teachingExplanation, setTeachingExplanation] = useState<string | null>(null);
+  // Web project picker — load a static Web Builder project as starting point
+  const [showWebProjectPicker, setShowWebProjectPicker] = useState(false);
+  const [webProjects, setWebProjects]         = useState<{id: string; name: string; files: ProjectFile[]}[]>([]);
+  const [loadingWebProjects, setLoadingWebProjects] = useState(false);
+  // Teaching tab — mirrors WebDev teaching panel
+  const [teachingExplanation, setTeachingExplanation] = useState<string | null>(null);
+  // Web project picker — load a static Web Builder project as starting point
+  const [showWebProjectPicker, setShowWebProjectPicker] = useState(false);
+  const [webProjects, setWebProjects]         = useState<{id: string; name: string; files: ProjectFile[]}[]>([]);
+  const [loadingWebProjects, setLoadingWebProjects] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
   const currentTask  = TASKS[taskIndex];
   const currentPhase = currentTask?.phase ?? 1;
   const pm           = PHASE_META[currentPhase];
+
+  // Help Me Answer hook — same pattern as WebDevelopmentPage
+  const helpMe = useHelpMeAnswer({
+    question:     taskInstruction?.subTasks?.[subTaskIndex]      ?? '',
+    teaching:     taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '',
+    taskLabel:    currentTask?.label ?? '',
+    taskContext:  currentTask?.label,
+    sessionContext,
+    chatPage:           'WebDevelopmentPage',
+    systemPromptPreset: 'web-dev',
+  });
+
+  // Help Me Answer hook — same pattern as WebDevelopmentPage
+  const helpMe = useHelpMeAnswer({
+    question:     taskInstruction?.subTasks?.[subTaskIndex]      ?? '',
+    teaching:     taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '',
+    taskLabel:    currentTask?.label ?? '',
+    taskContext:  currentTask?.label,
+    sessionContext,
+    chatPage:           'WebDevelopmentPage',
+    systemPromptPreset: 'web-dev',
+  });
 
   // ── Load sessions ─────────────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
@@ -931,6 +971,64 @@ const FullStackDevelopmentPage: React.FC = () => {
     setEvaluation(ev.scores || null); setPromptHistory(s.fs_prompts || []);
     setTaskHasGeneration(false); setShowSessionPicker(false);
     setTaskInstruction(null); setPrompt(''); setAiExplanation(null); setErrorMsg(null); setSubTaskCritique(null);
+  }, []);
+
+  // Load static Web Builder projects so the learner can pick a starting point
+  const loadWebProjects = useCallback(async () => {
+    if (!userId) return;
+    setLoadingWebProjects(true);
+    try {
+      const { data } = await supabase.from('dashboard')
+        .select('id, session_id, session_name, pages, updated_at')
+        .eq('user_id', userId).eq('activity', 'web_development')
+        .not('session_id', 'is', null).order('updated_at', { ascending: false });
+      if (data?.length) {
+        setWebProjects(data.map((s: any) => ({
+          id: s.session_id,
+          name: s.session_name || 'Unnamed Web Project',
+          files: (s.pages || []).map((p: any) => ({ path: p.path || p.name, content: p.content || p.code || '' })),
+        })));
+        setShowWebProjectPicker(true);
+      }
+    } catch { /* silent */ } finally { setLoadingWebProjects(false); }
+  }, [userId]);
+
+  const importWebProject = useCallback((proj: { files: ProjectFile[]; name: string }) => {
+    // Merge web project files into starter files (web files take precedence)
+    const merged = mergeFiles(STARTER_FILES, proj.files);
+    setProjectFiles(merged);
+    setSessionName(`${proj.name} (Full-Stack)`);
+    setShowWebProjectPicker(false);
+    setActiveFilePath('src/App.jsx');
+  }, []);
+
+  // Load static Web Builder projects so the learner can pick a starting point
+  const loadWebProjects = useCallback(async () => {
+    if (!userId) return;
+    setLoadingWebProjects(true);
+    try {
+      const { data } = await supabase.from('dashboard')
+        .select('id, session_id, session_name, pages, updated_at')
+        .eq('user_id', userId).eq('activity', 'web_development')
+        .not('session_id', 'is', null).order('updated_at', { ascending: false });
+      if (data?.length) {
+        setWebProjects(data.map((s: any) => ({
+          id: s.session_id,
+          name: s.session_name || 'Unnamed Web Project',
+          files: (s.pages || []).map((p: any) => ({ path: p.path || p.name, content: p.content || p.code || '' })),
+        })));
+        setShowWebProjectPicker(true);
+      }
+    } catch { /* silent */ } finally { setLoadingWebProjects(false); }
+  }, [userId]);
+
+  const importWebProject = useCallback((proj: { files: ProjectFile[]; name: string }) => {
+    // Merge web project files into starter files (web files take precedence)
+    const merged = mergeFiles(STARTER_FILES, proj.files);
+    setProjectFiles(merged);
+    setSessionName(`${proj.name} (Full-Stack)`);
+    setShowWebProjectPicker(false);
+    setActiveFilePath('src/App.jsx');
   }, []);
 
   const handleDeleteSession = useCallback(async (e: React.MouseEvent, sid: string) => {
@@ -1079,6 +1177,10 @@ const FullStackDevelopmentPage: React.FC = () => {
 
       entry.aiExplanation = result.explanation;
       setAiExplanation(result.explanation || null);
+      setTeachingExplanation(result.explanation || null);
+      if (result.explanation) setRightTab('teaching');
+      setTeachingExplanation(result.explanation || null);
+      if (result.explanation) setRightTab('teaching');
 
       // Critique the student's prompt
       if (prompt.trim().length > 10) {
@@ -1161,7 +1263,9 @@ const FullStackDevelopmentPage: React.FC = () => {
     speakText('Welcome! Let\'s start by setting up your Supabase project.');
     await fetchTaskInstruction(1, projectFiles, sessionContext);
     setTimeout(() => persistSession(projectFiles, promptHistory, 1, sessionContext), 100);
-  }, [ensureSession, projectFiles, promptHistory, sessionContext, persistSession, fetchTaskInstruction, speakText]);
+    // Offer to import a static web project as the starting point
+    loadWebProjects();
+  }, [ensureSession, projectFiles, promptHistory, sessionContext, persistSession, fetchTaskInstruction, speakText, loadWebProjects]);
 
   // ── Save + evaluate ──────────────────────────────────────────────────
   const handleSaveProject = useCallback(async () => {
@@ -1221,10 +1325,11 @@ const FullStackDevelopmentPage: React.FC = () => {
 
   // Tabs for the right panel
   const RIGHT_TABS: { id: RightTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'code',   label: 'Code',   icon: <Code2 size={12} />   },
-    { id: 'tables', label: 'Tables', icon: <Table2 size={12} />  },
-    { id: 'sql',    label: 'SQL',    icon: <Database size={12} /> },
-    { id: 'github', label: 'GitHub', icon: <Github size={12} />  },
+    { id: 'teaching', label: 'Teaching', icon: <Layers size={12} />  },
+    { id: 'code',     label: 'Code',     icon: <Code2 size={12} />   },
+    { id: 'tables',   label: 'Tables',   icon: <Table2 size={12} />  },
+    { id: 'sql',      label: 'SQL',      icon: <Database size={12} /> },
+    { id: 'github',   label: 'GitHub',   icon: <Github size={12} />  },
   ];
 
   // ── Show supabase credentials panel on setup task ─────────────────────
@@ -1244,6 +1349,104 @@ const FullStackDevelopmentPage: React.FC = () => {
           <VoiceFallback text={fallbackText} onDismiss={clearFallback} />
         </div>
       )}
+
+      {/* Web project picker — import a static Web Builder project */}
+      {showWebProjectPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-gray-800 border border-emerald-600/40 rounded-2xl w-full max-w-lg max-h-[80vh] overflow-hidden shadow-2xl flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <Database size={18} className="text-emerald-400" /> Start from a Web Project
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">Import your static site — we'll add the database layer on top</p>
+              </div>
+              <button onClick={() => setShowWebProjectPicker(false)} className="p-1 text-gray-400 hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {loadingWebProjects ? (
+                <div className="flex items-center gap-2 py-8 justify-center">
+                  <Loader2 size={16} className="animate-spin text-emerald-400" />
+                  <span className="text-sm text-gray-400">Loading your web projects…</span>
+                </div>
+              ) : webProjects.length === 0 ? (
+                <div className="py-8 text-center">
+                  <p className="text-sm text-gray-400">No Web Builder projects found.</p>
+                  <p className="text-xs text-gray-600 mt-1">Complete the Web Development track first, or start fresh below.</p>
+                </div>
+              ) : webProjects.map(proj => (
+                <button key={proj.id} onClick={() => importWebProject(proj)}
+                  className="w-full text-left p-3 bg-gray-700/40 hover:bg-gray-700 border border-gray-600 hover:border-emerald-500/40 rounded-xl transition-colors">
+                  <p className="text-sm font-semibold text-white">{proj.name}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{proj.files.length} files · click to import as starting point</p>
+                </button>
+              ))}
+            </div>
+            <div className="px-5 pb-4 flex-shrink-0">
+              <button onClick={() => setShowWebProjectPicker(false)}
+                className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold bg-gray-700 hover:bg-gray-600 text-white rounded-xl transition-colors">
+                Start with blank project
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Help Me Answer popup */}
+      <HelpMeAnswerPopup
+        {...helpMe}
+        onUseDraft={draft => { setPrompt(draft); setTimeout(() => promptRef.current?.focus(), 80); }}
+        phaseLabel={pm.label}
+      />
+
+      {/* Web project picker — import a static Web Builder project */}
+      {showWebProjectPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-gray-800 border border-emerald-600/40 rounded-2xl w-full max-w-lg max-h-[80vh] overflow-hidden shadow-2xl flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <Database size={18} className="text-emerald-400" /> Start from a Web Project
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">Import your static site — we'll add the database layer on top</p>
+              </div>
+              <button onClick={() => setShowWebProjectPicker(false)} className="p-1 text-gray-400 hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {loadingWebProjects ? (
+                <div className="flex items-center gap-2 py-8 justify-center">
+                  <Loader2 size={16} className="animate-spin text-emerald-400" />
+                  <span className="text-sm text-gray-400">Loading your web projects…</span>
+                </div>
+              ) : webProjects.length === 0 ? (
+                <div className="py-8 text-center">
+                  <p className="text-sm text-gray-400">No Web Builder projects found.</p>
+                  <p className="text-xs text-gray-600 mt-1">Complete the Web Development track first, or start fresh below.</p>
+                </div>
+              ) : webProjects.map(proj => (
+                <button key={proj.id} onClick={() => importWebProject(proj)}
+                  className="w-full text-left p-3 bg-gray-700/40 hover:bg-gray-700 border border-gray-600 hover:border-emerald-500/40 rounded-xl transition-colors">
+                  <p className="text-sm font-semibold text-white">{proj.name}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{proj.files.length} files · click to import as starting point</p>
+                </button>
+              ))}
+            </div>
+            <div className="px-5 pb-4 flex-shrink-0">
+              <button onClick={() => setShowWebProjectPicker(false)}
+                className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold bg-gray-700 hover:bg-gray-600 text-white rounded-xl transition-colors">
+                Start with blank project
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Help Me Answer popup */}
+      <HelpMeAnswerPopup
+        {...helpMe}
+        onUseDraft={draft => { setPrompt(draft); setTimeout(() => promptRef.current?.focus(), 80); }}
+        phaseLabel={pm.label}
+      />
 
       {/* Session picker */}
       {showSessionPicker && (
@@ -1530,6 +1733,42 @@ const FullStackDevelopmentPage: React.FC = () => {
                             See example →
                           </button>
                         )}
+                        {/* Help Me Answer + Skip buttons — mirrors WebDev */}
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            onClick={helpMe.open}
+                            title="Get help understanding and answering this question"
+                            className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium rounded-lg border border-purple-500/40 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors">
+                            <HelpCircle size={11} />
+                            Help Me Answer
+                          </button>
+                          {subTaskIndex < (taskInstruction?.subTasks?.length ?? 1) - 1 && (
+                            <button
+                              onClick={() => { const next = subTaskIndex + 1; setSubTaskIndex(next); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); }}
+                              title="Skip this step"
+                              className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg border border-gray-600 text-gray-400 hover:text-white hover:border-gray-400 transition-colors">
+                              <SkipIcon size={11} /> Skip
+                            </button>
+                          )}
+                        </div>
+                        {/* Help Me Answer + Skip buttons — mirrors WebDev */}
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            onClick={helpMe.open}
+                            title="Get help understanding and answering this question"
+                            className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium rounded-lg border border-purple-500/40 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors">
+                            <HelpCircle size={11} />
+                            Help Me Answer
+                          </button>
+                          {subTaskIndex < (taskInstruction?.subTasks?.length ?? 1) - 1 && (
+                            <button
+                              onClick={() => { const next = subTaskIndex + 1; setSubTaskIndex(next); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); }}
+                              title="Skip this step"
+                              className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg border border-gray-600 text-gray-400 hover:text-white hover:border-gray-400 transition-colors">
+                              <SkipIcon size={11} /> Skip
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ) : null}
@@ -1653,6 +1892,130 @@ const FullStackDevelopmentPage: React.FC = () => {
 
             {/* Tab content */}
             <div className="flex-1 flex overflow-hidden">
+
+              {/* Teaching tab — What Was Built, Why This Matters, critique, current question */}
+              {rightTab === 'teaching' && (
+                <div className="flex-1 overflow-y-auto p-5 space-y-4" style={{ background: '#fdf8f0' }}>
+                  {/* What was built */}
+                  {teachingExplanation && (
+                    <div className="rounded-xl border border-blue-200 overflow-hidden">
+                      <div className="px-4 py-2 bg-blue-50 border-b border-blue-200">
+                        <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">✅ What was built</p>
+                      </div>
+                      <p className="px-4 py-3 text-sm text-gray-700 leading-relaxed">{teachingExplanation}</p>
+                    </div>
+                  )}
+                  {/* Why this matters */}
+                  {taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
+                    <div className="rounded-xl border border-amber-200 overflow-hidden">
+                      <div className="px-4 py-2 bg-amber-50 border-b border-amber-200">
+                        <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">💡 Why this matters</p>
+                      </div>
+                      <p className="px-4 py-3 text-sm text-gray-700 leading-relaxed italic">
+                        {taskInstruction.subTaskTeaching[subTaskIndex]}
+                      </p>
+                    </div>
+                  )}
+                  {/* Critique feedback */}
+                  {subTaskCritique && (
+                    <div className={`rounded-xl border overflow-hidden ${
+                      subTaskCritique.hasSuggestions ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50'
+                    }`}>
+                      <div className="px-4 py-2 border-b border-inherit">
+                        <p className={`text-[10px] font-bold uppercase tracking-wide ${
+                          subTaskCritique.hasSuggestions ? 'text-amber-700' : 'text-emerald-700'
+                        }`}>
+                          {subTaskCritique.hasSuggestions ? '💡 Feedback on your response' : '✅ Step complete'}
+                        </p>
+                      </div>
+                      <p className="px-4 py-3 text-sm text-gray-700 leading-relaxed">{subTaskCritique.feedback}</p>
+                    </div>
+                  )}
+                  {/* Current question */}
+                  {taskInstruction?.subTasks?.[subTaskIndex] && (
+                    <div className="rounded-xl border border-gray-200 overflow-hidden">
+                      <div className={`px-4 py-2 border-b border-gray-200 ${pm.bg}`}>
+                        <p className={`text-[10px] font-bold uppercase tracking-wide ${pm.color}`}>
+                          Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
+                        </p>
+                      </div>
+                      <p className="px-4 py-3 text-sm text-gray-800 font-medium leading-relaxed">
+                        {taskInstruction.subTasks[subTaskIndex]}
+                      </p>
+                    </div>
+                  )}
+                  {/* Empty state */}
+                  {!teachingExplanation && !taskInstruction?.subTaskTeaching?.[subTaskIndex] && !subTaskCritique && (
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <Layers size={32} className="text-gray-300 mb-3" />
+                      <p className="text-sm text-gray-500 font-medium">Teaching panel</p>
+                      <p className="text-xs text-gray-400 mt-1">Submit a response in the left panel to see feedback here</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Teaching tab — What Was Built, Why This Matters, critique, current question */}
+              {rightTab === 'teaching' && (
+                <div className="flex-1 overflow-y-auto p-5 space-y-4" style={{ background: '#fdf8f0' }}>
+                  {/* What was built */}
+                  {teachingExplanation && (
+                    <div className="rounded-xl border border-blue-200 overflow-hidden">
+                      <div className="px-4 py-2 bg-blue-50 border-b border-blue-200">
+                        <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">✅ What was built</p>
+                      </div>
+                      <p className="px-4 py-3 text-sm text-gray-700 leading-relaxed">{teachingExplanation}</p>
+                    </div>
+                  )}
+                  {/* Why this matters */}
+                  {taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
+                    <div className="rounded-xl border border-amber-200 overflow-hidden">
+                      <div className="px-4 py-2 bg-amber-50 border-b border-amber-200">
+                        <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">💡 Why this matters</p>
+                      </div>
+                      <p className="px-4 py-3 text-sm text-gray-700 leading-relaxed italic">
+                        {taskInstruction.subTaskTeaching[subTaskIndex]}
+                      </p>
+                    </div>
+                  )}
+                  {/* Critique feedback */}
+                  {subTaskCritique && (
+                    <div className={`rounded-xl border overflow-hidden ${
+                      subTaskCritique.hasSuggestions ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50'
+                    }`}>
+                      <div className="px-4 py-2 border-b border-inherit">
+                        <p className={`text-[10px] font-bold uppercase tracking-wide ${
+                          subTaskCritique.hasSuggestions ? 'text-amber-700' : 'text-emerald-700'
+                        }`}>
+                          {subTaskCritique.hasSuggestions ? '💡 Feedback on your response' : '✅ Step complete'}
+                        </p>
+                      </div>
+                      <p className="px-4 py-3 text-sm text-gray-700 leading-relaxed">{subTaskCritique.feedback}</p>
+                    </div>
+                  )}
+                  {/* Current question */}
+                  {taskInstruction?.subTasks?.[subTaskIndex] && (
+                    <div className="rounded-xl border border-gray-200 overflow-hidden">
+                      <div className={`px-4 py-2 border-b border-gray-200 ${pm.bg}`}>
+                        <p className={`text-[10px] font-bold uppercase tracking-wide ${pm.color}`}>
+                          Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}
+                        </p>
+                      </div>
+                      <p className="px-4 py-3 text-sm text-gray-800 font-medium leading-relaxed">
+                        {taskInstruction.subTasks[subTaskIndex]}
+                      </p>
+                    </div>
+                  )}
+                  {/* Empty state */}
+                  {!teachingExplanation && !taskInstruction?.subTaskTeaching?.[subTaskIndex] && !subTaskCritique && (
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <Layers size={32} className="text-gray-300 mb-3" />
+                      <p className="text-sm text-gray-500 font-medium">Teaching panel</p>
+                      <p className="text-xs text-gray-400 mt-1">Submit a response in the left panel to see feedback here</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Code tab: file tree + Monaco */}
               {rightTab === 'code' && (
