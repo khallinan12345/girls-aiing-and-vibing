@@ -11,17 +11,14 @@ import { supabase } from '../../lib/supabaseClient';
 import Editor from '@monaco-editor/react';
 import GitHubPanel from '../../components/GitHubPanel';
 import { useVoice } from '../../hooks/useVoice';
-import { useHelpMeAnswer } from '../../hooks/useHelpMeAnswer';
-import HelpMeAnswerPopup from '../../components/HelpMeAnswerPopup';
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
   Database, Table2, Play, CheckCircle, ArrowRight, FileCode,
-  ChevronDown, ChevronRight, Loader2, Save, FolderOpen, Download, FileText,
+  ChevronDown, ChevronRight, Loader2, Save, FolderOpen, Download,
   ArrowUpCircle, SkipForward, Lightbulb, RefreshCw, BarChart3,
   Award, X, Copy, Check, Volume2, VolumeX, AlertCircle, Star,
   Key, Globe, Link, Eye, EyeOff, Trash2, Plus, Code2,
   Package, Layers, Cpu, MessageSquarePlus, Github,
-  HelpCircle, SkipForward,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -54,7 +51,7 @@ interface SessionRecord {
 
 interface SupaCredentials { url: string; anonKey: string; }
 
-type RightTab = 'teaching' | 'code' | 'tables' | 'sql' | 'github';
+type RightTab = 'code' | 'tables' | 'sql' | 'github';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -63,7 +60,6 @@ const FS_ACTIVITY = 'fullstack_development';
 const LS_CREDS_KEY = 'fs_dev_supabase_creds';
 
 const TASKS: TaskDef[] = [
-  { id: 'load_web_project', label: 'Load Your Web Project',    phase: 1, icon: '📂', isOnboarding: true },
   { id: 'intro_fullstack',  label: 'Full-Stack Overview',      phase: 1, icon: '🏗️', isOnboarding: true },
   { id: 'supabase_setup',   label: 'Set Up Supabase Project',   phase: 1, icon: '🔑' },
   { id: 'schema_design',    label: 'Design Your Schema',        phase: 1, icon: '📐' },
@@ -192,112 +188,6 @@ const ScoreBadge: React.FC<{ score: number; max?: number }> = ({ score, max = 3 
 };
 
 // ─── Onboarding card ──────────────────────────────────────────────────────────
-
-// Web Project Loader - Phase 0
-
-const WebProjectLoader: React.FC<{
-  userId: string | null;
-  onProjectLoaded: (project: WebProject, dataRoleAnswer: string) => void;
-}> = ({ userId, onProjectLoaded }) => {
-  const [projects, setProjects] = React.useState<WebProject[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [selected, setSelected] = React.useState<WebProject | null>(null);
-  const [question, setQuestion] = React.useState<string | null>(null);
-  const [questionLoading, setQuestionLoading] = React.useState(false);
-  const [answer, setAnswer] = React.useState('');
-  const [submitting, setSubmitting] = React.useState(false);
-  const answerRef = React.useRef<HTMLTextAreaElement>(null);
-
-  React.useEffect(() => {
-    if (!userId) { setLoading(false); return; }
-    supabase.from('dashboard')
-      .select('session_id, session_name, pages, updated_at')
-      .eq('user_id', userId).eq('activity', 'web_development')
-      .not('session_id', 'is', null).order('updated_at', { ascending: false })
-      .then(({ data }) => {
-        if (data?.length) setProjects(data.map((s: any) => {
-          const files: ProjectFile[] = (s.pages || []).map((p: any) => ({ path: p.path || p.name, content: p.content || p.code || '' }));
-          return { id: s.session_id, name: s.session_name || 'Unnamed Project', files, pageCount: files.filter(f => f.path.includes('/pages/')).length };
-        }));
-        setLoading(false);
-      });
-  }, [userId]);
-
-  const handleSelect = async (proj: WebProject) => {
-    setSelected(proj); setQuestion(null); setAnswer(''); setQuestionLoading(true);
-    try {
-      const pages = proj.files.filter(f => f.path.includes('/pages/')).map(f => f.path.split('/').pop()?.replace('.jsx','') || '').join(', ');
-      const appCode = proj.files.find(f => f.path === 'src/App.jsx')?.content.slice(0, 300) || '';
-      const desc = `Site: ${proj.name}. Pages: ${pages || 'home'}. Components: ${proj.files.filter(f=>f.path.includes('/components/')).length}. Code: ${appCode}`;
-      const system = 'You are a full-stack educator. Ask ONE Socratic question (under 40 words, starting with "What happens when" or "How would") that reveals why their specific static site needs a real database. Be specific to THEIR site. No preamble.';
-      const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ page: 'WebDevelopmentPage', max_tokens: 80, system, messages: [{ role: 'user', content: `What they built:\n${desc}\nAsk the question.` }] }) });
-      const data = await res.json();
-      setQuestion(data.choices?.[0]?.message?.content?.trim() || 'What happens when a visitor wants to add their own content to your site? Where would it go?');
-      setTimeout(() => answerRef.current?.focus(), 80);
-    } catch { setQuestion('What happens when a visitor wants to add their own content to your site? Where would it go?'); }
-    finally { setQuestionLoading(false); }
-  };
-
-  return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-4">
-      <div className="p-4 bg-blue-500/10 border border-blue-500/25 rounded-xl">
-        <p className="text-xs font-bold text-blue-400 uppercase mb-2">Step 1 -- Your Starting Point</p>
-        <p className="text-sm text-gray-300 leading-relaxed">Full-stack development adds a real database to the site you already built. Select your web project -- we will build the data layer on top of it.</p>
-      </div>
-      {loading ? (
-        <div className="flex items-center gap-2 py-6 justify-center"><Loader2 size={16} className="animate-spin text-blue-400" /><span className="text-sm text-gray-400">Loading your web projects...</span></div>
-      ) : projects.length === 0 ? (
-        <div className="p-4 bg-amber-500/10 border border-amber-500/25 rounded-xl text-center">
-          <p className="text-sm text-amber-300 font-medium mb-1">No completed Web Builder projects found</p>
-          <p className="text-xs text-gray-400">Complete the Web Development track first, then come back to add the database layer.</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Your completed web projects</p>
-          {projects.map(proj => (
-            <button key={proj.id} onClick={() => handleSelect(proj)}
-              className={`w-full text-left p-3 rounded-xl border transition-all ${selected?.id === proj.id ? 'bg-blue-500/15 border-blue-500/50 text-white' : 'bg-gray-800/40 border-gray-700 text-gray-300 hover:border-blue-500/30 hover:bg-gray-800'}`}>
-              <div className="flex items-center gap-2">
-                <span className="text-lg">🌐</span>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold truncate">{proj.name}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">{proj.files.length} files &middot; {proj.pageCount} page{proj.pageCount !== 1 ? 's' : ''}</p>
-                </div>
-                {selected?.id === proj.id && <CheckCircle size={14} className="text-blue-400 ml-auto" />}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-      {selected && (
-        <div className="space-y-3">
-          {questionLoading ? (
-            <div className="flex items-center gap-2 py-3"><Loader2 size={13} className="animate-spin text-emerald-400" /><span className="text-xs text-gray-400">Thinking about your project...</span></div>
-          ) : question ? (
-            <>
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl">
-                <p className="text-[10px] font-bold text-emerald-400 uppercase mb-1">Before we add the database...</p>
-                <p className="text-sm text-white font-medium leading-relaxed">{question}</p>
-              </div>
-              <textarea ref={answerRef} value={answer} onChange={e => setAnswer(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && answer.trim()) { setSubmitting(true); onProjectLoaded(selected, answer.trim()); } }}
-                placeholder="Write your answer here -- there is no wrong answer..."
-                rows={4} className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-600 resize-none outline-none focus:border-emerald-500 transition-colors" />
-              <p className="text-[9px] text-gray-600">Ctrl+Enter to continue</p>
-              <button onClick={() => { if (answer.trim()) { setSubmitting(true); onProjectLoaded(selected, answer.trim()); } }}
-                disabled={!answer.trim() || submitting}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors disabled:opacity-40">
-                {submitting ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
-                Continue to Full-Stack Overview
-              </button>
-            </>
-          ) : null}
-        </div>
-      )}
-    </div>
-  );
-};
 
 const FullStackOnboarding: React.FC<{ onComplete: () => void }> = ({ onComplete }) => (
   <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -966,30 +856,15 @@ const FullStackDevelopmentPage: React.FC = () => {
   const [evalError, setEvalError]           = useState<string | null>(null);
 
   // ── Right panel ──────────────────────────────────────────────────────
-  const [rightTab, setRightTab]       = useState<RightTab>('teaching');
+  const [rightTab, setRightTab]       = useState<RightTab>('code');
   const [generatedSql, setGeneratedSql] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [copied, setCopied]           = useState(false);
-  const [teachingExplanation, setTeachingExplanation] = useState<string | null>(null);
-  const [loadedWebProject, setLoadedWebProject] = useState<{ name: string; fileCount: number } | null>(null);
-  const [dataRoleAnswer, setDataRoleAnswer] = useState<string | null>(null);
-  const [showWebProjectPicker, setShowWebProjectPicker] = useState(false);
-  const [webProjects, setWebProjects] = useState<any[]>([]);
-  const [loadingWebProjects, setLoadingWebProjects] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
   const currentTask  = TASKS[taskIndex];
   const currentPhase = currentTask?.phase ?? 1;
   const pm           = PHASE_META[currentPhase];
-
-  const helpMe = useHelpMeAnswer({
-    question:          taskInstruction?.subTasks?.[subTaskIndex]        ?? '',
-    teaching:          taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '',
-    taskLabel:         currentTask?.label ?? '',
-    sessionContext,
-    chatPage:          'WebDevelopmentPage',
-    systemPromptPreset: 'web-dev',
-  });
 
   // ── Load sessions ─────────────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
@@ -1058,23 +933,6 @@ const FullStackDevelopmentPage: React.FC = () => {
     setTaskInstruction(null); setPrompt(''); setAiExplanation(null); setErrorMsg(null); setSubTaskCritique(null);
   }, []);
 
-  const handleWebProjectLoaded = useCallback(async (
-    project: { id: string; name: string; files: ProjectFile[]; pageCount: number },
-    answer: string,
-  ) => {
-    const merged = mergeFiles(STARTER_FILES, project.files);
-    setProjectFiles(merged); setActiveFilePath('src/App.jsx');
-    setSessionName(`${project.name} (Full-Stack)`);
-    setLoadedWebProject({ name: project.name, fileCount: project.files.length });
-    setDataRoleAnswer(answer);
-    const newCtx = { ...sessionContext, importedSiteName: project.name, dataRoleAnswer: answer };
-    setSessionContext(newCtx);
-    await ensureSession();
-    setTaskIndex(1); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
-    await fetchTaskInstruction(1, merged, newCtx);
-    setTimeout(() => persistSession(merged, promptHistory, 1, newCtx), 100);
-  }, [sessionContext, ensureSession, fetchTaskInstruction, promptHistory, persistSession]);
-
   const handleDeleteSession = useCallback(async (e: React.MouseEvent, sid: string) => {
     e.stopPropagation(); if (!userId) return;
     setDeletingSessionId(sid);
@@ -1097,9 +955,7 @@ const FullStackDevelopmentPage: React.FC = () => {
         projectFiles: fileSummary, sessionContext: ctx,
         completedTasks: TASKS.slice(0, idx).map(t => t.id),
         communicationStrategy, learningStrategy,
-        supabaseConnected:  !!(creds.url && creds.anonKey),
-        importedSiteName:   ctx.importedSiteName || null,
-        dataRoleAnswer:     ctx.dataRoleAnswer   || null,
+        supabaseConnected: !!(creds.url && creds.anonKey),
       });
       setTaskInstruction(result as TaskInstruction);
       if (result?.subTaskTeaching?.[0] && result?.subTasks?.[0]) {
@@ -1223,8 +1079,6 @@ const FullStackDevelopmentPage: React.FC = () => {
 
       entry.aiExplanation = result.explanation;
       setAiExplanation(result.explanation || null);
-      setTeachingExplanation(result.explanation || null);
-      if (result.explanation) setRightTab('teaching');
 
       // Critique the student's prompt
       if (prompt.trim().length > 10) {
@@ -1367,8 +1221,7 @@ const FullStackDevelopmentPage: React.FC = () => {
 
   // Tabs for the right panel
   const RIGHT_TABS: { id: RightTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'teaching', label: 'Teaching', icon: <Layers size={12} /> },
-    { id: 'code',     label: 'Code',     icon: <Code2 size={12} />   },
+    { id: 'code',   label: 'Code',   icon: <Code2 size={12} />   },
     { id: 'tables', label: 'Tables', icon: <Table2 size={12} />  },
     { id: 'sql',    label: 'SQL',    icon: <Database size={12} /> },
     { id: 'github', label: 'GitHub', icon: <Github size={12} />  },
@@ -1392,11 +1245,6 @@ const FullStackDevelopmentPage: React.FC = () => {
         </div>
       )}
 
-      <HelpMeAnswerPopup
-        {...helpMe}
-        onUseDraft={draft => { setPrompt(draft); setTimeout(() => promptRef.current?.focus(), 80); }}
-        phaseLabel={pm.label}
-      />
       {/* Session picker */}
       {showSessionPicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -1550,12 +1398,6 @@ const FullStackDevelopmentPage: React.FC = () => {
               })}
               <span className="text-[10px] text-gray-500 ml-1">{taskIndex + 1}/{TASKS.length}</span>
             </div>
-            {loadedWebProject && (
-              <div className="hidden md:flex items-center gap-1 px-2 py-0.5 bg-blue-500/10 border border-blue-500/25 rounded-full flex-shrink-0">
-                <span className="text-[10px]">🌐</span>
-                <span className="text-[10px] text-blue-300 font-medium truncate max-w-[120px]">{loadedWebProject.name}</span>
-              </div>
-            )}
             {/* Creds status */}
             {creds.url && creds.anonKey && (
               <div className="hidden md:flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/25 rounded-full flex-shrink-0">
@@ -1595,14 +1437,6 @@ const FullStackDevelopmentPage: React.FC = () => {
             </button>
             {lastSaved && !isSaving && <span className="text-[10px] text-gray-600 hidden sm:block">Saved {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
             {saveError && <span className="text-[10px] text-red-500 hidden sm:block">Save failed</span>}
-            <a
-              href="https://wohmsbeygxrbwogrggkq.supabase.co/storage/v1/object/sign/platform-assets/My_Community_My_Voice_Tutorial_Script.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV81YTZmOGZhNi1hMTY1LTRlNjYtOTM2Ny1mYzE4NWMzN2YyODUiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJwbGF0Zm9ybS1hc3NldHMvTXlfQ29tbXVuaXR5X015X1ZvaWNlX1R1dG9yaWFsX1NjcmlwdC5wZGYiLCJpYXQiOjE3Nzc2NTUyOTUsImV4cCI6MTgwOTE5MTI5NX0.PRMvU75tOURNUpz9iuwc8PXqHTlTdCqr1IrGNdHWyiM"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Open Tutorial Script (PDF)"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-600/30 border border-amber-500/30 rounded-lg transition-colors">
-              <FileText size={12} /> Tutorial
-            </a>
             <button onClick={handleSaveProject} disabled={isSaving || !taskHasGeneration}
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-lg transition-colors disabled:opacity-40">
               {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
@@ -1623,10 +1457,7 @@ const FullStackDevelopmentPage: React.FC = () => {
 
             {currentTask?.isOnboarding ? (
               <div className="flex-1 overflow-y-auto">
-                {currentTask.id === 'load_web_project'
-                  ? <WebProjectLoader userId={userId} onProjectLoaded={handleWebProjectLoaded} />
-                  : <FullStackOnboarding onComplete={handleOnboardingComplete} />
-                }
+                <FullStackOnboarding onComplete={handleOnboardingComplete} />
               </div>
             ) : (
               <>
@@ -1691,18 +1522,6 @@ const FullStackDevelopmentPage: React.FC = () => {
                             See example →
                           </button>
                         )}
-                        <div className="flex items-center gap-2 mt-2">
-                          <button onClick={helpMe.open}
-                            className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium rounded-lg border border-purple-500/40 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors">
-                            <HelpCircle size={11} /> Help Me Answer
-                          </button>
-                          {subTaskIndex < (taskInstruction?.subTasks?.length ?? 1) - 1 && (
-                            <button onClick={() => { setSubTaskIndex(subTaskIndex + 1); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); }}
-                              className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg border border-gray-600 text-gray-400 hover:text-white hover:border-gray-400 transition-colors">
-                              <SkipForward size={11} /> Skip
-                            </button>
-                          )}
-                        </div>
                       </div>
                     </div>
                   ) : null}
@@ -1826,63 +1645,6 @@ const FullStackDevelopmentPage: React.FC = () => {
 
             {/* Tab content */}
             <div className="flex-1 flex overflow-hidden">
-
-              {rightTab === 'teaching' && (
-                <div className="flex-1 overflow-y-auto p-5 space-y-4" style={{ background: '#fdf8f0' }}>
-                  {teachingExplanation && (
-                    <div className="rounded-xl border border-blue-200 overflow-hidden">
-                      <div className="px-4 py-2 bg-blue-50 border-b border-blue-200"><p className="text-[10px] font-bold text-blue-600 uppercase">What was built</p></div>
-                      <p className="px-4 py-3 text-sm text-gray-700 leading-relaxed">{teachingExplanation}</p>
-                    </div>
-                  )}
-                  {loadedWebProject && !teachingExplanation && (
-                    <div className="rounded-xl border border-blue-200 overflow-hidden">
-                      <div className="px-4 py-2 bg-blue-50 border-b border-blue-200"><p className="text-[10px] font-bold text-blue-600 uppercase">Starting from your web project</p></div>
-                      <div className="px-4 py-3">
-                        <p className="text-sm font-semibold text-gray-800">{loadedWebProject.name}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{loadedWebProject.fileCount} files imported as your starting point</p>
-                        {dataRoleAnswer && (
-                          <div className="mt-2 p-2 bg-emerald-50 rounded-lg border border-emerald-200">
-                            <p className="text-[10px] font-bold text-emerald-700 uppercase mb-1">Your thinking about data</p>
-                            <p className="text-xs text-gray-700 italic">{dataRoleAnswer}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {taskInstruction?.subTaskTeaching?.[subTaskIndex] && (
-                    <div className="rounded-xl border border-amber-200 overflow-hidden">
-                      <div className="px-4 py-2 bg-amber-50 border-b border-amber-200"><p className="text-[10px] font-bold text-amber-700 uppercase">Why this matters</p></div>
-                      <p className="px-4 py-3 text-sm text-gray-700 leading-relaxed italic">{taskInstruction.subTaskTeaching[subTaskIndex]}</p>
-                    </div>
-                  )}
-                  {subTaskCritique && (
-                    <div className={`rounded-xl border overflow-hidden ${subTaskCritique.hasSuggestions ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50'}`}>
-                      <div className="px-4 py-2 border-b border-inherit">
-                        <p className={`text-[10px] font-bold uppercase ${subTaskCritique.hasSuggestions ? 'text-amber-700' : 'text-emerald-700'}`}>
-                          {subTaskCritique.hasSuggestions ? 'Feedback on your response' : 'Step complete'}
-                        </p>
-                      </div>
-                      <p className="px-4 py-3 text-sm text-gray-700 leading-relaxed">{subTaskCritique.feedback}</p>
-                    </div>
-                  )}
-                  {taskInstruction?.subTasks?.[subTaskIndex] && (
-                    <div className="rounded-xl border border-gray-200 overflow-hidden">
-                      <div className={`px-4 py-2 border-b border-gray-200 ${pm.bg}`}>
-                        <p className={`text-[10px] font-bold uppercase ${pm.color}`}>Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}</p>
-                      </div>
-                      <p className="px-4 py-3 text-sm text-gray-800 font-medium leading-relaxed">{taskInstruction.subTasks[subTaskIndex]}</p>
-                    </div>
-                  )}
-                  {!teachingExplanation && !loadedWebProject && !taskInstruction?.subTaskTeaching?.[subTaskIndex] && !subTaskCritique && (
-                    <div className="flex flex-col items-center justify-center py-16 text-center">
-                      <Layers size={32} className="text-gray-300 mb-3" />
-                      <p className="text-sm text-gray-500 font-medium">Teaching panel</p>
-                      <p className="text-xs text-gray-400 mt-1">Submit a response to see feedback here</p>
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* Code tab: file tree + Monaco */}
               {rightTab === 'code' && (
