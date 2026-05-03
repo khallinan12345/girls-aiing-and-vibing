@@ -271,7 +271,7 @@ async function generateOnce(
   imageData?: string,
   imageMediaType?: string,
   imageName?: string,
-  maxTokens = 8000,
+  maxTokens = 16000,
 ): Promise<GenerateResult> {
   const userContent: any = imageData
     ? [
@@ -490,7 +490,7 @@ async function splitAndGenerate(
     console.log(`[generate-site-code] splitAndGenerate: no split detected for taskId=${taskId}, using single call`);
     const relevantFiles = buildRelevantFiles(projectFiles, taskId, contentCap);
     const userMessage = buildUserMessage(action, taskId, prompt, relevantFiles);
-    return generateOnce(apiKey, systemPrompt, userMessage, imageData, imageMediaType, imageName);
+    return generateOnce(apiKey, systemPrompt, userMessage, imageData, imageMediaType, imageName, maxTokens);
   }
 
   console.log(`[generate-site-code] splitAndGenerate: ${chunks.length} chunks for taskId=${taskId}`);
