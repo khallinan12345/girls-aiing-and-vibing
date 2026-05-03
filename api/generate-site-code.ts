@@ -1,11 +1,22 @@
 // api/generate-site-code.ts
 // Generates / iterates Vite + React static website code (no database).
 //
-// TRIAGE PATCH: all Anthropic errors now logged to system_events + email alert.
-// Uses shared anthropicFetch + checkUsage + logEvent from lib/api-logger.
+// Request body:
+//   action: 'generate' | 'iterate' | 'critique'
+//   prompt: string
+//   taskId: string
+//   projectFiles: { path: string; content: string }[]
+//   sessionContext: { siteName?, sitePurpose?, audience?, pages?, components? }
+//   communicationStrategy?: any
+//   learningStrategy?: any
+//
+// Response (generate/iterate):
+//   { files: { path, content }[], explanation: string, sessionContext? }
+// Response (critique):
+//   { critique: string, feedback: string }
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { anthropicFetch, checkUsage, logEvent } from '../lib/api-logger';
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
 // ─── Per-task guidance ────────────────────────────────────────────────────────
 
@@ -30,24 +41,27 @@ Also return sessionContext: { pages: "comma-separated page names", components: "
 
   app_shell: `
 Build the application shell with react-router-dom v6 routing.
-Return EXACTLY these four files (no more):
-- src/App.jsx — BrowserRouter + Routes with one Route per planned page. Import each page component.
-- src/components/Navbar.jsx — responsive navigation with <Link> to every route
-- src/components/Footer.jsx — simple footer with site name and copyright year
-- src/index.css — clean base styles: CSS reset, font stack, colour variables, basic layout utilities
+Return EXACTLY these four files — no more, no fewer:
+1. src/App.jsx — BrowserRouter + Routes. One Route per planned page. Import each page component.
+2. src/components/Navbar.jsx — navigation links using react-router-dom <Link>. Keep it concise.
+3. src/components/Footer.jsx — site name, tagline, copyright year. Keep it concise.
+4. src/index.css — CSS reset, font stack, 2–3 colour variables, minimal layout utilities only.
 
-For any page not yet built, create a minimal placeholder file in src/pages/ (just an <h1> and <p>).
-Keep component code concise — save detailed styling for the styling task.`,
+For pages not yet built, stub them inline in App.jsx as arrow-function placeholders — do NOT create separate placeholder files.
+Keep every file SHORT. This is scaffolding only — detailed content and styling come in later tasks.
+Return at most 4 files total.`,
 
   home_page: `
-Build the Home page — the most important page of the site.
-Based on the site purpose and audience, create:
-- src/pages/HomePage.jsx — a complete, visually engaging home page with:
-  - Hero section (headline, subheadline, call-to-action button)
-  - At least one content section relevant to the site's purpose
-  - Professional, clean layout using CSS classes
-Update src/index.css with any new styles needed.
-Make it feel real — not a placeholder.`,
+Build the Home page only. Return at most 2 files:
+1. src/pages/HomePage.jsx — a complete home page with:
+   - Hero section (headline, subheadline, one call-to-action button)
+   - One feature/stats row (3 items)
+   - One preview section linking to inner pages
+   Keep the JSX concise — use CSS classes, not inline styles.
+2. src/index.css — append only the new CSS classes used in HomePage.jsx. Do not rewrite existing rules.
+
+Do NOT modify App.jsx, Navbar, Footer, or any other file.
+Return at most 2 files total.`,
 
   content_pages: `
 Build EXACTLY ONE content page based on the student's instruction.
@@ -61,38 +75,42 @@ Also return ONLY the updated src/App.jsx if and only if a new route needs to be 
 Return at most 2 files total: the new page + App.jsx (if needed). Nothing else.`,
 
   interactivity: `
-Add meaningful interactivity using React state and events.
-Examples appropriate for a static site (no database needed):
-- Contact form with validation and a success message (useState — no real submission)
-- Accordion / FAQ section that expands/collapses
-- Image gallery or tabs with active state
-- Dark/light mode toggle
-- Smooth scroll, animated counters, or other UX enhancements
-Choose what fits the site's purpose. Use useState and useEffect only — no external APIs.`,
+Add ONE interactive feature based on the student's instruction. Return at most 2 files:
+1. The component or page file that contains the interactive feature (e.g. src/pages/ContactPage.jsx for a form, or src/components/FAQ.jsx for an accordion).
+2. src/index.css — append only the new CSS classes needed. Do not rewrite existing rules.
+
+Use useState and useEffect only — no external APIs, no Supabase.
+Do NOT modify App.jsx, Navbar, Footer, or any other existing file unless a new route is strictly required.
+One feature. Two files maximum.`,
 
   styling: `
-Elevate the visual design across the entire site.
-Update src/index.css and any component styles to create a cohesive, polished look:
-- Consistent colour palette (define CSS custom properties / variables)
-- Typography scale (headings, body, captions)
-- Spacing system (margin/padding utilities)
-- Hover states and smooth transitions
-- Card and button styles that match the site's personality
-The result should look like a real, professional website.`,
+Polish the site's visual design. Return ONLY src/index.css — no other files.
+Update index.css to add or refine:
+- CSS custom properties (--color-primary, --color-accent, --font-heading, --font-body, etc.)
+- Typography scale (h1–h4, body, caption sizes)
+- Spacing utilities (consistent margin/padding classes)
+- Button and card styles
+- Hover transitions (keep under 300ms)
+Do NOT return any .jsx files. Components already use CSS classes — updating index.css is sufficient.
+Return exactly 1 file: src/index.css.`,
 
   responsive: `
-Make the site fully responsive for mobile, tablet, and desktop.
-Update styles to use:
-- Flexible layouts (flexbox / CSS grid)
-- Media queries for breakpoints (mobile-first: 480px, 768px, 1024px)
-- Responsive navigation (hamburger menu on mobile using useState)
-- Readable font sizes and touch-friendly tap targets on small screens
-Test every page at each breakpoint.`,
+Make the site mobile-responsive. Return at most 2 files:
+1. src/index.css — add media queries (mobile-first: 480px, 768px, 1024px). Cover layout, font sizes, touch targets. Do not rewrite existing rules — append the @media blocks.
+2. src/components/Navbar.jsx — add a hamburger menu toggle (useState boolean) for screens under 768px.
+
+Do NOT modify any page files. CSS media queries applied to existing classes are sufficient for page layouts.
+Return at most 2 files total.`,
 
   deploy_prep: `
 Prepare the project for deployment.
 Return:
-- README.md — full setup and deployment instructions
+- README.md — full setup and deployment instructions:
+  1. Clone / unzip
+  2. npm install
+  3. npm run dev  (local preview)
+  4. npm run build  (production build)
+  5. Deploy dist/ folder to Netlify, Vercel, or GitHub Pages
 - vite.config.js — ensure base path is configurable for subdirectory hosting
 - src/components/Navbar.jsx — verify all links use react-router-dom <Link>, not <a href>
 Add a brief comment at the top of App.jsx explaining the project structure.`,
@@ -108,6 +126,7 @@ function buildSystemPrompt(
   learningStrategy?: any,
   freeFormInstruction?: string,
 ): string {
+  // Personality block — shapes explanation tone
   const commStr  = communicationStrategy ? JSON.stringify(communicationStrategy) : null;
   const learnStr = learningStrategy      ? JSON.stringify(learningStrategy)      : null;
   const personalityBlock = (commStr || learnStr)
@@ -173,20 +192,29 @@ Return only the JSON object — no extra text, no backticks.`;
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const {
-    action, prompt, taskId, projectFiles, sessionContext,
-    communicationStrategy, learningStrategy,
-    imageData, imageMediaType, imageName,
-    freeFormFeedback, freeFormInstruction,
-    user_id, cohort,                         // pass through for triage context
-  } = req.body;
+  const { action, prompt, taskId, projectFiles, sessionContext, communicationStrategy, learningStrategy,
+          imageData, imageMediaType, imageName,
+          freeFormFeedback, freeFormInstruction } = req.body;
 
   if (!prompt?.trim()) return res.status(400).json({ error: 'Prompt is required' });
 
-  const meta = { user_id, cohort };           // forwarded to every logEvent call
-
   try {
-    const contentCap = taskId === 'content_pages' ? 250 : 600;
+    // For content_pages, existing files can already be 150+ lines each.
+    // Truncate more aggressively so the input payload doesn't crowd out the output budget.
+    // Phase 3 tasks (styling, responsive) operate on a fully-built project — cap tightly.
+    const INPUT_CAPS: Record<string, number> = {
+      define_site:   600,
+      plan_pages:    600,
+      app_shell:     300,  // project is mostly empty at this point, but be safe
+      home_page:     300,  // App/Navbar/Footer already exist; don't let them eat the budget
+      content_pages: 250,  // most files already written
+      interactivity: 250,
+      styling:       200,  // entire project exists; only need file names + class names
+      responsive:    200,
+      deploy_prep:   400,
+    };
+    const contentCap = INPUT_CAPS[taskId] ?? 400;
+
     const relevantFiles = (projectFiles || [])
       .filter((f: any) => f.content?.length > 10)
       .slice(0, 8)
@@ -199,6 +227,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           relevantFiles ? `Current project files:\n${relevantFiles}` : ''
         }`;
 
+    // Build user message — plain text, or multimodal when a screenshot is attached
     const userContent: any = imageData
       ? [
           { type: 'image', source: { type: 'base64', media_type: imageMediaType || 'image/jpeg', data: imageData } },
@@ -206,56 +235,55 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ]
       : userMessage;
 
+    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
+
+    // Phase 1 planning tasks return a single markdown file — 4000 tokens is enough.
+    // Phase 2+ tasks generate multiple JSX files simultaneously (App + Navbar + Footer + pages).
+    // Those routinely exceed 4000 tokens, causing silent JSON truncation → empty files response.
     const SINGLE_FILE_TASKS = new Set(['define_site', 'plan_pages']);
     const maxTokens = (action === 'critique' || SINGLE_FILE_TASKS.has(taskId)) ? 4000 : 8000;
 
-    // ── TRIAGE: use wrapped fetch instead of raw fetch ────────────────────────
-    const response = await anthropicFetch(
-      {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: maxTokens,
-        system: buildSystemPrompt(
-          action, taskId, sessionContext,
-          communicationStrategy, learningStrategy,
-          freeFormFeedback ? freeFormInstruction : undefined,
-        ),
+        system: buildSystemPrompt(action, taskId, sessionContext, communicationStrategy, learningStrategy, freeFormFeedback ? freeFormInstruction : undefined),
         messages: [{ role: 'user', content: userContent }],
-      },
-      'generate-site-code',
-      meta,
-    );
+      }),
+    });
 
     if (!response.ok) {
-      // anthropicFetch already logged it; just return to the client
       const err = await response.json().catch(() => ({}));
-      return res.status(response.status).json({
-        error: (err as any)?.error?.message || `Anthropic API error (${response.status})`,
-      });
+      throw new Error(`Anthropic API error (${response.status}): ${(err as any)?.error?.message || 'Unknown'}`);
     }
-
     const completion = await response.json();
     const raw: string = completion.content?.[0]?.text || '{}';
-    const stopReason  = completion.stop_reason;
 
+    // Log stop_reason — 'max_tokens' means the response was truncated (the primary cause of
+    // silent empty-files failures in Phase 2). Surface it immediately rather than swallowing it.
+    const stopReason = completion.stop_reason;
     console.log(`[generate-site-code] taskId=${taskId} stop_reason=${stopReason} raw_len=${raw.length} max_tokens=${maxTokens}`);
-
-    // ── TRIAGE: log max_tokens truncation ─────────────────────────────────────
-    await checkUsage(
-      { stop_reason: stopReason, usage: completion.usage },
-      'generate-site-code',
-      'claude-sonnet-4-6',
-      meta,
-    );
-
     if (stopReason === 'max_tokens') {
+      console.error('[generate-site-code] Response truncated — JSON will be malformed. Increase max_tokens or reduce file scope.');
       return res.status(200).json({
         files: [],
         explanation: `The AI ran out of space generating code for "${taskId}". Try asking for one file at a time, or break this task into smaller steps.`,
       });
     }
 
+    // Robustly extract the JSON object even when Claude adds preamble or closing text.
+    // Strategy: find the outermost { ... } block in the response.
     function extractJSON(text: string): string {
+      // 1. Strip markdown fences
       const stripped = text.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
+      // 2. Find first { and last } to isolate the JSON object
       const start = stripped.indexOf('{');
       const end   = stripped.lastIndexOf('}');
       if (start !== -1 && end !== -1 && end > start) return stripped.slice(start, end + 1);
@@ -265,35 +293,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let result: any;
     try {
       result = JSON.parse(extractJSON(raw));
-    } catch {
-      // ── TRIAGE: JSON parse failure after a successful API call ───────────────
-      await logEvent({
-        function_name: 'generate-site-code',
-        event_type:    'json_parse_failure',
-        severity:      'error',
-        payload: {
-          taskId,
-          stopReason,
-          raw_length:  raw.length,
-          raw_sample:  raw.slice(0, 300),
-          maxTokens,
-          note: 'Response was not valid JSON despite stop_reason=end_turn',
-        },
-        ...meta,
-      });
-
+    } catch (parseErr: any) {
+      // JSON parse failure after stop_reason=end_turn is unexpected — log the raw output for debugging
+      console.error('[generate-site-code] JSON parse failed. stop_reason:', stopReason, 'raw (first 500):', raw.slice(0, 500));
       if (action === 'critique') return res.status(200).json({ critique: raw, feedback: raw });
-      return res.status(500).json({
-        error: `AI response could not be parsed. Raw output (first 200 chars): ${raw.slice(0, 200)}`,
-      });
+      return res.status(500).json({ error: `AI response could not be parsed. Raw output (first 200 chars): ${raw.slice(0, 200)}` });
     }
 
     if (action === 'critique') {
       return res.status(200).json({
-        critique:       result.critique  || result.feedback || raw,
-        feedback:       result.feedback  || result.critique || raw,
-        improvedPrompt: result.improvedPrompt,
-        score:          result.score,
+        critique:        result.critique  || result.feedback || raw,
+        feedback:        result.feedback  || result.critique || raw,
+        improvedPrompt:  result.improvedPrompt,
+        score:           result.score,
       });
     }
 
@@ -302,22 +314,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       explanation:    result.explanation    || '',
       sessionContext: result.sessionContext,
     });
-
   } catch (err: any) {
-    // ── TRIAGE: unexpected thrown error (network, env issue, etc.) ────────────
-    await logEvent({
-      function_name: 'generate-site-code',
-      event_type:    'unhandled_exception',
-      severity:      'critical',
-      payload: {
-        message: err.message,
-        stack:   err.stack?.slice(0, 500),
-        taskId,
-        action,
-      },
-      ...meta,
-    });
-
     console.error('[generate-site-code]', err);
     return res.status(500).json({ error: err.message || 'Generation failed' });
   }
