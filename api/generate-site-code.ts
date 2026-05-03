@@ -292,12 +292,43 @@ async function generateOnce(
     };
   }
 
+  function sanitizeJSX(s: string): string {
+    let out = '', i = 0;
+    while (i < s.length) {
+      if (s[i] === '"' && s.slice(i, i + 9) === '"content"') {
+        out += s.slice(i, i + 9); i += 9;
+        while (i < s.length && /[ \t\n\r:]/.test(s[i])) { out += s[i++]; }
+        if (i >= s.length || s[i] !== '"') continue;
+        i++; let v = '';
+        while (i < s.length) {
+          const c = s[i];
+          if (c === '\\' && i + 1 < s.length) { v += c + s[i+1]; i += 2; continue; }
+          if (c === '"') { i++; break; }
+          if (c === '\n') { v += '\\n'; i++; continue; }
+          if (c === '\r') { v += '\\r'; i++; continue; }
+          if (c === '\t') { v += '\\t'; i++; continue; }
+          v += c; i++;
+        }
+        out += '"' + v + '"';
+        continue;
+      }
+      out += s[i++];
+    }
+    return out;
+  }
+
   let result: any;
   try {
     result = JSON.parse(extractJSON(raw));
   } catch {
-    console.error('[generate-site-code] JSON parse failed. stop_reason:', stopReason, 'raw (first 500):', raw.slice(0, 500));
-    throw new Error(`AI response could not be parsed. Raw output (first 200 chars): ${raw.slice(0, 200)}`);
+    console.warn('[generate-site-code] Initial parse failed — trying JSX sanitizer');
+    try {
+      result = JSON.parse(sanitizeJSX(extractJSON(raw)));
+      console.log('[generate-site-code] Parse succeeded after sanitization');
+    } catch {
+      console.error('[generate-site-code] JSON parse failed. stop_reason:', stopReason, 'raw (first 500):', raw.slice(0, 500));
+      throw new Error(\`AI response could not be parsed. Raw output (first 200 chars): \${raw.slice(0, 200)}\`);
+    }
   }
 
   return {
