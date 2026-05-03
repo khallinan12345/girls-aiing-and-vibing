@@ -480,6 +480,7 @@ async function splitAndGenerate(
   imageMediaType?: string,
   imageName?: string,
   contentCap = 250,
+  maxTokens = 16000,
 ): Promise<GenerateResult> {
   const chunks = splitPromptIntoChunks(prompt);
 
@@ -696,6 +697,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         imageMediaType,
         imageName,
         contentCap,
+        maxTokens,
       );
     } else {
       // Standard path: single call (all non-splittable tasks).
