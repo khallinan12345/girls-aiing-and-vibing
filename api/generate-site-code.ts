@@ -327,7 +327,7 @@ async function generateOnce(
       console.log('[generate-site-code] Parse succeeded after sanitization');
     } catch {
       console.error('[generate-site-code] JSON parse failed. stop_reason:', stopReason, 'raw (first 500):', raw.slice(0, 500));
-      throw new Error(\`AI response could not be parsed. Raw output (first 200 chars): \${raw.slice(0, 200)}\`);
+      throw new Error(`AI response could not be parsed. Raw output (first 200 chars): ${raw.slice(0, 200)}`);
     }
   }
 
