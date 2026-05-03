@@ -1071,7 +1071,7 @@ const WebDevelopmentPage: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          page: 'WebDevelopmentPage',
           mode: 'task',
           taskId: completedTaskId,
           chatHistory: taskPrompts,
@@ -1115,11 +1115,11 @@ const WebDevelopmentPage: React.FC = () => {
     try {
       const question = taskInstruction.subTasks[subTaskIndex];
       const teaching = taskInstruction.subTaskTeaching?.[subTaskIndex] || '';
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          page: 'WebDevelopmentPage',
           max_tokens: 600,
           system: `You are a friendly web development coach helping a beginner learner understand what a question is asking.
 Explain the question in simple, encouraging language. Give a SHORT concrete example answer (2-3 sentences) so they know what kind of response is expected.
@@ -1138,7 +1138,7 @@ Explain what this question is asking in simple terms and give a short example of
         }),
       });
       const data = await res.json();
-      setHelpResponse(data.content?.[0]?.text || 'Sorry, could not load help right now.');
+      setHelpResponse(data.choices?.[0]?.message?.content || 'Sorry, could not load help right now.');
     } catch {
       setHelpResponse('Sorry, could not load help right now. Try rephrasing the question in your own words.');
     } finally {
@@ -1178,11 +1178,11 @@ Explain what this question is asking in simple terms and give a short example of
     setHelpMeAnswerLoading(true);
     try {
       const history = newMessages.map(m => ({ role: m.role, content: m.text }));
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          page: 'WebDevelopmentPage',
           max_tokens: 800,
           system: `You are a friendly helper for a first-generation digital learner building their first website.
 They are answering this question: "${question}"
@@ -1202,7 +1202,7 @@ Your job:
         }),
       });
       const data = await res.json();
-      const reply = data.content?.[0]?.text ?? 'Sorry, I could not get a response. Please try again.';
+      const reply = data.choices?.[0]?.message?.content ?? 'Sorry, I could not get a response. Please try again.';
       const isReady = reply.includes('READY_TO_DRAFT');
       const cleanReply = reply.replace('READY_TO_DRAFT', '').trim();
       setHelpMeAnswerMessages(prev => [...prev, { role: 'assistant', text: cleanReply }]);
@@ -1225,11 +1225,11 @@ Your job:
     const teaching  = taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '';
     const taskLabel = currentTask?.label ?? '';
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          page: 'WebDevelopmentPage',
           max_tokens: 400,
           system: `Based on the conversation below, write a complete, natural answer the learner can submit.
 The question they are answering: "${question}"
@@ -1245,7 +1245,7 @@ No jargon. Plain English. No bullet points. Just a direct, complete answer.`,
         }),
       });
       const data = await res.json();
-      const draft = data.content?.[0]?.text ?? '';
+      const draft = data.choices?.[0]?.message?.content ?? '';
       if (draft) setHelpMeAnswerDraft(draft);
     } catch { /* silent — user can still request manually */ }
   }, [taskInstruction, subTaskIndex, currentTask, sessionContext]);
@@ -1531,7 +1531,7 @@ No jargon. Plain English. No bullet points. Just a direct, complete answer.`,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
+            page: 'WebDevelopmentPage',
             studentResponse:  submittedPrompt,
             subTaskQuestion:  snapInstruction?.subTasks?.[snapSubIdx]  ?? '',
             subTaskTeaching:  snapInstruction?.subTaskTeaching?.[snapSubIdx] ?? '',
