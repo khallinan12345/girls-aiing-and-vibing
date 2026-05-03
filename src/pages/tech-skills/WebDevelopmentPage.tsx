@@ -640,17 +640,6 @@ const WebDevelopmentPage: React.FC = () => {
   const [copied, setCopied]                   = useState(false);
   const [showStackBlitzModal, setShowStackBlitzModal] = useState(false);
   const [stepperOpen, setStepperOpen]         = useState(false);
-  // Help Me Answer — hook provides all state + API logic
-  // question/teaching/taskLabel are read at call time so they stay reactive
-  const helpMe = useHelpMeAnswer({
-    question:     taskInstruction?.subTasks?.[subTaskIndex]      ?? '',
-    teaching:     taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '',
-    taskLabel:    currentTask?.label ?? '',
-    taskContext:  currentTask?.label,
-    sessionContext,
-    chatPage:           'WebDevelopmentPage',
-    systemPromptPreset: 'web-dev',
-  });
   // Keep old state for any remaining references (unused but avoids TS errors)
   const [showHelpPopup, setShowHelpPopup]     = useState(false);
   const [helpLoading, setHelpLoading]         = useState(false);
@@ -664,6 +653,18 @@ const WebDevelopmentPage: React.FC = () => {
   const currentTask  = TASKS[taskIndex];
   const currentPhase = currentTask?.phase ?? 1;
   const pm           = PHASE_META[currentPhase];
+
+  // Help Me Answer — hook provides all state + API logic
+  // Placed after currentTask/pm so all deps are defined at hook call time
+  const helpMe = useHelpMeAnswer({
+    question:     taskInstruction?.subTasks?.[subTaskIndex]      ?? '',
+    teaching:     taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '',
+    taskLabel:    currentTask?.label ?? '',
+    taskContext:  currentTask?.label,
+    sessionContext,
+    chatPage:           'WebDevelopmentPage',
+    systemPromptPreset: 'web-dev',
+  });
 
   // ═════════════════════════════════════════════════════════════════════
   // Session management
