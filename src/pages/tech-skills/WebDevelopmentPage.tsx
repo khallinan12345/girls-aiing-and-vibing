@@ -8,6 +8,8 @@ import { supabase } from '../../lib/supabaseClient';
 import Editor from '@monaco-editor/react';
 import GitHubPanel from '../../components/GitHubPanel';
 import { useVoice } from '../../hooks/useVoice';
+import { useHelpMeAnswer } from '../../hooks/useHelpMeAnswer';
+import HelpMeAnswerPopup from '../../components/HelpMeAnswerPopup';
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
   Code, Sparkles, Loader2, Save, FolderOpen, Download, CheckCircle, ArrowUpCircle, SkipForward, CloudUpload, ImageIcon, ImagePlus, Trash2, MessageSquarePlus, FileText, Github,
@@ -638,13 +640,17 @@ const WebDevelopmentPage: React.FC = () => {
   const [copied, setCopied]                   = useState(false);
   const [showStackBlitzModal, setShowStackBlitzModal] = useState(false);
   const [stepperOpen, setStepperOpen]         = useState(false);
-  // Help Me Answer popup (replaces old Help popup + Site Feedback button)
-  const [showHelpMeAnswer, setShowHelpMeAnswer]         = useState(false);
-  const [helpMeAnswerMessages, setHelpMeAnswerMessages] = useState<{role:'assistant'|'user'; text:string}[]>([]);
-  const [helpMeAnswerInput, setHelpMeAnswerInput]       = useState('');
-  const [helpMeAnswerLoading, setHelpMeAnswerLoading]   = useState(false);
-  const [helpMeAnswerDraft, setHelpMeAnswerDraft]       = useState<string | null>(null);
-  const helpMeAnswerInputRef = useRef<HTMLInputElement>(null);
+  // Help Me Answer — hook provides all state + API logic
+  // question/teaching/taskLabel are read at call time so they stay reactive
+  const helpMe = useHelpMeAnswer({
+    question:     taskInstruction?.subTasks?.[subTaskIndex]      ?? '',
+    teaching:     taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '',
+    taskLabel:    currentTask?.label ?? '',
+    taskContext:  currentTask?.label,
+    sessionContext,
+    chatPage:           'WebDevelopmentPage',
+    systemPromptPreset: 'web-dev',
+  });
   // Keep old state for any remaining references (unused but avoids TS errors)
   const [showHelpPopup, setShowHelpPopup]     = useState(false);
   const [helpLoading, setHelpLoading]         = useState(false);
@@ -1145,122 +1151,6 @@ Explain what this question is asking in simple terms and give a short example of
       setHelpLoading(false);
     }
   }, [taskInstruction, subTaskIndex, currentTask]);
-
-  // ── Help Me Answer — conversational AI assistant for the current question ──
-  const openHelpMeAnswer = useCallback(() => {
-    const question = taskInstruction?.subTasks?.[subTaskIndex] ?? '';
-    const teaching = taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '';
-    const taskLabel = currentTask?.label ?? '';
-    // Build the opening message from the AI
-    const opening =
-      `Let me help you answer this question about ${taskLabel}.\n\n` +
-      `The question is asking: "${question}"\n\n` +
-      `Here is what to think about: ${teaching}\n\n` +
-      `What aspect of this question would you like me to explain more? ` +
-      `For example, you can ask me what specific terms mean, what options you have, ` +
-      `or just say "give me some options" and I will walk you through the choices.`;
-    setHelpMeAnswerMessages([{ role: 'assistant', text: opening }]);
-    setHelpMeAnswerInput('');
-    setHelpMeAnswerDraft(null);
-    setShowHelpMeAnswer(true);
-    setTimeout(() => helpMeAnswerInputRef.current?.focus(), 80);
-  }, [taskInstruction, subTaskIndex, currentTask]);
-
-  const sendHelpMeAnswerMessage = useCallback(async () => {
-    const text = helpMeAnswerInput.trim();
-    if (!text || helpMeAnswerLoading) return;
-    const question   = taskInstruction?.subTasks?.[subTaskIndex]      ?? '';
-    const teaching   = taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '';
-    const taskLabel  = currentTask?.label ?? '';
-    const newMessages = [...helpMeAnswerMessages, { role: 'user' as const, text }];
-    setHelpMeAnswerMessages(newMessages);
-    setHelpMeAnswerInput('');
-    setHelpMeAnswerLoading(true);
-    try {
-      const history = newMessages.map(m => ({ role: m.role, content: m.text }));
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          page: 'WebDevelopmentPage',
-          max_tokens: 800,
-          system: `You are a friendly helper for a first-generation digital learner building their first website.
-They are answering this question: "${question}"
-Background context: ${teaching}
-Task: ${taskLabel}
-Site context: ${JSON.stringify(sessionContext)}
-
-Your job:
-- Explain things in plain, simple language — no jargon
-- When they ask about technical terms (like 'hamburger menu', 'hex color', 'font'), explain with a real-world analogy
-- When they ask for options, give 3-4 concrete, specific choices they can pick from
-- Ask which option they prefer so you can build a complete answer for them
-- When you have enough information, end your message with: READY_TO_DRAFT
-- Keep replies short — 3-6 sentences maximum
-- Never use bullet points or markdown — plain conversational sentences only`,
-          messages: history,
-        }),
-      });
-      const data = await res.json();
-      const reply = data.choices?.[0]?.message?.content ?? 'Sorry, I could not get a response. Please try again.';
-      const isReady = reply.includes('READY_TO_DRAFT');
-      const cleanReply = reply.replace('READY_TO_DRAFT', '').trim();
-      setHelpMeAnswerMessages(prev => [...prev, { role: 'assistant', text: cleanReply }]);
-      // If AI signals it has enough info, generate a draft answer
-      if (isReady) {
-        await generateHelpMeAnswerDraft([...newMessages, { role: 'assistant', text: cleanReply }]);
-      }
-    } catch {
-      setHelpMeAnswerMessages(prev => [...prev, { role: 'assistant', text: 'Sorry, something went wrong. Please try again.' }]);
-    } finally {
-      setHelpMeAnswerLoading(false);
-      setTimeout(() => helpMeAnswerInputRef.current?.focus(), 80);
-    }
-  }, [helpMeAnswerInput, helpMeAnswerMessages, helpMeAnswerLoading, taskInstruction, subTaskIndex, currentTask, sessionContext]);
-
-  const generateHelpMeAnswerDraft = useCallback(async (
-    messages: {role:'assistant'|'user'; text:string}[]
-  ) => {
-    const question  = taskInstruction?.subTasks?.[subTaskIndex]      ?? '';
-    const teaching  = taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '';
-    const taskLabel = currentTask?.label ?? '';
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          page: 'WebDevelopmentPage',
-          max_tokens: 400,
-          system: `Based on the conversation below, write a complete, natural answer the learner can submit.
-The question they are answering: "${question}"
-Task context: ${taskLabel} — ${teaching}
-Site context: ${JSON.stringify(sessionContext)}
-Write 2-4 sentences in first person, as if the learner is writing it themselves.
-Be specific — use the exact choices and details from the conversation.
-No jargon. Plain English. No bullet points. Just a direct, complete answer.`,
-          messages: [
-            ...messages.map(m => ({ role: m.role, content: m.text })),
-            { role: 'user', content: 'Now write my complete answer that I can submit.' },
-          ],
-        }),
-      });
-      const data = await res.json();
-      const draft = data.choices?.[0]?.message?.content ?? '';
-      if (draft) setHelpMeAnswerDraft(draft);
-    } catch { /* silent — user can still request manually */ }
-  }, [taskInstruction, subTaskIndex, currentTask, sessionContext]);
-
-  const requestHelpMeAnswerDraft = useCallback(() => {
-    generateHelpMeAnswerDraft(helpMeAnswerMessages);
-  }, [helpMeAnswerMessages, generateHelpMeAnswerDraft]);
-
-  const useHelpMeAnswerDraft = useCallback(() => {
-    if (helpMeAnswerDraft) {
-      setPrompt(helpMeAnswerDraft);
-      setShowHelpMeAnswer(false);
-      setTimeout(() => promptRef.current?.focus(), 80);
-    }
-  }, [helpMeAnswerDraft]);
 
   // Skip a sub-task the learner doesn't need
   const handleSkipSubTask = useCallback(async () => {
@@ -2441,7 +2331,7 @@ No jargon. Plain English. No bullet points. Just a direct, complete answer.`,
                       )}
                       {/* Help Me Answer button */}
                       <button
-                        onClick={openHelpMeAnswer}
+                        onClick={helpMe.open}
                         title="Get help understanding and answering this question"
                         className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium rounded-lg border border-purple-500/40 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors">
                         <HelpCircle size={11} />
@@ -2753,118 +2643,12 @@ No jargon. Plain English. No bullet points. Just a direct, complete answer.`,
           </div>
         </div>
 
-        {/* ── Help Me Answer Popup Modal ──────────────────────────── */}
-        {showHelpMeAnswer && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}>
-            <div className="w-full max-w-lg flex flex-col rounded-2xl shadow-2xl border overflow-hidden" style={{ background: '#1a1025', borderColor: '#6040a0', maxHeight: '85vh' }}>
-
-              {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor: '#3a2060', background: '#12081a' }}>
-                <div className="flex items-center gap-2">
-                  <HelpCircle size={16} style={{ color: '#a080e0' }} />
-                  <div>
-                    <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#a080e0' }}>
-                      {pm.label} · {currentTask?.label}
-                    </p>
-                    <p className="text-sm font-bold text-white">Help Me Answer</p>
-                  </div>
-                </div>
-                <button onClick={() => setShowHelpMeAnswer(false)} className="p-1.5 rounded-lg transition-colors hover:bg-white/10">
-                  <X size={16} style={{ color: '#a080e0' }} />
-                </button>
-              </div>
-
-              {/* Question reminder */}
-              <div className="px-5 pt-4 pb-2 flex-shrink-0">
-                <div className="rounded-xl p-3 border" style={{ background: '#2a1845', borderColor: '#6040a0' }}>
-                  <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#a080e0' }}>Your question</p>
-                  <p className="text-xs text-white leading-relaxed">{taskInstruction?.subTasks?.[subTaskIndex]}</p>
-                </div>
-              </div>
-
-              {/* Conversation messages */}
-              <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3 min-h-0">
-                {helpMeAnswerMessages.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div
-                      className="rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
-                      style={{
-                        maxWidth: '85%',
-                        background: msg.role === 'user' ? '#4a20a0' : '#2a1845',
-                        color: msg.role === 'user' ? 'white' : '#e0d0ff',
-                        borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                      }}>
-                      {msg.text}
-                    </div>
-                  </div>
-                ))}
-                {helpMeAnswerLoading && (
-                  <div className="flex justify-start">
-                    <div className="rounded-2xl px-4 py-3" style={{ background: '#2a1845' }}>
-                      <div className="flex gap-1">
-                        {[0,1,2].map(i => (
-                          <div key={i} className="w-2 h-2 rounded-full animate-bounce" style={{ background: '#a080e0', animationDelay: `${i * 0.15}s` }} />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Draft answer panel — appears when AI generates one */}
-              {helpMeAnswerDraft && (
-                <div className="mx-5 mb-3 rounded-xl border flex-shrink-0" style={{ background: '#0f2a0f', borderColor: '#3a7a3a' }}>
-                  <div className="px-4 pt-3 pb-1">
-                    <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: '#7aba7a' }}>Your answer — ready to use</p>
-                    <p className="text-xs leading-relaxed" style={{ color: '#c0e8c0' }}>{helpMeAnswerDraft}</p>
-                  </div>
-                  <div className="px-4 pb-3 pt-2">
-                    <button
-                      onClick={useHelpMeAnswerDraft}
-                      className="w-full py-2 rounded-xl text-sm font-bold transition-colors hover:opacity-90"
-                      style={{ background: '#3a7a3a', color: 'white' }}>
-                      Use this answer →
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Input row */}
-              <div className="px-5 pb-5 pt-2 flex gap-2 flex-shrink-0">
-                <input
-                  ref={helpMeAnswerInputRef}
-                  value={helpMeAnswerInput}
-                  onChange={e => setHelpMeAnswerInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') sendHelpMeAnswerMessage(); }}
-                  placeholder="Ask me anything, or say 'give me some options'…"
-                  disabled={helpMeAnswerLoading}
-                  className="flex-1 rounded-xl px-3 py-2 text-sm outline-none disabled:opacity-50"
-                  style={{ background: '#2a1845', border: '1px solid #6040a0', color: 'white' }}
-                />
-                <button
-                  onClick={sendHelpMeAnswerMessage}
-                  disabled={helpMeAnswerLoading || !helpMeAnswerInput.trim()}
-                  className="px-4 py-2 rounded-xl text-sm font-bold transition-colors disabled:opacity-40"
-                  style={{ background: '#6040a0', color: 'white' }}>
-                  Send
-                </button>
-              </div>
-
-              {/* Footer — Get AI response button (if no draft yet) */}
-              {!helpMeAnswerDraft && helpMeAnswerMessages.length >= 3 && (
-                <div className="px-5 pb-5 flex-shrink-0 border-t pt-3" style={{ borderColor: '#3a2060' }}>
-                  <button
-                    onClick={requestHelpMeAnswerDraft}
-                    disabled={helpMeAnswerLoading}
-                    className="w-full py-2.5 rounded-xl text-sm font-bold transition-colors hover:opacity-90 disabled:opacity-40"
-                    style={{ background: '#3a7a3a', color: 'white' }}>
-                    ✨ Get an AI response you can use
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        {/* ── Help Me Answer Popup ──────────────────────────────── */}
+        <HelpMeAnswerPopup
+          {...helpMe}
+          onUseDraft={draft => { setPrompt(draft); setTimeout(() => promptRef.current?.focus(), 80); }}
+          phaseLabel={pm.label}
+        />
 
         {/* ── Help Popup Modal ──────────────────────────────────────────────── */}
         {showHelpPopup && (
