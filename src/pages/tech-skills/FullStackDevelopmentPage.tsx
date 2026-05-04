@@ -1465,7 +1465,17 @@ const FullStackDevelopmentPage: React.FC = () => {
 
             {currentTask?.isOnboarding ? (
               <div className="flex-1 overflow-y-auto">
-                <FullStackOnboarding onComplete={handleOnboardingComplete} />
+                {currentTask.id === 'load_web_project' ? (
+                  <WebProjectLoader
+                    userId={userId}
+                    onProjectLoaded={(projName, dataAnswer) => {
+                      setSessionName(projName + ' (Full-Stack)');
+                      handleOnboardingComplete();
+                    }}
+                  />
+                ) : (
+                  <FullStackOnboarding onComplete={handleOnboardingComplete} />
+                )}
               </div>
             ) : (
               <>
