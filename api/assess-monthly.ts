@@ -188,6 +188,8 @@ function buildUserCard(
 
   ${kudosHtml}
 
+  \${kudosHtml}
+
   <table style="width:100%;border-collapse:collapse;font-size:12px;">
     <tr style="background:#f5faf6;">
       <th style="padding:6px 10px;text-align:left;font-size:9px;color:#5a7060;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Period</th>
