@@ -60,6 +60,7 @@ const FS_ACTIVITY = 'fullstack_development';
 const LS_CREDS_KEY = 'fs_dev_supabase_creds';
 
 const TASKS: TaskDef[] = [
+  { id: 'load_web_project', label: 'Load Your Web Project',    phase: 1, icon: '📂', isOnboarding: true },
   { id: 'intro_fullstack',  label: 'Full-Stack Overview',      phase: 1, icon: '🏗️', isOnboarding: true },
   { id: 'supabase_setup',   label: 'Set Up Supabase Project',   phase: 1, icon: '🔑' },
   { id: 'schema_design',    label: 'Design Your Schema',        phase: 1, icon: '📐' },
