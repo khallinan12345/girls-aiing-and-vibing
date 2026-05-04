@@ -1275,8 +1275,73 @@ function buildUserCard(
     </tr>`;
   }).join("");
 
+  // ── Build kudos from actual data ──
+  const firstName = name.split(" ")[0] || "Learner";
+  const kudosList: string[] = [];
+  if (engagedSessionCount >= 10) {
+    kudosList.push("You completed <strong>" + engagedSessionCount + " engaged sessions</strong> this month \u2014 that\u2019s outstanding dedication! \ud83d\udcaa");
+  } else if (engagedSessionCount >= 5) {
+    kudosList.push("You showed up for <strong>" + engagedSessionCount + " engaged sessions</strong> this month \u2014 great consistency!");
+  } else if (engagedSessionCount >= 1) {
+    kudosList.push("You participated in <strong>" + engagedSessionCount + " session" + (engagedSessionCount > 1 ? "s" : "") + "</strong> this month \u2014 every session counts!");
+  }
+  const kudosSkills: Array<[string, number]> = [
+    ["Cognitive Skills", s.cognitive_score], ["Critical Thinking", s.critical_thinking_score],
+    ["Problem Solving", s.problem_solving_score], ["Creativity", s.creativity_score],
+    ["Productive Use of Energy", s.pue_score],
+  ];
+  const kudosSorted = [...kudosSkills].sort((a, b) => b[1] - a[1]);
+  const topSkill = kudosSorted[0];
+  if (topSkill[1] >= 75) {
+    kudosList.push("Your strongest area is <strong>" + topSkill[0] + "</strong> \u2014 scoring " + topSkill[1] + "/100 puts you at a strong level! \ud83c\udf1f");
+  } else if (topSkill[1] >= 55) {
+    kudosList.push("Your strongest area is <strong>" + topSkill[0] + "</strong> at " + topSkill[1] + "/100 \u2014 you\u2019re developing real skill here!");
+  } else if (topSkill[1] >= 35) {
+    kudosList.push("You\u2019re building your <strong>" + topSkill[0] + "</strong> skills (" + topSkill[1] + "/100) \u2014 keep going!");
+  }
+  if (history.length >= 2) {
+    const prevRec = history[history.length - 2];
+    const currRec = history[history.length - 1];
+    const prevA = (prevRec.cognitive_score + prevRec.critical_thinking_score + prevRec.problem_solving_score + prevRec.creativity_score + prevRec.pue_score) / 5;
+    const currA = (currRec.cognitive_score + currRec.critical_thinking_score + currRec.problem_solving_score + currRec.creativity_score + currRec.pue_score) / 5;
+    const deltaA = Math.round(currA - prevA);
+    if (deltaA > 0) { kudosList.push("Your overall scores went <strong>up by " + deltaA + " points</strong> compared to last month \u2014 real growth! \ud83d\udcc8"); }
+  }
+  if (s.pue_learner_initiated_pct >= 30) {
+    kudosList.push("You brought up energy and business topics on your own <strong>" + Math.round(s.pue_learner_initiated_pct) + "%</strong> of the time \u2014 real initiative! \u26a1");
+  }
+  if (s.enterprise_artifact_score >= 12) {
+    kudosList.push("Your enterprise planning scored <strong>" + s.enterprise_artifact_score + "/18</strong> \u2014 you\u2019re thinking like a business planner! \ud83c\udfea");
+  } else if (s.enterprise_artifact_score >= 6) {
+    kudosList.push("You\u2019re developing enterprise planning skills (" + s.enterprise_artifact_score + "/18) \u2014 keep building!");
+  }
+  if (s.scaffold_convergence_trend === "converging") {
+    kudosList.push("The AI needed to help you less and less over time \u2014 you\u2019re becoming more independent! \ud83e\udde0");
+  }
+  if (s.cert_passed_count >= 1) {
+    kudosList.push("You passed <strong>" + s.cert_passed_count + " certification" + (s.cert_passed_count > 1 ? "s" : "") + "</strong> \u2014 a real achievement! \ud83c\udfc6");
+  }
+  if (playground && playground.hasMeaningfulActivity) {
+    kudosList.push("You explored the AI Playground with <strong>" + playground.sessionCount + " free-form session" + (playground.sessionCount > 1 ? "s" : "") + "</strong> \u2014 that curiosity is what innovators do! \ud83c\udfae");
+  }
+  if (kudosList.length === 0) {
+    kudosList.push("You showed up and engaged with the learning \u2014 that takes commitment!");
+    kudosList.push("Every session builds your skills for the future. Keep going, " + firstName + "!");
+  } else if (kudosList.length === 1) {
+    kudosList.push("Keep up the effort, " + firstName + " \u2014 you\u2019re building skills that will make a real difference!");
+  }
+  const showKudos = kudosList.slice(0, 5);
+  const kudosHtml = '<div style="background:linear-gradient(135deg,#fef9c3,#fff7ed);border:2px solid #f59e0b;border-radius:10px;padding:16px 18px;margin:12px 16px 4px 16px;">'
+    + '<div style="font-size:14px;font-weight:700;color:#92400e;margin-bottom:10px;">\ud83c\udf1f Great Work This Month, ' + firstName + '!</div>'
+    + '<ul style="margin:0;padding-left:18px;font-size:12px;color:#374151;line-height:2;">'
+    + showKudos.map((k) => '<li style="margin-bottom:4px;">' + k + '</li>').join("")
+    + '</ul>'
+    + '<div style="margin-top:10px;font-size:11px;color:#92400e;font-style:italic;">Keep learning, keep growing \u2014 your future is bright! \u2600\ufe0f</div>'
+    + '</div>';
+
+
   return `
-<div style="margin-bottom:24px;border:1px solid #d0e8d8;border-radius:12px;overflow:hidden;">
+<div style="margin-bottom:24px;border:1px solid #d0e8d8;border-radius:12px;overflow:hidden;page-break-before:always;">
 
   <div style="background:linear-gradient(135deg,#f4fbf6,#fff);padding:13px 16px;display:flex;align-items:center;gap:11px;border-bottom:1px solid #d0e8d8;">
     <div style="width:38px;height:38px;border-radius:50%;background:#1a3d2b;display:flex;align-items:center;justify-content:center;color:#52b788;font-weight:700;font-size:14px;flex-shrink:0;">${initials}</div>
@@ -1285,6 +1350,8 @@ function buildUserCard(
       <div style="font-size:11px;color:#5a7060;margin-top:1px;">${history.length} assessment${history.length !== 1 ? "s" : ""} · ${sessionCount} sessions (${engagedSessionCount} engaged) this period</div>
     </div>
   </div>
+
+  ${kudosHtml}
 
   <table style="width:100%;border-collapse:collapse;font-size:12px;">
     <tr style="background:#f5faf6;">
