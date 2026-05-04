@@ -17,56 +17,72 @@ interface PlanningTask {
   helpTeaching: string;
 }
 
+// Tasks 1 and 2 use fixed questions.
+// Task 0 question is generated from the project's README/PLAN files.
 const PLANNING_TASKS: PlanningTask[] = [
   {
-    id: 'what_is_possible',
-    icon: '🌐',
-    label: 'What Could Your Site Do?',
-    teaching:
-      'Right now your site is a static display — the words and numbers are written directly into the code and never change. A database changes that. It means your site can remember things: stories that visitors submit, profiles that people create, numbers that update automatically. The site stops being a poster and becomes a living platform.',
-    question: '',
-    placeholder: 'Describe what you wish your site could do that it cannot do right now...',
-    helpTeaching:
-      'Think about the difference between a printed poster and a noticeboard where people can pin their own messages. Your static site is the poster. A database turns it into the noticeboard.',
-  },
-  {
-    id: 'who_does_what',
+    id: 'user_data_needs',
     icon: '👥',
-    label: 'Who Uses Your Site?',
+    label: 'What Does Each User Need?',
     teaching:
-      'Every database-connected site has different kinds of people using it differently. A visitor just reads. A contributor submits something — a story, a profile, a response. An administrator manages what gets published. Before you design any database, you need to know who your users are and what each of them needs to do.',
-    question:
-      'Think about your site. Who are the three kinds of people who would use it — someone who just reads, someone who wants to contribute something, and someone who manages everything? Describe each one in a sentence.',
+      'Your website already describes who it is for. Now think about data from their perspective. ' +
+      'A visitor wants to find information. A contributor wants to submit something and come back to it later. ' +
+      'A site manager needs to see everything and make decisions. ' +
+      'Each of those needs is a data requirement — something your database must store, retrieve, or protect.',
+    question: '', // generated from README.md / PLAN.md
     placeholder:
-      'e.g. A visitor reads our stories without signing in. A community member submits their own story after registering. An admin reviews and publishes submissions...',
+      'e.g. A visitor wants to find published community stories filtered by location. ' +
+      'A contributor wants to submit their own story and come back to edit it. ' +
+      'The site manager needs to see all pending submissions and approve or reject them...',
     helpTeaching:
-      'Think about a community noticeboard. Some people walk past and read it. Some people pin a notice. One person maintains it and decides what stays up. Your site needs the same three roles.',
+      'Think about each person visiting your site and ask: what would they type in, what would they press save on, and what would they search for when they come back? Each answer is a piece of data your database needs to hold.',
   },
   {
     id: 'what_gets_saved',
     icon: '💾',
     label: 'What Gets Saved?',
     teaching:
-      'Every time someone does something on your site — submits a story, creates a profile, fills in a form — something needs to be remembered. That remembered information is a database row. A database table is just a collection of rows that all have the same shape. Before writing any SQL, you need to know: what are the things your site needs to remember, and what details does each one have?',
+      'Every time someone does something on your site — submits a story, creates a profile, fills in a form — ' +
+      'something needs to be remembered. That remembered information is a database row. ' +
+      'A database table is just a collection of rows that all have the same shape. ' +
+      'Before writing any SQL, you need to know: what are the things your site needs to remember, ' +
+      'and what details does each one have?',
     question:
-      'For your site, name two or three things that need to be saved in the database. For each one, list the pieces of information it would need — like a story needs a title, the text, the author name, and the date submitted.',
+      'For your site, name two or three things that need to be saved in the database. ' +
+      'For each one, list the pieces of information it would need — ' +
+      'like a story needs a title, the text, the author name, and the date submitted.',
     placeholder:
-      'e.g. A story needs: title, content, author name, community name, date submitted, status.\nA profile needs: name, photo, role, short bio, community...',
+      'e.g. A story needs: title, content, author name, community, date submitted, status (published or pending).\n' +
+      'A profile needs: name, photo, role, short bio, community...',
     helpTeaching:
-      'Think of a database table like a contact list on a phone. Every contact has the same fields — name, number, email — but different values. What fields would every story have? Every profile?',
+      'Think of a database table like a contact list on a phone. ' +
+      'Every contact has the same fields — name, number, email — but different values. ' +
+      'What fields would every story have? Every profile?',
   },
   {
     id: 'who_sees_what',
     icon: '🔒',
     label: 'Who Can See What?',
     teaching:
-      'Not everything in a database should be visible to everyone. A pending story should only be visible to the person who wrote it and the admin — not the public. A profile should be readable by anyone but editable only by the owner. These rules are called access policies, and they are written into the database itself. Thinking through them now prevents security problems later.',
+      'Not everything in a database should be visible to everyone. ' +
+      'A pending story should only be visible to the person who wrote it and the admin — not the public. ' +
+      'A profile should be readable by anyone but editable only by the owner. ' +
+      'These rules are called access policies, and they are written into the database itself. ' +
+      'Thinking through them now prevents security problems later.',
     question:
-      'For your site, describe the access rules. What can an anonymous visitor see? What can a logged-in community member do that a visitor cannot? What can only an admin do?',
+      'For your site, describe the access rules. ' +
+      'What can an anonymous visitor see? ' +
+      'What can a logged-in community member do that a visitor cannot? ' +
+      'What can only an admin do?',
     placeholder:
-      'e.g. Anyone can read published stories and all profiles. Only logged-in members can submit a story. Only admins can publish or reject submissions. Members can only edit their own profile...',
+      'e.g. Anyone can read published stories and all profiles. ' +
+      'Only logged-in members can submit a story. ' +
+      'Only admins can publish or reject submissions. ' +
+      'Members can only edit their own profile...',
     helpTeaching:
-      'Think about a community meeting. Anyone can attend and listen. Only members can speak. Only the chair can decide who gets added to the agenda. Your database needs the same rules.',
+      'Think about a community meeting. Anyone can attend and listen. ' +
+      'Only members can speak. Only the chair can decide who gets added to the agenda. ' +
+      'Your database needs the same rules.',
   },
 ];
 
@@ -75,22 +91,21 @@ const WebProjectLoader: React.FC<{
   onProjectLoaded: (projName: string, planSummary: string) => void;
 }> = ({ userId, onProjectLoaded }) => {
 
-  const [projects, setProjects]         = React.useState<WebProject[]>([]);
-  const [loading, setLoading]           = React.useState(true);
-  const [selected, setSelected]         = React.useState<WebProject | null>(null);
-  const [phase, setPhase]               = React.useState<'pick' | 'plan'>('pick');
-  const [taskIndex, setTaskIndex]       = React.useState(0);
-  const [answers, setAnswers]           = React.useState<string[]>(['', '', '', '']);
+  const [projects, setProjects]           = React.useState<WebProject[]>([]);
+  const [loading, setLoading]             = React.useState(true);
+  const [selected, setSelected]           = React.useState<WebProject | null>(null);
+  const [phase, setPhase]                 = React.useState<'pick' | 'plan'>('pick');
+  const [taskIndex, setTaskIndex]         = React.useState(0);
+  const [answers, setAnswers]             = React.useState<string[]>(['', '', '']);
   const [currentAnswer, setCurrentAnswer] = React.useState('');
-  const [submitting, setSubmitting]     = React.useState(false);
-  const [generatedQ, setGeneratedQ]     = React.useState<string | null>(null);
-  const [generatingQ, setGeneratingQ]   = React.useState(false);
-  const [feedback, setFeedback]         = React.useState<string | null>(null);
+  const [submitting, setSubmitting]       = React.useState(false);
+  const [generatedQ, setGeneratedQ]       = React.useState<string | null>(null);
+  const [generatingQ, setGeneratingQ]     = React.useState(false);
+  const [feedback, setFeedback]           = React.useState<string | null>(null);
   const [feedbackLoading, setFeedbackLoading] = React.useState(false);
   const [answerSubmitted, setAnswerSubmitted] = React.useState(false);
 
-  const answerRef = React.useRef<HTMLTextAreaElement>(null);
-
+  const answerRef   = React.useRef<HTMLTextAreaElement>(null);
   const currentTask = PLANNING_TASKS[taskIndex];
   const isLastTask  = taskIndex === PLANNING_TASKS.length - 1;
 
@@ -107,6 +122,7 @@ const WebProjectLoader: React.FC<{
     systemPromptPreset: 'web-dev',
   });
 
+  // Load web projects from dashboard
   React.useEffect(() => {
     if (!userId) { setLoading(false); return; }
     supabase
@@ -136,11 +152,12 @@ const WebProjectLoader: React.FC<{
       });
   }, [userId]);
 
+  // When a project is selected, read README/PLAN and generate a role-specific question
   const handleSelectProject = async (proj: WebProject) => {
     setSelected(proj);
     setPhase('plan');
     setTaskIndex(0);
-    setAnswers(['', '', '', '']);
+    setAnswers(['', '', '']);
     setCurrentAnswer('');
     setGeneratedQ(null);
     setFeedback(null);
@@ -149,51 +166,75 @@ const WebProjectLoader: React.FC<{
     setTimeout(() => answerRef.current?.focus(), 200);
 
     try {
+      // Extract planning context from README.md and PLAN.md
+      const readme = proj.files.find(
+        (f) => f.path.toLowerCase().includes('readme') || f.path.toLowerCase().includes('plan')
+      )?.content || '';
+
+      const plan = proj.files.find(
+        (f) => f.path.toLowerCase().includes('plan')
+      )?.content || '';
+
+      // Use whichever is more substantial
+      const planningDoc = plan.length > readme.length ? plan : readme;
+      const docSnippet  = planningDoc.slice(0, 800);
+
+      // Also grab page names as context
       const pages = proj.files
         .filter((f) => f.path.includes('/pages/'))
         .map((f) => f.path.split('/').pop()?.replace('.jsx', '') || '')
+        .filter(Boolean)
         .join(', ');
-      const appSnippet =
-        proj.files.find((f) => f.path === 'src/App.jsx')?.content.slice(0, 400) || '';
-      const desc =
-        'Site: ' + proj.name +
-        '. Pages: ' + (pages || 'home') +
-        '. App.jsx: ' + appSnippet;
+
+      const context =
+        'Site name: ' + proj.name + '\n' +
+        'Pages: ' + (pages || 'home') + '\n' +
+        (docSnippet ? 'Planning document:\n' + docSnippet : '');
 
       const res = await fetch('/api/chat', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           page:       'WebDevelopmentPage',
-          max_tokens: 100,
+          max_tokens: 150,
           system:
-            'You are a full-stack educator. A learner just finished a static React website. ' +
-            'Ask ONE question (under 50 words) that helps them imagine what their site could do if visitors could submit or save their own information. ' +
-            'Be specific to THEIR site. Start with "Imagine if" or "What if visitors could". No preamble.',
+            'You are a full-stack educator helping a learner plan the database for their website. ' +
+            'They have already built a static React site. You have their planning document. ' +
+            'Your job: read the planning document and identify the specific user roles or audiences described (e.g. visitors, community members, admins, leaders). ' +
+            'Then ask ONE question (under 60 words) that asks the learner to describe — for each of THOSE specific roles — ' +
+            'what data they would want to submit, save, or come back to retrieve. ' +
+            'Name the actual roles from their document. Be specific. No preamble. No generic question.',
           messages: [
-            { role: 'user', content: 'What they built:\n' + desc + '\n\nAsk the opening question.' },
+            {
+              role:    'user',
+              content: 'Here is what they built:\n\n' + context + '\n\nAsk the role-specific data needs question.',
+            },
           ],
         }),
       });
+
       const data = await res.json();
+      const q = data.choices?.[0]?.message?.content?.trim();
+
       setGeneratedQ(
-        data.choices?.[0]?.message?.content?.trim() ||
-        'Imagine if visitors to ' + proj.name + ' could submit their own content — what would they most want to share?'
+        q ||
+        'Looking at your site and the people it serves — what would each type of user want to save, submit, or come back to find later?'
       );
     } catch {
       setGeneratedQ(
-        'Imagine if visitors to ' + proj.name + ' could submit their own content — what would they most want to share?'
+        'Looking at your site and the people it serves — what would each type of user want to save, submit, or come back to find later?'
       );
     } finally {
       setGeneratingQ(false);
     }
   };
 
+  // Submit answer and get AI feedback
   const handleSubmitAnswer = async () => {
     if (!currentAnswer.trim() || submitting || answerSubmitted) return;
     setSubmitting(true);
 
-    const newAnswers = [...answers];
+    const newAnswers  = [...answers];
     newAnswers[taskIndex] = currentAnswer.trim();
     setAnswers(newAnswers);
     setAnswerSubmitted(true);
@@ -203,6 +244,7 @@ const WebProjectLoader: React.FC<{
 
     try {
       const q = taskIndex === 0 ? (generatedQ ?? currentTask.question) : currentTask.question;
+
       const res = await fetch('/api/chat', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,18 +252,20 @@ const WebProjectLoader: React.FC<{
           page:       'WebDevelopmentPage',
           max_tokens: 200,
           system:
-            'You are a warm, encouraging full-stack educator giving feedback on a planning answer. ' +
+            'You are a warm, encouraging full-stack educator giving feedback on a learner planning their database. ' +
             'Site: ' + (selected?.name || 'their website') + '. ' +
-            'Task: ' + currentTask.label + '. ' +
-            'Question: ' + q + '. ' +
-            'Give 2-3 sentences: affirm what is strong, deepen or correct gently, end with one observation. ' +
+            'Planning step: ' + currentTask.label + '. ' +
+            'Question they answered: ' + q + '. ' +
+            'Give 2-3 sentences: affirm what is strong, deepen or gently correct if needed, ' +
+            'end with one observation that connects their answer to what comes next in database design. ' +
             (isLastTask
-              ? 'This is their final planning step — end with encouragement that they are ready to build.'
-              : 'End with a brief bridge to what comes next.') +
+              ? 'This is their final planning step — end with genuine encouragement that they are ready to build.'
+              : 'End with a brief bridge to the next planning step.') +
             ' Plain English. Warm but not effusive. No bullet points.',
           messages: [{ role: 'user', content: currentAnswer.trim() }],
         }),
       });
+
       const data = await res.json();
       setFeedback(data.choices?.[0]?.message?.content?.trim() || null);
     } catch {
@@ -231,6 +275,7 @@ const WebProjectLoader: React.FC<{
     }
   };
 
+  // Advance to next task or finish
   const handleAdvance = () => {
     if (taskIndex < PLANNING_TASKS.length - 1) {
       setTaskIndex(taskIndex + 1);
@@ -239,13 +284,12 @@ const WebProjectLoader: React.FC<{
       setAnswerSubmitted(false);
       setTimeout(() => answerRef.current?.focus(), 100);
     } else {
-      const taskLabels = PLANNING_TASKS.map((t) => t.label);
+      // Build summary from all answers
       const parts: string[] = [];
-      for (let i = 0; i < taskLabels.length; i++) {
-        parts.push(taskLabels[i] + ': ' + answers[i]);
+      for (let i = 0; i < PLANNING_TASKS.length; i++) {
+        parts.push(PLANNING_TASKS[i].label + ': ' + answers[i]);
       }
-      const summary = parts.join('\n\n');
-      onProjectLoaded(selected!.name, summary);
+      onProjectLoaded(selected!.name, parts.join('\n\n'));
     }
   };
 
@@ -316,7 +360,7 @@ const WebProjectLoader: React.FC<{
         {phase === 'plan' && selected && (
           <div className="space-y-4">
 
-            {/* Completed tasks */}
+            {/* Completed tasks summary */}
             {taskIndex > 0 && (
               <div className="space-y-1">
                 {PLANNING_TASKS.slice(0, taskIndex).map((t, i) => (
@@ -333,7 +377,7 @@ const WebProjectLoader: React.FC<{
               </div>
             )}
 
-            {/* Progress bar */}
+            {/* Progress */}
             <div className="flex items-center gap-2">
               <div className="flex gap-1">
                 {PLANNING_TASKS.map((_, i) => (
@@ -341,11 +385,8 @@ const WebProjectLoader: React.FC<{
                     key={i}
                     className={
                       'h-1 rounded-full transition-all ' +
-                      (i < taskIndex
-                        ? 'bg-emerald-500 w-6'
-                        : i === taskIndex
-                        ? 'bg-blue-400 w-8'
-                        : 'bg-gray-700 w-4')
+                      (i < taskIndex  ? 'bg-emerald-500 w-6' :
+                       i === taskIndex ? 'bg-blue-400 w-8'   : 'bg-gray-700 w-4')
                     }
                   />
                 ))}
@@ -362,18 +403,20 @@ const WebProjectLoader: React.FC<{
             </div>
 
             {/* Teaching */}
-            <div className="p-3 rounded-xl border border-amber-500/20" style={{ background: 'rgba(245,158,11,0.05)' }}>
+            <div
+              className="p-3 rounded-xl border border-amber-500/20"
+              style={{ background: 'rgba(245,158,11,0.05)' }}>
               <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wide mb-1.5">
-                💡 Why this matters
+                Why this matters
               </p>
               <p className="text-xs text-gray-300 leading-relaxed">{currentTask.teaching}</p>
             </div>
 
-            {/* Question */}
+            {/* Question — generated for task 0, fixed for tasks 1-2 */}
             {taskIndex === 0 && generatingQ ? (
               <div className="flex items-center gap-2 py-2">
                 <Loader2 size={13} className="animate-spin text-emerald-400" />
-                <span className="text-xs text-gray-400">Reading your site...</span>
+                <span className="text-xs text-gray-400">Reading your project plan...</span>
               </div>
             ) : currentQuestion ? (
               <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl">
@@ -382,7 +425,7 @@ const WebProjectLoader: React.FC<{
               </div>
             ) : null}
 
-            {/* Answer area — visible before submission */}
+            {/* Answer textarea — visible before submission */}
             {!answerSubmitted && (currentQuestion || taskIndex > 0) && (
               <>
                 <div className="relative">
@@ -415,13 +458,13 @@ const WebProjectLoader: React.FC<{
                   <button
                     onClick={helpMe.open}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-lg border border-purple-500/40 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors">
-                    💬 Help Me Answer
+                    Help Me Answer
                   </button>
                 </div>
               </>
             )}
 
-            {/* Submitted answer */}
+            {/* Submitted answer display */}
             {answerSubmitted && currentAnswer && (
               <div className="p-3 bg-gray-800/60 border border-gray-700 rounded-xl">
                 <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">Your answer</p>
@@ -440,12 +483,12 @@ const WebProjectLoader: React.FC<{
             {/* Feedback */}
             {feedback && !feedbackLoading && (
               <div className="p-3 bg-blue-500/10 border border-blue-500/25 rounded-xl">
-                <p className="text-[10px] font-bold text-blue-400 uppercase mb-1.5">💬 Feedback</p>
+                <p className="text-[10px] font-bold text-blue-400 uppercase mb-1.5">Feedback</p>
                 <p className="text-sm text-gray-200 leading-relaxed">{feedback}</p>
               </div>
             )}
 
-            {/* Next Step button */}
+            {/* Next Step / Start Building */}
             {answerSubmitted && !feedbackLoading && (
               <button
                 onClick={handleAdvance}
