@@ -30,6 +30,10 @@ const EXCLUDED_USER_IDS = new Set([
   "f6157a9d-5ffd-4058-b0b3-af3ea897d876", // Bennywhite Davidson (bennywhite090d@gmail.com)
 ]);
 
+// ─── Organization IDs (matches assess-monthly.ts) ─────────────────────────────
+const VAI_ORG_ID       = 'c0b48eae-67af-449d-8c04-cc6950bf0982'; // 100 Black Girls / vAI
+const SOLARDERO_ORG_ID = 'a1b2c3d4-0002-0002-0002-000000000002'; // Solardero / Ibiade
+
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -38,33 +42,28 @@ const supabase = createClient(
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface DailyMetrics {
-  logDate: string;           // YYYY-MM-DD in WAT
-  city: string;              // "Oloibiri" | "Ibiade"
+  logDate: string;
+  city: string;
   totalAfricaUsers: number;
-
-  // Distinct active users today
-  activeUsers: number;       // unique users with a dashboard session updated today
-  totalActivities: number;   // total dashboard rows updated today (all categories)
-
-  // By category — ROW counts (not distinct users)
+  activeUsers: number;
+  totalActivities: number;
   catAiLearning: number;
   catSkillsDevelopment: number;
   catEnglishSkills: number;
   catAiProficiencyCert: number;
   catOther: number;
-
-  // Playground — distinct users and total chat rows
-  playgroundUsers: number;       // unique users active in playground today
-  playgroundChatsTotal: number;  // total playground chat rows created/updated today
-
-  // Certifications
-  certAttemptedUsers: number;   // all-time distinct users who attempted a cert
-  certAttemptedToday: number;   // distinct users who updated a cert row today
+  playgroundUsers: number;
+  playgroundChatsTotal: number;
+  certAttemptedUsers: number;
+  certAttemptedToday: number;
 }
 
 interface UserProfile {
   id: string;
   name: string | null;
+  city: string | null;
+  organization_id: string | null;
+  continent: string | null;
 }
 
 interface DailyCostSummary {
@@ -76,7 +75,7 @@ interface DailyCostSummary {
   totalInputTokens: number;
   cacheSavingsUsd: number;
   byPage: { page: string; cost: number; requests: number; provider: string }[];
-  available: boolean;   // false if api_cost_log table doesn't exist yet
+  available: boolean;
 }
 
 // ─── Chunked query helper ─────────────────────────────────────────────────────
@@ -94,23 +93,63 @@ async function inChunks<T>(
   return results;
 }
 
+// ─── Profile Fetching (aligned with assess-monthly.ts) ────────────────────────
+// Single source of truth for fetching all Africa-cohort profiles.
+// Uses the SAME.or() filter as assess-monthly.ts to ensure identical coverage.
+
+async function fetchAllCohortProfiles(): Promise<UserProfile[]> {
+  const { data: profiles } = await supabase.from("profiles").select("id, name, city, organization_id, continent").or(`continent.eq.Africa,organization_id.eq.${VAI_ORG_ID},organization_id.eq.${SOLARDERO_ORG_ID}`);
+
+  return (profiles || []).filter((p) => !EXCLUDED_USER_IDS.has(p.id));
+}
+
+// Split profiles into Oloibiri vs Ibiade cohorts.
+// Logic: Ibiade = explicitly city='Ibiade' OR organization_id=SOLARDERO_ORG_ID.
+// Oloibiri = everyone else in the Africa cohort.
+//
+// IMPORTANT: A user can only be in ONE cohort. If a user matches both
+// (e.g. Solardero org but city='Oloibiri'), Ibiade takes priority since
+// org_id is more reliable than free-text city field.
+
+function splitCohorts(profiles: UserProfile[]): {
+  oloibiriProfiles: UserProfile[];
+  ibiadeProfiles: UserProfile[];
+} {
+  const ibiadeProfiles: UserProfile[] = [];
+  const oloibiriProfiles: UserProfile[] = [];
+
+  const ibiadeIds = new Set<string>();
+
+  for (const p of profiles) {
+    const isIbiade =
+      p.organization_id === SOLARDERO_ORG_ID ||
+      (p.city || "").toLowerCase().trim() === "ibiade";
+
+    if (isIbiade) {
+      ibiadeProfiles.push(p);
+      ibiadeIds.add(p.id);
+    }
+  }
+
+  // Oloibiri = everyone NOT in Ibiade
+  for (const p of profiles) {
+    if (!ibiadeIds.has(p.id)) {
+      oloibiriProfiles.push(p);
+    }
+  }
+
+  return { oloibiriProfiles, ibiadeProfiles };
+}
+
 // ─── Data Fetching ────────────────────────────────────────────────────────────
 
-/**
- * Returns today's date string in WAT (UTC+1), formatted as YYYY-MM-DD.
- * Called at 11:00 UTC which is 12:00 WAT — so the date is always correct.
- */
 function todayWAT(): string {
   const now = new Date();
-  // Shift to WAT = UTC+1
   const wat = new Date(now.getTime() + 60 * 60 * 1000);
   return wat.toISOString().split("T")[0];
 }
 
 async function fetchMetrics(logDate: string, cohortIds: string[], city: string): Promise<DailyMetrics> {
-  // Day boundaries in UTC (WAT day starts at UTC-1 offset, i.e. 23:00 prev day)
-  // Since we run at 11:00 UTC = 12:00 WAT, we use the WAT date's UTC window:
-  // WAT 00:00 = UTC 23:00 previous day → WAT 23:59 = UTC 22:59 same day
   const dayStartUTC = new Date(`${logDate}T00:00:00+01:00`).toISOString();
   const dayEndUTC   = new Date(`${logDate}T23:59:59+01:00`).toISOString();
 
@@ -127,30 +166,20 @@ async function fetchMetrics(logDate: string, cohortIds: string[], city: string):
     };
   }
 
-  // ── 2. Dashboard sessions started OR updated on this day ────────────────
+  // ── Dashboard sessions started OR updated on this day ────────────────
   const [createdRows, updatedRows] = await Promise.all([
     inChunks(cohortIds, async (chunk) => {
-      const { data } = await supabase
-        .from("dashboard")
-        .select("id, user_id, category_activity, activity")
-        .in("user_id", chunk)
-        .gte("created_at", dayStartUTC)
-        .lte("created_at", dayEndUTC);
+      const { data } = await supabase.from("dashboard").select("id, user_id, category_activity, activity").in("user_id", chunk).gte("created_at", dayStartUTC).lte("created_at", dayEndUTC);
       return data || [];
     }),
     inChunks(cohortIds, async (chunk) => {
-      const { data } = await supabase
-        .from("dashboard")
-        .select("id, user_id, category_activity, activity")
-        .in("user_id", chunk)
-        .gte("updated_at", dayStartUTC)
-        .lte("updated_at", dayEndUTC);
+      const { data } = await supabase.from("dashboard").select("id, user_id, category_activity, activity").in("user_id", chunk).gte("updated_at", dayStartUTC).lte("updated_at", dayEndUTC);
       return data || [];
     }),
   ]);
 
   const sessionMap = new Map<string, { id: string; user_id: string; category_activity: string; activity: string }>();
-  for (const row of [...createdRows, ...updatedRows]) {
+  for (const row of [...createdRows,...updatedRows]) {
     sessionMap.set(row.id, row);
   }
   const sessionRows = [...sessionMap.values()];
@@ -158,7 +187,7 @@ async function fetchMetrics(logDate: string, cohortIds: string[], city: string):
   const activeUserSet = new Set(sessionRows.map((r) => r.user_id));
   const activeUsers = activeUserSet.size;
 
-  // ── 3. Category breakdown ────────────────────────────────────────────────
+  // ── Category breakdown ────────────────────────────────────────────────
   const catCounts: Record<string, number> = {
     aiLearning: 0, skillsDevelopment: 0,
     englishSkills: 0, aiProficiencyCert: 0, other: 0,
@@ -179,44 +208,34 @@ async function fetchMetrics(logDate: string, cohortIds: string[], city: string):
     }
   }
 
-  // ── 4. AI Playground ─────────────────────────────────────────────────────
+  // ── AI Playground ─────────────────────────────────────────────────────
   const [pgCreated, pgUpdated] = await Promise.all([
     inChunks(cohortIds, async (chunk) => {
-      const { data } = await supabase
-        .from("ai_playground_chats").select("id, user_id")
-        .in("user_id", chunk).gte("created_at", dayStartUTC).lte("created_at", dayEndUTC);
+      const { data } = await supabase.from("ai_playground_chats").select("id, user_id").in("user_id", chunk).gte("created_at", dayStartUTC).lte("created_at", dayEndUTC);
       return data || [];
     }),
     inChunks(cohortIds, async (chunk) => {
-      const { data } = await supabase
-        .from("ai_playground_chats").select("id, user_id")
-        .in("user_id", chunk).gte("updated_at", dayStartUTC).lte("updated_at", dayEndUTC);
+      const { data } = await supabase.from("ai_playground_chats").select("id, user_id").in("user_id", chunk).gte("updated_at", dayStartUTC).lte("updated_at", dayEndUTC);
       return data || [];
     }),
   ]);
   const pgMap = new Map<string, string>();
-  for (const row of [...pgCreated, ...pgUpdated]) pgMap.set(row.id, row.user_id);
+  for (const row of [...pgCreated,...pgUpdated]) pgMap.set(row.id, row.user_id);
   const pgRowsToday = [...pgMap.entries()].map(([id, user_id]) => ({ id, user_id }));
   const playgroundUsers = new Set(pgRowsToday.map((r) => r.user_id)).size;
   const playgroundChatsTotal = pgRowsToday.length;
 
-  // ── 5. Certifications ─────────────────────────────────────────────────────
+  // ── Certifications ─────────────────────────────────────────────────────
   const certAllTime = await inChunks(cohortIds, async (chunk) => {
-    const { data } = await supabase
-      .from("dashboard").select("user_id, created_at, updated_at")
-      .in("user_id", chunk)
-      .eq("activity", "AI Proficiency Certification")
-      .not("certification_evaluation_score", "is", null);
+    const { data } = await supabase.from("dashboard").select("user_id, created_at, updated_at").in("user_id", chunk).eq("activity", "AI Proficiency Certification").not("certification_evaluation_score", "is", null);
     return data || [];
   });
   const certAttemptedUsers = new Set(certAllTime.map((r) => r.user_id)).size;
   const certAttemptedToday = new Set(
-    certAllTime
-      .filter((r) =>
+    certAllTime.filter((r) =>
         (r.created_at >= dayStartUTC && r.created_at <= dayEndUTC) ||
         (r.updated_at >= dayStartUTC && r.updated_at <= dayEndUTC)
-      )
-      .map((r) => r.user_id)
+      ).map((r) => r.user_id)
   ).size;
 
   return {
@@ -252,21 +271,15 @@ async function fetchDailyCosts(
   };
 
   try {
-    const { data, error } = await supabase
-      .from("api_cost_log")
-      .select("page, provider, model, input_tokens, output_tokens, cache_hit_tokens, estimated_cost_usd")
-      .gte("logged_at", dayStartUTC)
-      .lte("logged_at", dayEndUTC)
-      .limit(10000);
+    const { data, error } = await supabase.from("api_cost_log").select("page, provider, model, input_tokens, output_tokens, cache_hit_tokens, estimated_cost_usd").gte("logged_at", dayStartUTC).lte("logged_at", dayEndUTC).limit(10000);
 
-    // Table doesn't exist yet — return gracefully
     if (error) {
       console.warn("   api_cost_log not available:", error.message);
       return empty;
     }
 
     const rows = data || [];
-    if (rows.length === 0) return { ...empty, available: true };
+    if (rows.length === 0) return {...empty, available: true };
 
     const totalCostUsd      = rows.reduce((s, r) => s + (r.estimated_cost_usd || 0), 0);
     const anthropicCostUsd  = rows.filter(r => r.provider === "anthropic").reduce((s, r) => s + (r.estimated_cost_usd || 0), 0);
@@ -274,13 +287,11 @@ async function fetchDailyCosts(
     const anthropicRequests = rows.filter(r => r.provider === "anthropic").length;
     const cacheHitTokens    = rows.reduce((s, r) => s + (r.cache_hit_tokens || 0), 0);
     const totalInputTokens  = rows.reduce((s, r) => s + (r.input_tokens || 0), 0);
-    // Cache savings: what it would have cost without caching (full input price) vs actual cache price (10%)
     const cacheSavingsUsd   = rows.reduce((s, r) => {
       const p = PRICING_PER_MTOK[r.model] || { input: 0, output: 0 };
       return s + ((r.cache_hit_tokens || 0) / 1_000_000) * p.input * 0.90;
     }, 0);
 
-    // Group by page for the breakdown table
     const pageMap = new Map<string, { cost: number; requests: number; provider: string }>();
     rows.forEach(r => {
       const existing = pageMap.get(r.page) || { cost: 0, requests: 0, provider: r.provider };
@@ -291,10 +302,7 @@ async function fetchDailyCosts(
       });
     });
 
-    const byPage = [...pageMap.entries()]
-      .map(([page, val]) => ({ page, ...val }))
-      .sort((a, b) => b.cost - a.cost)
-      .slice(0, 10); // top 10 pages by cost
+    const byPage = [...pageMap.entries()].map(([page, val]) => ({ page,...val })).sort((a, b) => b.cost - a.cost).slice(0, 10);
 
     return {
       totalCostUsd, anthropicCostUsd, groqRequests, anthropicRequests,
@@ -397,11 +405,11 @@ function buildCohortPanel(m: DailyMetrics): string {
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <div style="flex:1;background:#fffdf0;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;">
           <div style="font-size:10px;font-weight:600;color:#92400e;margin-bottom:4px;">🎮 Playground</div>
-          <div style="font-size:11px;color:#374151;">Users: <strong>${m.playgroundUsers}</strong> &nbsp; Chats: <strong>${m.playgroundChatsTotal}</strong></div>
+          <div style="font-size:11px;color:#374151;">Users: <strong>${m.playgroundUsers}</strong>   Chats: <strong>${m.playgroundChatsTotal}</strong></div>
         </div>
         <div style="flex:1;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px 12px;">
           <div style="font-size:10px;font-weight:600;color:#4c1d95;margin-bottom:4px;">🏆 Certifications</div>
-          <div style="font-size:11px;color:#374151;">Ever attempted: <strong>${m.certAttemptedUsers}</strong> &nbsp; Today: <strong>${m.certAttemptedToday}</strong></div>
+          <div style="font-size:11px;color:#374151;">Ever attempted: <strong>${m.certAttemptedUsers}</strong>   Today: <strong>${m.certAttemptedToday}</strong></div>
         </div>
       </div>
     </div>
@@ -542,10 +550,10 @@ function buildEmailHtml(oloibiri: DailyMetrics, ibiade: DailyMetrics, dateLabel:
 
     <!-- Footer -->
     <div style="border-top:1px solid #e5e7eb;padding-top:12px;color:#9ca3af;font-size:10px;">
-      <div>🕛 Generated at 12:00 WAT (11:00 UTC) &nbsp;·&nbsp; 🌍 Oloibiri + Ibiade cohorts &nbsp;·&nbsp;
+      <div>🕛 Generated at 12:00 WAT (11:00 UTC)  ·  🌍 Oloibiri + Ibiade cohorts  · 
         <a href="https://girls-aiing-and-vibing.vercel.app" style="color:#2d6a4f;text-decoration:none;">Open App ↗</a>
       </div>
-      <div style="margin-top:3px;">Facilitator accounts excluded. Active users and Playground users are distinct user counts per cohort. Cohorts derived from profiles.continent and organization_id (vAI + Solardero).</div>
+      <div style="margin-top:3px;">Facilitator accounts excluded. Active users and Playground users are distinct user counts per cohort. Cohorts derived from profiles.continent, organization_id (vAI + Solardero), and city field.</div>
     </div>
   </div>
 </div>
@@ -568,35 +576,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log(`\n${"─".repeat(50)}\nDAILY REPORT — ${dateLabel}\n${"─".repeat(50)}`);
 
   try {
-    // ── Fetch cohort profiles — Africa continent OR vAI/Solardero org ─────────
-    // Broadened from continent-only so Solardero (Ibiade) users without
-    // continent='Africa' set are still included in the report.
-    const VAI_ORG_ID       = 'c0b48eae-67af-449d-8c04-cc6950bf0982'; // 100 Black Girls / vAI
-    const SOLARDERO_ORG_ID = 'a1b2c3d4-0002-0002-0002-000000000002'; // Solardero / Ibiade
+    // ── Fetch ALL cohort profiles using the same filter as assess-monthly.ts ──
+    const allProfiles = await fetchAllCohortProfiles();
+    const { oloibiriProfiles, ibiadeProfiles } = splitCohorts(allProfiles);
 
-    const { data: africaProfiles } = await supabase
-      .from("profiles")
-      .select("id, city, organization_id, continent")
-      .or(`continent.eq.Africa,organization_id.eq.${VAI_ORG_ID},organization_id.eq.${SOLARDERO_ORG_ID}`);
+    const oloibiriIds = oloibiriProfiles.map((p) => p.id);
+    const ibiadeIds   = ibiadeProfiles.map((p) => p.id);
 
-    const allProfiles = (africaProfiles || []).filter((p) => !EXCLUDED_USER_IDS.has(p.id));
-    // Ibiade = Solardero org OR city explicitly set to Ibiade
-    const oloibiriIds = allProfiles
-      .filter((p) => p.city !== "Ibiade" && p.organization_id !== SOLARDERO_ORG_ID)
-      .map((p) => p.id);
-    const ibiadeIds = allProfiles
-      .filter((p) => p.city === "Ibiade" || p.organization_id === SOLARDERO_ORG_ID)
-      .map((p) => p.id);
-
+    console.log(`  Total cohort profiles: ${allProfiles.length}`);
     console.log(`  Oloibiri cohort: ${oloibiriIds.length} users`);
     console.log(`  Ibiade cohort:   ${ibiadeIds.length} users`);
+
+    // Log any users that might have ambiguous assignment for debugging
+    const bothOrgAndCity = allProfiles.filter(
+      (p) => p.organization_id === SOLARDERO_ORG_ID && (p.city || "").toLowerCase().trim() !== "ibiade" && p.city
+    );
+    if (bothOrgAndCity.length > 0) {
+      console.log(`  ⚠️  ${bothOrgAndCity.length} users have Solardero org but city≠Ibiade (assigned to Ibiade):`,
+        bothOrgAndCity.map((p) => `${p.id.slice(0, 8)} city="${p.city}"`).join(", ")
+      );
+    }
 
     // ── Fetch metrics + cost data in parallel ────────────────────────────────
     const dayStartUTC = new Date(`${logDate}T00:00:00+01:00`).toISOString();
     const dayEndUTC   = new Date(`${logDate}T23:59:59+01:00`).toISOString();
 
-    // Cost window uses full UTC day to catch all timestamps regardless of timezone
-    // Slightly wider than the WAT window to avoid missing edge-case logs
     const costStartUTC = new Date(`${logDate}T00:00:00Z`).toISOString();
     const costEndUTC   = new Date(`${logDate}T23:59:59Z`).toISOString();
     console.log(`  Cost window: ${costStartUTC} → ${costEndUTC}`);
@@ -608,14 +612,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ]);
 
     const logMetrics = (label: string, m: DailyMetrics) => {
-      console.log(`  [${label}] Active: ${m.activeUsers} · Activities: ${m.totalActivities} · Playground: ${m.playgroundUsers} · Certs: ${m.certAttemptedUsers}`);
+      console.log(`  [${label}] Total: ${m.totalAfricaUsers} · Active: ${m.activeUsers} · Activities: ${m.totalActivities} · Playground: ${m.playgroundUsers} · Certs: ${m.certAttemptedUsers}`);
     };
     logMetrics("Oloibiri", oloibiriMetrics);
     logMetrics("Ibiade",   ibiadeMetrics);
     console.log(`  [Cost] Anthropic: $${costSummary.anthropicCostUsd.toFixed(4)} · Groq: ${costSummary.groqRequests} reqs · Cache saved: $${costSummary.cacheSavingsUsd.toFixed(4)} · Available: ${costSummary.available}`);
 
     // ── Upsert one row per cohort into daily_activity_log ───────────────────
-    // Note: daily_activity_log needs composite unique key on (log_date, city)
     let upsertError: string | null = null;
     try {
       const upsertRows = [oloibiriMetrics, ibiadeMetrics].map((m) => ({
@@ -634,7 +637,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         cert_attempted_today:    m.certAttemptedToday,
         total_activities:        m.totalActivities,
         total_africa_users:      m.totalAfricaUsers,
-        // Cost columns — stored once per day (not per cohort, so both rows get same values)
         cost_anthropic_usd:      costSummary.available ? costSummary.anthropicCostUsd : null,
         cost_groq_requests:      costSummary.available ? costSummary.groqRequests : null,
         cost_cache_savings_usd:  costSummary.available ? costSummary.cacheSavingsUsd : null,
@@ -642,9 +644,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? Math.round(costSummary.cacheHitTokens / costSummary.totalInputTokens * 100) : null,
         cost_total_requests:     costSummary.available ? (costSummary.anthropicRequests + costSummary.groqRequests) : null,
       }));
-      const { error } = await supabase
-        .from("daily_activity_log")
-        .upsert(upsertRows, { onConflict: "log_date,city" });
+      const { error } = await supabase.from("daily_activity_log").upsert(upsertRows, { onConflict: "log_date,city" });
       if (error) { upsertError = error.message; console.error("❌ Upsert error:", error.message); }
       else console.log(`✅ daily_activity_log upserted for ${logDate} (Oloibiri + Ibiade)`);
     } catch (e: any) {
@@ -687,6 +687,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({
       date: logDate,
+      totalCohort: allProfiles.length,
       oloibiri: {
         activeUsers: oloibiriMetrics.activeUsers,
         totalActivities: oloibiriMetrics.totalActivities,
