@@ -7,6 +7,7 @@
 //   • "Improve my English" button — polishes the prompt while keeping the idea
 //   • "Critique my Prompt" panel — step-by-step coaching on T2V prompt quality
 //   • Full generation + polling + history
+//   • DAILY LIMIT: 1 video per day, 5 seconds only (cost control)
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '../../components/layout/AppLayout';
@@ -17,7 +18,7 @@ import {
   Film, Sparkles, Clock, CheckCircle, XCircle,
   Download, RotateCcw, ChevronDown, ChevronUp,
   Volume2, VolumeX, Wand2, MessageSquare, Lightbulb, Save,
-  AlertTriangle, ImagePlus, X as XIcon, ArrowRight,
+  AlertTriangle, ImagePlus, X as XIcon, ArrowRight, Mail,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -73,8 +74,7 @@ async function callEdgeFunction(
   if (params) url += `?${new URLSearchParams(params).toString()}`;
   const res = await fetch(url, {
     method,
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    ...(body ? { body: JSON.stringify(body) } : {}),
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },...(body ? { body: JSON.stringify(body) } : {}),
   });
   const data = await res.json().catch(() => ({}));
   return { ok: res.ok, data };
@@ -105,7 +105,6 @@ const VideoCard: React.FC<{ job: VideoJob; onReuse: (p: string) => void }> = ({ 
   const [expanded, setExpanded] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const cfg = STATUS_CONFIG[job.status];
-  // Prefer permanently saved URL over expiring Replicate URL
   const playUrl = (job as any).saved_video_url || job.video_url;
   return (
     <div className={classNames('rounded-xl border backdrop-blur-sm overflow-hidden', cfg.border, 'bg-slate-900/60')}>
@@ -170,7 +169,7 @@ const VideoCard: React.FC<{ job: VideoJob; onReuse: (p: string) => void }> = ({ 
                 }
               }}
                 className="flex items-center gap-1.5 text-xs bg-cyan-700 hover:bg-cyan-600 text-white rounded-full px-3 py-1.5 transition-colors">
-                <Download size={12} /> Download .mp4
+                <Download size={12} /> Download.mp4
               </button>
             )}
           </div>
@@ -226,9 +225,9 @@ const VideoGenerationPage: React.FC = () => {
   const [isSavingDash,   setIsSavingDash]   = useState(false);
   const [dashSaved,      setDashSaved]      = useState(false);
 
-  // ── Weekly usage limit ────────────────────────────────────────────────────
-  const [weeklyCount,    setWeeklyCount]    = useState<number>(0);
-  const WEEKLY_LIMIT = 10;
+  // ── Daily usage limit (replaces weekly) ───────────────────────────────────
+  const [dailyCount,     setDailyCount]     = useState<number>(0);
+  const DAILY_LIMIT = 1;
 
   // ── Critique state ────────────────────────────────────────────────────────
   const [showCritique,   setShowCritique]   = useState(false);
@@ -241,8 +240,6 @@ const VideoGenerationPage: React.FC = () => {
   const [isImprovingStep, setIsImprovingStep] = useState(false);
 
   // ── Prompt quality gate ───────────────────────────────────────────────────
-  // promptScore is null until the learner runs a full critique.
-  // Generate is blocked until score >= PROMPT_SCORE_THRESHOLD.
   const PROMPT_SCORE_THRESHOLD = 7;
   const [promptScore,      setPromptScore]      = useState<number | null>(null);
   const [promptEvaluated,  setPromptEvaluated]  = useState(false);
@@ -256,66 +253,42 @@ const VideoGenerationPage: React.FC = () => {
   const [endImage,          setEndImage]          = useState<File | null>(null);
   const [endImagePreview,   setEndImagePreview]   = useState<string | null>(null);
 
-  // ── Recent frame images (from image_generations + captured last frames) ─────
+  // ── Recent frame images ─────────────────────────────────────────────────────
   interface FrameImageOption {
     id: string;
-    url: string;       // display + drag source URL
-    label: string;     // short description
+    url: string;
+    label: string;
     source: 'generated' | 'last_frame';
   }
   const [recentFrameImages, setRecentFrameImages] = useState<FrameImageOption[]>([]);
 
   const FRAMES: Record<number, number> = { 5: 121, 8: 193, 10: 241 };
 
-  // ── Fetch communication_level, continent, and weekly usage on mount ───────
+  // ── Fetch communication_level, continent, and DAILY usage on mount ────────
   useEffect(() => {
     if (!user?.id) return;
 
-    supabase
-      .from('user_personality_baseline')
-      .select('communication_level')
-      .eq('user_id', user.id)
-      .single()
-      .then(({ data }) => {
+    supabase.from('user_personality_baseline').select('communication_level').eq('user_id', user.id).single().then(({ data }) => {
         if (data?.communication_level != null) setCommunicationLevel(data.communication_level);
       });
 
-    // Fetch continent from profiles
-    supabase
-      .from('profiles')
-      .select('continent')
-      .eq('id', user.id)
-      .single()
-      .then(({ data }) => {
+    supabase.from('profiles').select('continent').eq('id', user.id).single().then(({ data }) => {
         setContinent(data?.continent ?? null);
         setLoadingContinent(false);
       });
 
-    // Weekly usage count (last 7 days, non-failed jobs)
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    supabase
-      .from('video_generations')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .neq('status', 'failed')
-      .gte('created_at', since)
-      .then(({ count }) => setWeeklyCount(count ?? 0));
+    // Daily usage count (today only, non-failed jobs)
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    supabase.from('video_generations').select('id', { count: 'exact', head: true }).eq('user_id', user.id).neq('status', 'failed').gte('created_at', todayStart.toISOString()).then(({ count }) => setDailyCount(count ?? 0));
   }, [user?.id]);
 
   // ── Fetch recent generated images for frame picker ───────────────────────
   useEffect(() => {
     if (!user?.id) return;
-    supabase
-      .from('image_generations')
-      .select('id, image_url, saved_image_url, prompt')
-      .eq('user_id', user.id)
-      .not('image_url', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(12)
-      .then(({ data }) => {
+    supabase.from('image_generations').select('id, image_url, saved_image_url, prompt').eq('user_id', user.id).not('image_url', 'is', null).order('created_at', { ascending: false }).limit(12).then(({ data }) => {
         if (!data) return;
-        const opts = data
-          .map((row: any) => {
+        const opts = data.map((row: any) => {
             const url = row.saved_image_url ?? row.image_url;
             if (!url) return null;
             return {
@@ -324,8 +297,7 @@ const VideoGenerationPage: React.FC = () => {
               label: (row.prompt ?? 'Generated image').slice(0, 40),
               source: 'generated' as const,
             };
-          })
-          .filter(Boolean) as any[];
+          }).filter(Boolean) as any[];
         setRecentFrameImages(opts);
       });
   }, [user?.id]);
@@ -414,14 +386,8 @@ const VideoGenerationPage: React.FC = () => {
   const loadHistory = useCallback(async () => {
     if (!user?.id) return;
     setLoadingHist(true);
-    const { data } = await supabase
-      .from('video_generations')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(20);
+    const { data } = await supabase.from('video_generations').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);
     setHistory((data ?? []) as VideoJob[]);
-    // Load saved thumbnails (videos that have been saved to storage)
     const saved = (data ?? []).filter((d: any) => d.thumbnail_url && d.saved_video_url);
     setSavedThumbnails(saved.map((d: any) => ({
       id: d.id,
@@ -444,7 +410,7 @@ const VideoGenerationPage: React.FC = () => {
       if (data.status === 'succeeded') {
         clearInterval(pollRef.current!);
         setVideoUrl(data.videoUrl);
-        setActiveJob(prev => prev ? { ...prev, status: 'succeeded', video_url: data.videoUrl } : null);
+        setActiveJob(prev => prev ? {...prev, status: 'succeeded', video_url: data.videoUrl } : null);
         loadHistory();
         speakText(lvl <= 1
           ? 'Your video is ready! You can watch it now.'
@@ -452,10 +418,10 @@ const VideoGenerationPage: React.FC = () => {
       } else if (data.status === 'failed') {
         clearInterval(pollRef.current!);
         setError(data.error ?? 'Generation failed. Please try again.');
-        setActiveJob(prev => prev ? { ...prev, status: 'failed' } : null);
+        setActiveJob(prev => prev ? {...prev, status: 'failed' } : null);
         loadHistory();
       } else {
-        setActiveJob(prev => prev ? { ...prev, status: data.status } : null);
+        setActiveJob(prev => prev ? {...prev, status: data.status } : null);
       }
     }, 3000);
   }, [loadHistory, speakText, lvl]);
@@ -489,13 +455,11 @@ const VideoGenerationPage: React.FC = () => {
     setStartImage(null);
     if (startImagePreview) URL.revokeObjectURL(startImagePreview);
     setStartImagePreview(null);
-    // Clearing the start image also clears end image (end requires start)
     setEndImage(null);
     if (endImagePreview) URL.revokeObjectURL(endImagePreview);
     setEndImagePreview(null);
   };
 
-  // Apply a URL (from recent images) directly as start or end frame
   const applyUrlAsStartImage = useCallback(async (url: string, label: string) => {
     try {
       const resp = await fetch(url);
@@ -509,7 +473,7 @@ const VideoGenerationPage: React.FC = () => {
   }, []);
 
   const applyUrlAsEndImage = useCallback(async (url: string, label: string) => {
-    if (!startImage) return; // end requires start
+    if (!startImage) return;
     try {
       const resp = await fetch(url);
       const blob = await resp.blob();
@@ -527,7 +491,6 @@ const VideoGenerationPage: React.FC = () => {
     setEndImagePreview(null);
   };
 
-  // Determine current mode for display
   const imageMode: 'text' | 'start' | 'start-end' =
     startImage && endImage ? 'start-end' : startImage ? 'start' : 'text';
 
@@ -535,11 +498,11 @@ const VideoGenerationPage: React.FC = () => {
   const handleGenerate = async () => {
     if (!prompt.trim() || isStarting || !user) return;
 
-    // Weekly limit check
-    if (weeklyCount >= WEEKLY_LIMIT) {
+    // Daily limit check
+    if (dailyCount >= DAILY_LIMIT) {
       setError(lvl <= 1
-        ? `You have made ${WEEKLY_LIMIT} videos this week. Please come back next week!`
-        : `Weekly limit reached (${WEEKLY_LIMIT} videos/week). Resets in ${daysUntilReset()} day(s).`);
+        ? 'You already made a video today. You can make another one tomorrow!'
+        : `Daily limit reached (${DAILY_LIMIT} video/day). Try again tomorrow.`);
       return;
     }
 
@@ -549,7 +512,6 @@ const VideoGenerationPage: React.FC = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Not authenticated');
 
-      // Build image params
       const imagePayload: Record<string, string> = {};
       if (startImage) {
         imagePayload.image = await fileToBase64(startImage);
@@ -558,10 +520,6 @@ const VideoGenerationPage: React.FC = () => {
         imagePayload.last_image = await fileToBase64(endImage);
       }
 
-      // ── Anchor prompt injection ──────────────────────────────────────────
-      // LTX-Video requires the prompt to explicitly describe the anchor frames
-      // as the first and last moments of the clip, otherwise it treats the
-      // images as soft guidance rather than hard frame constraints.
       let anchoredPrompt = prompt.trim();
       if (startImage && endImage) {
         anchoredPrompt =
@@ -577,14 +535,12 @@ const VideoGenerationPage: React.FC = () => {
           `Maintain strict fidelity to the starting image.`;
       }
 
-      // Strengthen negative prompt when anchors are active
       const anchoredNegPrompt = startImage
         ? `${negPrompt.trim()}, inconsistent first frame, mismatched starting scene, different opening composition, frame mismatch, scene change at start${endImage ? ', inconsistent last frame, mismatched ending scene, different closing composition, frame mismatch at end' : ''}`
         : negPrompt.trim();
 
       const { ok, data } = await callEdgeFunction('generate-video', 'POST', session.access_token, {
-        prompt: anchoredPrompt, negative_prompt: anchoredNegPrompt, num_frames: FRAMES[duration],
-        ...imagePayload,
+        prompt: anchoredPrompt, negative_prompt: anchoredNegPrompt, num_frames: FRAMES[duration],...imagePayload,
       });
       if (!ok || !data.jobId) throw new Error(data.error ?? 'Failed to start video generation');
       const newJob: VideoJob = {
@@ -592,7 +548,7 @@ const VideoGenerationPage: React.FC = () => {
         video_url: null, error_message: null, created_at: new Date().toISOString(),
       };
       setActiveJob(newJob);
-      setWeeklyCount(c => c + 1);
+      setDailyCount(c => c + 1);
       startPolling(data.jobId, session.access_token);
       speakText(lvl <= 1
         ? 'OK! Your video is being made. This can take 2 to 5 minutes. Please wait and keep the page open.'
@@ -612,15 +568,7 @@ const VideoGenerationPage: React.FC = () => {
     stopSpeaking();
   };
 
-  // ── Days until weekly limit resets ───────────────────────────────────────
-  const daysUntilReset = (): number => {
-    const now = new Date();
-    const dayOfWeek = now.getDay(); // 0 = Sunday
-    return 7 - dayOfWeek;
-  };
-
   // ── Save video to Supabase Storage bucket ────────────────────────────────
-  // ── Download helpers ─────────────────────────────────────────────────────────
   const getSafeName = () => {
     const base = videoName.trim() || prompt.trim().slice(0, 40) || 'My_Video';
     return base.replace(/[^a-zA-Z0-9_\-]/g, '_');
@@ -642,7 +590,6 @@ const VideoGenerationPage: React.FC = () => {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
     } catch {
-      // Fallback to direct link if CORS blocks fetch
       const a = document.createElement('a');
       a.href = url;
       a.download = `${safeName}.mp4`;
@@ -656,13 +603,11 @@ const VideoGenerationPage: React.FC = () => {
     const safeName = getSafeName();
 
     try {
-      // Fetch the video as a local blob — avoids tainted canvas CORS restriction
       const resp = await fetch(srcUrl);
       if (!resp.ok) throw new Error('Could not fetch video');
       const blob = await resp.blob();
       const blobUrl = URL.createObjectURL(blob);
 
-      // Create a temporary video element pointed at our local blob URL
       const tempVideo = document.createElement('video');
       tempVideo.src = blobUrl;
       tempVideo.muted = true;
@@ -670,7 +615,6 @@ const VideoGenerationPage: React.FC = () => {
 
       await new Promise<void>((resolve, reject) => {
         tempVideo.onloadedmetadata = () => {
-          // Seek to last frame
           const target = Math.max(0, tempVideo.duration - 0.1);
           tempVideo.currentTime = target;
         };
@@ -679,7 +623,6 @@ const VideoGenerationPage: React.FC = () => {
         tempVideo.load();
       });
 
-      // Draw to canvas
       const canvas = document.createElement('canvas');
       canvas.width  = tempVideo.videoWidth  || 640;
       canvas.height = tempVideo.videoHeight || 360;
@@ -688,26 +631,22 @@ const VideoGenerationPage: React.FC = () => {
       ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(blobUrl);
 
-      // Download + add to frame picker
       canvas.toBlob(imgBlob => {
         if (!imgBlob) return;
         const imgUrl = URL.createObjectURL(imgBlob);
-        // Add to recent frame images so it can be used as start/end frame
         const frameId = `last_frame_${Date.now()}`;
         setRecentFrameImages(prev => [{
           id: frameId,
           url: imgUrl,
           label: `Last frame: ${safeName.slice(0, 30)}`,
           source: 'last_frame',
-        }, ...prev.filter(f => f.source !== 'last_frame' || f.id !== frameId)].slice(0, 16));
-        // Trigger download
+        },...prev.filter(f => f.source !== 'last_frame' || f.id !== frameId)].slice(0, 16));
         const a = document.createElement('a');
         a.href = imgUrl;
         a.download = `${safeName}_last_frame.png`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        // Don't revoke immediately — keep blob URL alive for frame picker
       }, 'image/png');
 
     } catch (err) {
@@ -716,9 +655,8 @@ const VideoGenerationPage: React.FC = () => {
     }
   };
 
-  // Capture a thumbnail from the generated video element
   const captureThumbnailBlob = async (): Promise<Blob | null> => {
-    const srcUrl = videoUrl; // always the fresh Replicate URL at save time
+    const srcUrl = videoUrl;
     if (!srcUrl) return null;
     try {
       const resp = await fetch(srcUrl);
@@ -751,51 +689,35 @@ const VideoGenerationPage: React.FC = () => {
     if (!videoUrl || !user?.id || !activeJob || isSaving) return;
     setIsSaving(true); setSaveError(null);
     try {
-      // Fetch the video blob from Replicate CDN
       const res = await fetch(videoUrl);
       if (!res.ok) throw new Error('Could not fetch video from source');
       const blob = await res.blob();
 
-      // Upload to ai-videos/{userId}/{jobId}.mp4
       const path = `${user.id}/${activeJob.id}.mp4`;
-      const { error: uploadError } = await supabase.storage
-        .from('ai-videos')
-        .upload(path, blob, { contentType: 'video/mp4', upsert: true });
+      const { error: uploadError } = await supabase.storage.from('ai-videos').upload(path, blob, { contentType: 'video/mp4', upsert: true });
 
       if (uploadError) throw uploadError;
 
-      // Capture and upload thumbnail
       let thumbnailUrl: string | null = null;
       const thumbBlob = await captureThumbnailBlob();
       if (thumbBlob) {
         const thumbPath = `${user.id}/${activeJob.id}_thumb.jpg`;
-        const { error: thumbErr } = await supabase.storage
-          .from('ai-videos')
-          .upload(thumbPath, thumbBlob, { contentType: 'image/jpeg', upsert: true });
+        const { error: thumbErr } = await supabase.storage.from('ai-videos').upload(thumbPath, thumbBlob, { contentType: 'image/jpeg', upsert: true });
         if (!thumbErr) {
-          const { data: thumbSigned } = await supabase.storage
-            .from('ai-videos')
-            .createSignedUrl(thumbPath, 60 * 60 * 24 * 365);
+          const { data: thumbSigned } = await supabase.storage.from('ai-videos').createSignedUrl(thumbPath, 60 * 60 * 24 * 365);
           thumbnailUrl = thumbSigned?.signedUrl ?? null;
         }
       }
 
-      // Get the permanent signed URL (valid for 10 years)
-      const { data: signed } = await supabase.storage
-        .from('ai-videos')
-        .createSignedUrl(path, 60 * 60 * 24 * 365);
+      const { data: signed } = await supabase.storage.from('ai-videos').createSignedUrl(path, 60 * 60 * 24 * 365);
 
       const permanentUrl = signed?.signedUrl ?? null;
 
-      // Update the DB row with the saved URL and thumbnail
-      await supabase
-        .from('video_generations')
-        .update({
+      await supabase.from('video_generations').update({
           saved_video_url: permanentUrl,
           thumbnail_url:   thumbnailUrl,
           saved_at:        new Date().toISOString(),
-        })
-        .eq('id', activeJob.id);
+        }).eq('id', activeJob.id);
 
       setSavedUrl(permanentUrl);
       speakText(lvl <= 1
@@ -927,7 +849,6 @@ ${commGuidance}`
         temperature: 0.5,
       });
 
-      // Extract score from response
       const scoreMatch = critique.match(/SCORE:\s*(\d+)\s*\/\s*10/i);
       const parsedScore = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
 
@@ -1015,7 +936,6 @@ ${commGuidance}`
     }
   };
 
-  // ── Improve English for the step-by-step input box ───────────────────────
   const handleImproveStep = async () => {
     if (!stepInput.trim() || isImprovingStep) return;
     setIsImprovingStep(true);
@@ -1077,6 +997,62 @@ Return ONLY the improved text. No explanation, no preamble.`
       </div>
 
       <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 py-8">
+
+        {/* ══════════════════════════════════════════════════════════════════
+            COST WARNING BANNER — always visible at top of page
+            ══════════════════════════════════════════════════════════════════ */}
+        <div className="mb-6 rounded-2xl border-2 border-amber-500/50 bg-gradient-to-r from-amber-950/80 via-red-950/60 to-amber-950/80 backdrop-blur-sm overflow-hidden">
+          <div className="px-5 py-4 flex items-start gap-4">
+            <div className="shrink-0 mt-0.5">
+              <div className="p-2 rounded-xl bg-amber-500/20 border border-amber-500/30">
+                <AlertTriangle size={24} className="text-amber-400" />
+              </div>
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-base font-bold text-amber-200 mb-1.5">
+                {lvl <= 1
+                  ? '⚠️ Important: Video making is limited right now'
+                  : '⚠️ Cost Notice: Video Generation Temporarily Limited'}
+              </h2>
+              <p className="text-sm text-amber-100/90 leading-relaxed mb-3">
+                {lvl <= 1
+                  ? 'Making videos costs a lot of money for our platform. Right now, each person can only make 1 video per day, and videos are only 5 seconds long. We are working to make this better!'
+                  : 'AI video generation incurs significant compute costs that currently exceed what we can sustainably support. To keep this feature available for everyone, we have temporarily limited usage to 1 video per day per user, with a maximum duration of 5 seconds.'}
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 bg-amber-900/40 border border-amber-500/30 rounded-lg px-3 py-1.5">
+                  <Film size={14} className="text-amber-400 shrink-0" />
+                  <span className="text-xs font-semibold text-amber-200">
+                    {lvl <= 1 ? '1 video per day' : 'Limit: 1 video / day'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 bg-amber-900/40 border border-amber-500/30 rounded-lg px-3 py-1.5">
+                  <Clock size={14} className="text-amber-400 shrink-0" />
+                  <span className="text-xs font-semibold text-amber-200">
+                    {lvl <= 1 ? '5 seconds only' : 'Max duration: 5 seconds'}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-3 pt-3 border-t border-amber-500/20">
+                <p className="text-xs text-amber-200/70 leading-relaxed">
+                  {lvl <= 1
+                    ? '📧 Do you have a special project and need more videos? Send an email to '
+                    : '📧 Have a special project that requires additional video generations? Email '}
+                  <a
+                    href="mailto:khallinan1@udayton.edu?subject=Video%20Generation%20Request%20-%20Girls%20AIing&body=Hi%20Kevin%2C%0A%0AI%20would%20like%20to%20request%20additional%20video%20generation%20access%20for%20a%20special%20project.%0A%0AProject%20description%3A%20%0A%0ANumber%20of%20videos%20needed%3A%20%0A%0AThank%20you!"
+                    className="inline-flex items-center gap-1 text-cyan-300 hover:text-cyan-200 underline underline-offset-2 font-medium transition-colors"
+                  >
+                    <Mail size={12} />
+                    khallinan1@udayton.edu
+                  </a>
+                  {lvl <= 1
+                    ? ' and tell us about your project. We will try to help!'
+                    : ' to request additional access. Please describe your project and the number of videos needed.'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="mb-6">
@@ -1140,30 +1116,26 @@ Return ONLY the improved text. No explanation, no preamble.`
         {view === 'generate' && (
           <div className="space-y-4">
 
-            {/* Weekly usage indicator */}
-            {weeklyCount > 0 && (
-              <div className={classNames(
-                'flex items-center gap-3 rounded-xl px-4 py-3 text-sm border',
-                weeklyCount >= WEEKLY_LIMIT
-                  ? 'bg-red-900/20 border-red-500/30 text-red-300'
-                  : weeklyCount >= WEEKLY_LIMIT - 2
-                  ? 'bg-amber-900/20 border-amber-500/30 text-amber-300'
-                  : 'bg-slate-800/60 border-slate-700/40 text-slate-400'
-              )}>
-                {weeklyCount >= WEEKLY_LIMIT
-                  ? <AlertTriangle size={16} className="shrink-0" />
-                  : <Film size={16} className="shrink-0" />}
-                <span>
-                  {weeklyCount >= WEEKLY_LIMIT
-                    ? (lvl <= 1
-                        ? `You made ${WEEKLY_LIMIT} videos this week. Come back next week!`
-                        : `Weekly limit reached (${WEEKLY_LIMIT}/week). Resets in ${daysUntilReset()} day(s).`)
-                    : (lvl <= 1
-                        ? `You made ${weeklyCount} of ${WEEKLY_LIMIT} videos this week.`
-                        : `${weeklyCount} / ${WEEKLY_LIMIT} videos used this week.`)}
-                </span>
-              </div>
-            )}
+            {/* Daily usage indicator */}
+            <div className={classNames(
+              'flex items-center gap-3 rounded-xl px-4 py-3 text-sm border',
+              dailyCount >= DAILY_LIMIT
+                ? 'bg-red-900/20 border-red-500/30 text-red-300'
+                : 'bg-slate-800/60 border-slate-700/40 text-slate-400'
+            )}>
+              {dailyCount >= DAILY_LIMIT
+                ? <AlertTriangle size={16} className="shrink-0" />
+                : <Film size={16} className="shrink-0" />}
+              <span>
+                {dailyCount >= DAILY_LIMIT
+                  ? (lvl <= 1
+                      ? 'You already made a video today. Come back tomorrow!'
+                      : 'Daily limit reached (1 video/day). Try again tomorrow.')
+                  : (lvl <= 1
+                      ? `You can make ${DAILY_LIMIT - dailyCount} video today.`
+                      : `${dailyCount} / ${DAILY_LIMIT} video used today.`)}
+              </span>
+            </div>
 
             {/* Prompt card */}
             <div className="bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 backdrop-blur-sm">
@@ -1184,7 +1156,6 @@ Return ONLY the improved text. No explanation, no preamble.`
 
               {/* Action buttons row */}
               <div className="flex flex-wrap gap-2 mb-4">
-                {/* Improve English */}
                 <button onClick={handleImproveEnglish}
                   disabled={!prompt.trim() || isImproving || isGenerating}
                   className="flex items-center gap-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
@@ -1193,7 +1164,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                     : <><Wand2 size={14} /> {uiText.improveBtnLabel}</>}
                 </button>
 
-                {/* Evaluate Prompt — primary quality gate action */}
                 <button onClick={handleFullCritique}
                   disabled={!prompt.trim() || isCritiquing || isGenerating}
                   className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full px-5 py-2 text-sm font-semibold transition-colors ring-2 ring-amber-400/30">
@@ -1202,7 +1172,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                     : <><Lightbulb size={14} /> {lvl <= 1 ? '📊 Check My Prompt' : '📊 Evaluate Prompt'}</>}
                 </button>
 
-                {/* Step-by-step builder */}
                 <button onClick={handleStartStepByStep}
                   disabled={isGenerating}
                   className="flex items-center gap-2 bg-teal-700 hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
@@ -1227,7 +1196,6 @@ Return ONLY the improved text. No explanation, no preamble.`
 
             {/* ── Image anchoring ───────────────────────────────────────── */}
             <div className="bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 backdrop-blur-sm space-y-4">
-              {/* Mode badge */}
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-slate-300">
@@ -1239,7 +1207,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                       : 'Anchor the first and/or last frame of the video to uploaded images.'}
                   </p>
                 </div>
-                {/* Mode pill */}
                 <span className={classNames(
                   'text-xs font-semibold rounded-full px-3 py-1 border shrink-0',
                   imageMode === 'start-end'
@@ -1257,8 +1224,7 @@ Return ONLY the improved text. No explanation, no preamble.`
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4 items-start">
-
-                {/* ── Start image ── */}
+                {/* Start image */}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-slate-400 mb-2">
                     {lvl <= 1 ? '▶ Start image' : '▶ Start frame'}
@@ -1300,7 +1266,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                   )}
                 </div>
 
-                {/* Arrow connector */}
                 <div className="flex items-center justify-center sm:pt-8">
                   <ArrowRight size={20} className={classNames(
                     'transition-colors',
@@ -1308,7 +1273,7 @@ Return ONLY the improved text. No explanation, no preamble.`
                   )} />
                 </div>
 
-                {/* ── End image ── */}
+                {/* End image */}
                 <div className="flex-1 min-w-0">
                   <p className={classNames('text-xs font-medium mb-2', startImage ? 'text-slate-400' : 'text-slate-600')}>
                     {lvl <= 1 ? '⏹ End image' : '⏹ End frame'}
@@ -1354,7 +1319,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                 </div>
               </div>
 
-              {/* Tip */}
               {imageMode !== 'text' && (
                 <p className="text-xs text-slate-500 bg-slate-800/50 rounded-lg px-3 py-2">
                   💡 {lvl <= 1
@@ -1367,7 +1331,7 @@ Return ONLY the improved text. No explanation, no preamble.`
                 </p>
               )}
 
-              {/* ── Recent images from AI Image Generation ─────────────── */}
+              {/* Recent images from AI Image Generation */}
               {recentFrameImages.length > 0 && (
                 <div className="border-t border-slate-700/40 pt-4">
                   <p className="text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
@@ -1393,13 +1357,11 @@ Return ONLY the improved text. No explanation, no preamble.`
                           className="w-full h-full object-cover"
                           onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                         />
-                        {/* Source badge */}
                         {img.source === 'last_frame' && (
                           <div className="absolute top-1 left-1 bg-violet-600/80 text-white text-[9px] px-1 rounded leading-tight">
                             last frame
                           </div>
                         )}
-                        {/* Action overlay */}
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/60 transition-colors flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
                           <button
                             onClick={() => applyUrlAsStartImage(img.url, img.label)}
@@ -1427,6 +1389,7 @@ Return ONLY the improved text. No explanation, no preamble.`
                 </div>
               )}
             </div>
+
             {showCritique && (
               <div className="bg-slate-900/80 border border-amber-500/30 rounded-2xl p-5 backdrop-blur-sm">
                 <div className="flex items-center justify-between mb-3">
@@ -1440,7 +1403,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                     className="text-slate-400 hover:text-slate-200 text-xs">✕ Close</button>
                 </div>
 
-                {/* Full critique output */}
                 {critiqueStep === 'full' && (
                   isCritiquing
                     ? <div className="flex items-center gap-3 text-slate-400 text-sm">
@@ -1452,7 +1414,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                       </div>
                 )}
 
-                {/* Step-by-step chat */}
                 {critiqueStep === 'step' && (
                   <div className="space-y-3">
                     <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
@@ -1568,7 +1529,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                 </div>
                 {videoUrl && (
                   <div className="space-y-3">
-                    {/* Video title */}
                     <div className="space-y-1">
                       <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
                         Video Title
@@ -1585,7 +1545,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                       <video ref={generatedVideoRef} src={savedUrl ?? videoUrl} controls autoPlay loop crossOrigin="anonymous" className="generated-video w-full max-h-80" />
                     </div>
 
-                    {/* Save Video to bucket */}
                     {!savedUrl ? (
                       <div className="flex flex-col gap-1.5">
                         <button onClick={handleSaveVideo} disabled={isSaving}
@@ -1623,7 +1582,7 @@ Return ONLY the improved text. No explanation, no preamble.`
                       <div className="flex gap-2 flex-wrap">
                         <button onClick={handleDownloadVideo}
                           className="flex items-center gap-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
-                          <Download size={14} /> {lvl <= 1 ? 'Download .mp4' : 'Download video (.mp4)'}
+                          <Download size={14} /> {lvl <= 1 ? 'Download.mp4' : 'Download video (.mp4)'}
                         </button>
                         <button onClick={handleDownloadLastFrame}
                           className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-full px-4 py-2 text-sm font-medium transition-colors">
@@ -1631,7 +1590,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                         </button>
                       </div>
                     )}
-                    {/* Save session to dashboard */}
                     {!dashSaved ? (
                       <button onClick={handleSaveToDashboard} disabled={isSavingDash}
                         className="flex items-center gap-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white rounded-full px-4 py-2 text-sm font-medium transition-colors">
@@ -1655,11 +1613,10 @@ Return ONLY the improved text. No explanation, no preamble.`
               const scorePassed  = promptScore !== null && promptScore >= PROMPT_SCORE_THRESHOLD;
               const needsEval    = !promptEvaluated || promptScore === null;
               const scoreFailed  = promptEvaluated && promptScore !== null && promptScore < PROMPT_SCORE_THRESHOLD;
-              const limitReached = weeklyCount >= WEEKLY_LIMIT;
+              const limitReached = dailyCount >= DAILY_LIMIT;
 
               return (
                 <div className="space-y-2">
-                  {/* Quality gate status banner */}
                   {!limitReached && (
                     <div className={classNames(
                       'rounded-xl px-4 py-3 text-sm border flex items-start gap-3',
@@ -1750,7 +1707,6 @@ Return ONLY the improved text. No explanation, no preamble.`
                       className="w-full h-full object-cover"
                       onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                     />
-                    {/* Play overlay */}
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
                       <div className="w-10 h-10 rounded-full bg-white/0 group-hover:bg-white/20 flex items-center justify-center transition-all">
                         <svg className="text-white opacity-0 group-hover:opacity-100 transition-opacity" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -1827,8 +1783,8 @@ Return ONLY the improved text. No explanation, no preamble.`
 
             <p className="text-sm text-amber-200 bg-amber-900/20 border border-amber-500/20 rounded-xl px-4 py-3">
               {lvl <= 1
-                ? 'Making a video uses AI computer power and costs real money. Each video takes 2–5 minutes and cannot be undone. Please make sure your prompt is exactly what you want.'
-                : 'Video generation consumes AI compute and has a real cost. Generation cannot be cancelled once started. Please confirm your prompt is final before proceeding.'}
+                ? 'Making a video uses AI computer power and costs real money. You can only make 1 video per day. Please make sure your prompt is exactly what you want!'
+                : 'Video generation consumes AI compute and has a real cost. You are limited to 1 video per day. Generation cannot be cancelled once started. Please confirm your prompt is final.'}
             </p>
 
             <div className="flex gap-3 pt-1">
@@ -1846,8 +1802,8 @@ Return ONLY the improved text. No explanation, no preamble.`
 
             <p className="text-xs text-slate-500 text-center">
               {lvl <= 1
-                ? `You have used ${weeklyCount} of ${WEEKLY_LIMIT} videos this week.`
-                : `Weekly usage: ${weeklyCount} / ${WEEKLY_LIMIT} videos.`}
+                ? `This is your ${dailyCount === 0 ? 'only' : '1'} video for today. Make it count!`
+                : `Daily usage: ${dailyCount} / ${DAILY_LIMIT} video. This is your only generation for today.`}
             </p>
           </div>
         </div>
