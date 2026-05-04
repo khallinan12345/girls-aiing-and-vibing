@@ -86,19 +86,26 @@ interface TaskCardProps {
   generatingQuestion?: boolean;
   answer: string;
   submitting: boolean;
+  answerSubmitted: boolean;
+  feedback: string | null;
+  feedbackLoading: boolean;
   onAnswer: (v: string) => void;
   onSubmit: () => void;
+  onAdvance: () => void;
   onHelpOpen: () => void;
   answerRef: React.RefObject<HTMLTextAreaElement>;
 }
 
 const TaskCard: React.FC<TaskCardProps> = ({
   task, taskIndex, totalTasks, generatedQuestion, generatingQuestion,
-  answer, submitting, onAnswer, onSubmit, onHelpOpen, answerRef,
+  answer, submitting, answerSubmitted, feedback, feedbackLoading,
+  onAnswer, onSubmit, onAdvance, onHelpOpen, answerRef,
 }) => {
   const question = task.id === 'what_is_possible'
     ? (generatedQuestion ?? task.question)
     : task.question;
+
+  const isLast = taskIndex === totalTasks - 1;
 
   return (
     <div className="space-y-3">
@@ -147,10 +154,9 @@ const TaskCard: React.FC<TaskCardProps> = ({
         </div>
       ) : null}
 
-      {/* Answer area */}
-      {(question || task.id !== 'what_is_possible') && (
+      {/* Answer area — hidden after submission */}
+      {!answerSubmitted && (question || task.id !== 'what_is_possible') && (
         <>
-          {/* Textarea with inline submit arrow */}
           <div className="relative">
             <textarea
               ref={answerRef}
@@ -166,7 +172,6 @@ const TaskCard: React.FC<TaskCardProps> = ({
               rows={5}
               className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2.5 pr-12 text-sm text-white placeholder-gray-600 resize-none outline-none focus:border-emerald-500 transition-colors leading-relaxed"
             />
-            {/* Green up-arrow submit inside the textarea */}
             <button
               onClick={onSubmit}
               disabled={!answer.trim() || submitting}
@@ -179,7 +184,6 @@ const TaskCard: React.FC<TaskCardProps> = ({
               }
             </button>
           </div>
-
           <div className="flex items-center justify-between">
             <p className="text-[9px] text-gray-600">Ctrl+Enter to submit</p>
             <button
@@ -189,6 +193,41 @@ const TaskCard: React.FC<TaskCardProps> = ({
             </button>
           </div>
         </>
+      )}
+
+      {/* Submitted answer preview */}
+      {answerSubmitted && answer && (
+        <div className="p-3 bg-gray-800/60 border border-gray-700 rounded-xl">
+          <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">Your answer</p>
+          <p className="text-xs text-gray-300 leading-relaxed">{answer}</p>
+        </div>
+      )}
+
+      {/* AI feedback */}
+      {feedbackLoading && (
+        <div className="flex items-center gap-2 py-2">
+          <Loader2 size={13} className="animate-spin text-blue-400" />
+          <span className="text-xs text-gray-400">Reading your answer...</span>
+        </div>
+      )}
+
+      {feedback && !feedbackLoading && (
+        <div className="p-3 bg-blue-500/10 border border-blue-500/25 rounded-xl">
+          <p className="text-[10px] font-bold text-blue-400 uppercase mb-1.5">
+            💬 Feedback
+          </p>
+          <p className="text-sm text-gray-200 leading-relaxed">{feedback}</p>
+        </div>
+      )}
+
+      {/* Next Step button — appears after feedback */}
+      {answerSubmitted && !feedbackLoading && (
+        <button
+          onClick={onAdvance}
+          className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors">
+          <ArrowRight size={15} />
+          {isLast ? 'Start Building →' : 'Next Step →'}
+        </button>
       )}
     </div>
   );
@@ -214,6 +253,10 @@ const WebProjectLoader: React.FC<{
   const [submitting, setSubmitting]   = React.useState(false);
   const [generatedQ, setGeneratedQ]   = React.useState<string | null>(null);
   const [generatingQ, setGeneratingQ] = React.useState(false);
+  // AI feedback after each submission
+  const [feedback, setFeedback]       = React.useState<string | null>(null);
+  const [feedbackLoading, setFeedbackLoading] = React.useState(false);
+  const [answerSubmitted, setAnswerSubmitted] = React.useState(false);
 
   const answerRef = React.useRef<HTMLTextAreaElement>(null);
 
@@ -300,30 +343,64 @@ const WebProjectLoader: React.FC<{
     }
   };
 
-  // Submit current task answer and advance
-  const handleSubmitAnswer = () => {
-    if (!currentAnswer.trim() || submitting) return;
+  // Submit current task answer → get AI feedback
+  const handleSubmitAnswer = async () => {
+    if (!currentAnswer.trim() || submitting || answerSubmitted) return;
     setSubmitting(true);
 
     const newAnswers = [...answers];
     newAnswers[taskIndex] = currentAnswer.trim();
     setAnswers(newAnswers);
+    setAnswerSubmitted(true);
+    setFeedback(null);
+    setFeedbackLoading(true);
+    setSubmitting(false);
 
-    setTimeout(() => {
-      setSubmitting(false);
-      if (taskIndex < PLANNING_TASKS.length - 1) {
-        // Advance to next task
-        setTaskIndex(taskIndex + 1);
-        setCurrentAnswer('');
-        setTimeout(() => answerRef.current?.focus(), 100);
-      } else {
-        // All tasks done — build summary and call parent
-        const summary = PLANNING_TASKS.map((t, i) =>
-          `${t.label}: ${newAnswers[i]}`
-        ).join('\n\n');
-        onProjectLoaded(selected!.name, summary);
-      }
-    }, 300);
+    try {
+      const task = PLANNING_TASKS[taskIndex];
+      const q = taskIndex === 0 ? (generatedQ ?? task.question) : task.question;
+      const isLast = taskIndex === PLANNING_TASKS.length - 1;
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page: 'WebDevelopmentPage',
+          max_tokens: 200,
+          system:
+            `You are a warm, encouraging full-stack educator giving feedback on a learner's planning answer. `
+            + `Site they built: ${selected?.name || 'their website'}. `
+            + `Task: ${task.label}. Question asked: "${q}". `
+            + `Give 2-3 sentences of feedback: affirm what is strong, gently deepen or correct if needed, and end with one follow-up thought or observation. `
+            + (isLast
+              ? 'This is their final planning step — end with genuine encouragement that they are ready to build.'
+              : 'End with a brief bridge to what comes next.')
+            + ' Plain English only. Warm but not effusive. No bullet points.',
+          messages: [{ role: 'user', content: currentAnswer.trim() }],
+        }),
+      });
+      const data = await res.json();
+      setFeedback(data.choices?.[0]?.message?.content?.trim() || null);
+    } catch {
+      setFeedback('Good thinking. Click Next Step when you are ready to continue.');
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+
+  // Advance to next task (called after feedback is shown)
+  const handleAdvance = () => {
+    if (taskIndex < PLANNING_TASKS.length - 1) {
+      setTaskIndex(taskIndex + 1);
+      setCurrentAnswer('');
+      setFeedback(null);
+      setAnswerSubmitted(false);
+      setTimeout(() => answerRef.current?.focus(), 100);
+    } else {
+      const summary = PLANNING_TASKS.map((t, i) =>
+        `${t.label}: ${answers[i]}`
+      ).join('\n\n');
+      onProjectLoaded(selected!.name, summary);
+    }
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -424,18 +501,16 @@ const WebProjectLoader: React.FC<{
               generatingQuestion={generatingQ}
               answer={currentAnswer}
               submitting={submitting}
+              answerSubmitted={answerSubmitted}
+              feedback={feedback}
+              feedbackLoading={feedbackLoading}
               onAnswer={setCurrentAnswer}
               onSubmit={handleSubmitAnswer}
+              onAdvance={handleAdvance}
               onHelpOpen={helpMe.open}
               answerRef={answerRef}
             />
 
-            {/* Final task completion note */}
-            {taskIndex === PLANNING_TASKS.length - 1 && (
-              <p className="text-[10px] text-gray-600 text-center">
-                This is the last planning step — submitting will take you into the full-stack builder.
-              </p>
-            )}
           </>
         )}
       </div>
