@@ -104,6 +104,9 @@ const WebProjectLoader: React.FC<{
   const [feedback, setFeedback]           = React.useState<string | null>(null);
   const [feedbackLoading, setFeedbackLoading] = React.useState(false);
   const [answerSubmitted, setAnswerSubmitted] = React.useState(false);
+  // Revision — learner can respond to feedback and resubmit
+  const [revisionAnswer, setRevisionAnswer] = React.useState('');
+  const [revisionSubmitting, setRevisionSubmitting] = React.useState(false);
 
   const answerRef   = React.useRef<HTMLTextAreaElement>(null);
   const currentTask = PLANNING_TASKS[taskIndex];
@@ -250,7 +253,7 @@ const WebProjectLoader: React.FC<{
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           page:       'WebDevelopmentPage',
-          max_tokens: 200,
+          max_tokens: 500,
           system:
             'You are a warm, encouraging full-stack educator giving feedback on a learner planning their database. ' +
             'Site: ' + (selected?.name || 'their website') + '. ' +
@@ -275,11 +278,57 @@ const WebProjectLoader: React.FC<{
     }
   };
 
+  // Learner revises their answer in response to feedback
+  const handleRevision = async () => {
+    if (!revisionAnswer.trim() || revisionSubmitting) return;
+    setRevisionSubmitting(true);
+    setFeedback(null);
+    setFeedbackLoading(true);
+
+    // Update the stored answer with the revision
+    const newAnswers = [...answers];
+    newAnswers[taskIndex] = revisionAnswer.trim();
+    setAnswers(newAnswers);
+
+    try {
+      const q = taskIndex === 0 ? (generatedQ ?? currentTask.question) : currentTask.question;
+      const res = await fetch('/api/chat', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page:       'WebDevelopmentPage',
+          max_tokens: 500,
+          system:
+            'You are a warm, encouraging full-stack educator. ' +
+            'A learner has revised their planning answer after your feedback. ' +
+            'Site: ' + (selected?.name || 'their website') + '. ' +
+            'Step: ' + currentTask.label + '. Question: ' + q + '. ' +
+            'Acknowledge the improvement specifically, affirm what is now strong, ' +
+            'and if there is still something to develop gently note it. ' +
+            (isLastTask
+              ? 'End with encouragement — they are ready to build.'
+              : 'End with a one-sentence bridge to what comes next.') +
+            ' 2-3 sentences. Plain English. No bullet points.',
+          messages: [{ role: 'user', content: revisionAnswer.trim() }],
+        }),
+      });
+      const data = await res.json();
+      setFeedback(data.choices?.[0]?.message?.content?.trim() || null);
+    } catch {
+      setFeedback('Good revision. Click Next Step when you are ready to continue.');
+    } finally {
+      setRevisionSubmitting(false);
+      setRevisionAnswer('');
+      setFeedbackLoading(false);
+    }
+  };
+
   // Advance to next task or finish
   const handleAdvance = () => {
     if (taskIndex < PLANNING_TASKS.length - 1) {
       setTaskIndex(taskIndex + 1);
       setCurrentAnswer('');
+      setRevisionAnswer('');
       setFeedback(null);
       setAnswerSubmitted(false);
       setTimeout(() => answerRef.current?.focus(), 100);
@@ -485,6 +534,39 @@ const WebProjectLoader: React.FC<{
               <div className="p-3 bg-blue-500/10 border border-blue-500/25 rounded-xl">
                 <p className="text-[10px] font-bold text-blue-400 uppercase mb-1.5">Feedback</p>
                 <p className="text-sm text-gray-200 leading-relaxed">{feedback}</p>
+              </div>
+            )}
+
+            {/* Revision area — shown after feedback */}
+            {feedback && !feedbackLoading && (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Want to improve your answer based on the feedback? Write your revision below — or click Next Step if you are happy with it.
+                </p>
+                <div className="relative">
+                  <textarea
+                    value={revisionAnswer}
+                    onChange={(e) => setRevisionAnswer(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && revisionAnswer.trim()) {
+                        e.preventDefault();
+                        handleRevision();
+                      }
+                    }}
+                    placeholder="Revise your answer here..."
+                    rows={3}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2.5 pr-12 text-sm text-white placeholder-gray-600 resize-none outline-none focus:border-blue-500 transition-colors leading-relaxed"
+                  />
+                  <button
+                    onClick={handleRevision}
+                    disabled={!revisionAnswer.trim() || revisionSubmitting}
+                    title="Submit revision"
+                    className="absolute bottom-3 right-3 w-8 h-8 flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-30 transition-colors">
+                    {revisionSubmitting
+                      ? <Loader2 size={14} className="animate-spin text-white" />
+                      : <ArrowUp size={14} className="text-white" />}
+                  </button>
+                </div>
               </div>
             )}
 
