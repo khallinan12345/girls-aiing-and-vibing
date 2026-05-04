@@ -11,7 +11,6 @@ import { supabase } from '../../lib/supabaseClient';
 import Editor from '@monaco-editor/react';
 import GitHubPanel from '../../components/GitHubPanel';
 import { useVoice } from '../../hooks/useVoice';
-import WebProjectLoader, { WebProject } from '../../components/WebProjectLoader';
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
   Database, Table2, Play, CheckCircle, ArrowRight, FileCode,
@@ -61,7 +60,6 @@ const FS_ACTIVITY = 'fullstack_development';
 const LS_CREDS_KEY = 'fs_dev_supabase_creds';
 
 const TASKS: TaskDef[] = [
-  { id: 'load_web_project', label: 'Load Your Web Project',    phase: 1, icon: '📂', isOnboarding: true },
   { id: 'intro_fullstack',  label: 'Full-Stack Overview',      phase: 1, icon: '🏗️', isOnboarding: true },
   { id: 'supabase_setup',   label: 'Set Up Supabase Project',   phase: 1, icon: '🔑' },
   { id: 'schema_design',    label: 'Design Your Schema',        phase: 1, icon: '📐' },
@@ -862,9 +860,6 @@ const FullStackDevelopmentPage: React.FC = () => {
   const [generatedSql, setGeneratedSql] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [copied, setCopied]           = useState(false);
-  const [teachingExplanation, setTeachingExplanation] = useState<string | null>(null);
-  const [loadedWebProject, setLoadedWebProject] = useState<{ name: string; fileCount: number } | null>(null);
-  const [dataRoleAnswer, setDataRoleAnswer] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
   const currentTask  = TASKS[taskIndex];
@@ -937,20 +932,6 @@ const FullStackDevelopmentPage: React.FC = () => {
     setTaskHasGeneration(false); setShowSessionPicker(false);
     setTaskInstruction(null); setPrompt(''); setAiExplanation(null); setErrorMsg(null); setSubTaskCritique(null);
   }, []);
-
-  const handleWebProjectLoaded = useCallback(async (project: WebProject, answer: string) => {
-    const merged = mergeFiles(STARTER_FILES, project.files);
-    setProjectFiles(merged); setActiveFilePath('src/App.jsx');
-    setSessionName(project.name + ' (Full-Stack)');
-    setLoadedWebProject({ name: project.name, fileCount: project.files.length });
-    setDataRoleAnswer(answer);
-    const newCtx = { ...sessionContext, importedSiteName: project.name, dataRoleAnswer: answer };
-    setSessionContext(newCtx);
-    await ensureSession();
-    setTaskIndex(1); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
-    await fetchTaskInstruction(1, merged, newCtx);
-    setTimeout(() => persistSession(merged, promptHistory, 1, newCtx), 100);
-  }, [sessionContext, ensureSession, fetchTaskInstruction, promptHistory, persistSession]);
 
   const handleDeleteSession = useCallback(async (e: React.MouseEvent, sid: string) => {
     e.stopPropagation(); if (!userId) return;
@@ -1484,10 +1465,7 @@ const FullStackDevelopmentPage: React.FC = () => {
 
             {currentTask?.isOnboarding ? (
               <div className="flex-1 overflow-y-auto">
-                {currentTask.id === 'load_web_project'
-                  ? <WebProjectLoader userId={userId} onProjectLoaded={handleWebProjectLoaded} />
-                  : <FullStackOnboarding onComplete={handleOnboardingComplete} />
-                }
+                <FullStackOnboarding onComplete={handleOnboardingComplete} />
               </div>
             ) : (
               <>
