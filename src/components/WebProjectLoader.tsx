@@ -17,6 +17,47 @@ const WebProjectLoader: React.FC<{
   const [answer, setAnswer] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
   const answerRef = React.useRef<HTMLTextAreaElement>(null);
+  const [showHelp, setShowHelp] = React.useState(false);
+  const [helpMessages, setHelpMessages] = React.useState<{role:'assistant'|'user';text:string}[]>([]);
+  const [helpInput, setHelpInput] = React.useState('');
+  const [helpLoading, setHelpLoading] = React.useState(false);
+  const [helpDraft, setHelpDraft] = React.useState('');
+
+  const openHelp = () => {
+    if (!selected) return;
+    setHelpMessages([{role:'assistant',text:'I can help you think about what data your site needs. What kinds of things would you want visitors to be able to do — like submit a story, create a profile, or sign up for something?'}]);
+    setHelpInput(''); setHelpDraft(''); setShowHelp(true);
+  };
+
+  const sendHelp = async () => {
+    if (!helpInput.trim() || helpLoading) return;
+    const msgs = [...helpMessages, {role:'user' as const, text:helpInput.trim()}];
+    setHelpMessages(msgs); setHelpInput(''); setHelpLoading(true);
+    try {
+      const res = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({page:'WebDevelopmentPage',max_tokens:300,
+          system:'You are helping a learner plan what data their website needs. Site: ' + (selected?.name||'') + '. Guide them to think about what visitors would submit, save, or look up. Keep replies under 4 sentences. When you have a clear picture of their data needs, end with READY_TO_DRAFT.',
+          messages:msgs.map(m=>({role:m.role,content:m.text}))})})
+      const data = await res.json();
+      const reply = data.choices?.[0]?.message?.content||'';
+      const isReady = reply.includes('READY_TO_DRAFT');
+      const clean = reply.replace('READY_TO_DRAFT','').trim();
+      setHelpMessages(p=>[...p,{role:'assistant',text:clean}]);
+      if (isReady) getDraft([...msgs,{role:'assistant',text:clean}]);
+    } catch { setHelpMessages(p=>[...p,{role:'assistant',text:'Sorry, try again.'}]); }
+    finally { setHelpLoading(false); }
+  };
+
+  const getDraft = async (msgs=helpMessages) => {
+    try {
+      const res = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({page:'WebDevelopmentPage',max_tokens:200,
+          system:'Based on the conversation, write 2-3 sentences in first person describing what data this learner wants their website to collect and why. Plain English, no jargon.',
+          messages:[...msgs.map(m=>({role:m.role,content:m.text})),{role:'user',content:'Write my answer.'}]})})
+      const data = await res.json();
+      setHelpDraft(data.choices?.[0]?.message?.content||'');
+    } catch {}
+  };
 
   React.useEffect(() => {
     if (!userId) { setLoading(false); return; }
@@ -48,7 +89,12 @@ const WebProjectLoader: React.FC<{
         .map(f => f.path.split('/').pop()?.replace('.jsx', '') || '').join(', ');
       const appCode = proj.files.find(f => f.path === 'src/App.jsx')?.content.slice(0, 300) || '';
       const desc = 'Site: ' + proj.name + '. Pages: ' + (pages || 'home') + '. Code: ' + appCode;
-      const system = 'You are a full-stack educator. Ask ONE Socratic question (under 40 words, starting with "What happens when" or "How would") that reveals why this static site needs a real database. Be specific to THEIR site. No preamble.';
+      const system = 'You are a full-stack educator helping a learner plan how to add real data to their website. '
+        + 'Look at what they built and ask ONE question (under 40 words) that helps them discover '
+        + 'what information VISITORS would want to submit, save, or retrieve from their site. '
+        + 'Think about: forms people could fill in, stories they could share, profiles they could create, '
+        + 'or community data they could contribute. Be specific to THEIR site. No preamble. '
+        + 'Start with "What if visitors could" or "Imagine if people could".';
       const res = await fetch('/api/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ page: 'WebDevelopmentPage', max_tokens: 80, system,
@@ -124,11 +170,49 @@ const WebProjectLoader: React.FC<{
                 <p className="text-[10px] font-bold text-emerald-400 uppercase mb-1">Before we add the database...</p>
                 <p className="text-sm text-white font-medium leading-relaxed">{question}</p>
               </div>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                Think about what information visitors would want to <strong className="text-gray-300">submit, save, or look up</strong> on your site — stories, profiles, comments, registrations. Write your ideas below, or click <strong className="text-purple-300">Help Me Answer</strong> if you want to talk it through first.
+              </p>
               <textarea ref={answerRef} value={answer} onChange={e => setAnswer(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleSubmit(); }}
                 placeholder="Write your answer here - there is no wrong answer..."
                 rows={4}
                 className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-600 resize-none outline-none focus:border-emerald-500 transition-colors" />
+              {/* Help Me Answer — opens inline chat */}
+              {showHelp ? (
+                <div className="space-y-2">
+                  <div className="rounded-xl border p-3 space-y-2" style={{background:'#1a1025',borderColor:'#6040a0',maxHeight:'220px',overflowY:'auto'}}>
+                    {helpMessages.map((m,i) => (
+                      <div key={i} className={`flex ${m.role==='user'?'justify-end':'justify-start'}`}>
+                        <div className="rounded-2xl px-3 py-2 text-xs leading-relaxed" style={{maxWidth:'85%',background:m.role==='user'?'#4a20a0':'#2a1845',color:m.role==='user'?'white':'#e0d0ff'}}>{m.text}</div>
+                      </div>
+                    ))}
+                    {helpLoading && <div className="flex gap-1 px-3 py-2"><div className="w-1.5 h-1.5 rounded-full animate-bounce bg-purple-400" /><div className="w-1.5 h-1.5 rounded-full animate-bounce bg-purple-400" style={{animationDelay:'0.15s'}} /><div className="w-1.5 h-1.5 rounded-full animate-bounce bg-purple-400" style={{animationDelay:'0.3s'}} /></div>}
+                  </div>
+                  <div className="flex gap-2">
+                    <input value={helpInput} onChange={e=>setHelpInput(e.target.value)}
+                      onKeyDown={e=>{if(e.key==='Enter')sendHelp();}}
+                      placeholder="Ask me anything..."
+                      className="flex-1 rounded-xl px-3 py-2 text-xs outline-none" style={{background:'#2a1845',border:'1px solid #6040a0',color:'white'}} />
+                    <button onClick={sendHelp} disabled={helpLoading||!helpInput.trim()} className="px-3 py-2 rounded-xl text-xs font-bold disabled:opacity-40" style={{background:'#6040a0',color:'white'}}>Send</button>
+                    <button onClick={()=>setShowHelp(false)} className="px-3 py-2 rounded-xl text-xs font-bold" style={{background:'#2a1845',color:'#a080e0'}}>Close</button>
+                  </div>
+                  {helpDraft && (
+                    <div className="p-3 rounded-xl border" style={{background:'#0f2a0f',borderColor:'#3a7a3a'}}>
+                      <p className="text-[10px] font-bold text-emerald-400 uppercase mb-1">Suggested answer</p>
+                      <p className="text-xs text-emerald-200 leading-relaxed mb-2">{helpDraft}</p>
+                      <button onClick={()=>{setAnswer(helpDraft);setShowHelp(false);}} className="w-full py-1.5 rounded-lg text-xs font-bold" style={{background:'#3a7a3a',color:'white'}}>Use this answer</button>
+                    </div>
+                  )}
+                  {!helpDraft && helpMessages.length>=3 && (
+                    <button onClick={getDraft} disabled={helpLoading} className="w-full py-2 rounded-xl text-xs font-bold disabled:opacity-40" style={{background:'#3a7a3a',color:'white'}}>✨ Get an AI response you can use</button>
+                  )}
+                </div>
+              ) : (
+                <button onClick={openHelp} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl border border-purple-500/40 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors">
+                  💬 Help Me Answer
+                </button>
+              )}
               <button onClick={handleSubmit} disabled={!answer.trim() || submitting}
                 className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors disabled:opacity-40">
                 {submitting ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
