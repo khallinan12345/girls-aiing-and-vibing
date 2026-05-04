@@ -11,9 +11,6 @@ import { supabase } from '../../lib/supabaseClient';
 import Editor from '@monaco-editor/react';
 import GitHubPanel from '../../components/GitHubPanel';
 import { useVoice } from '../../hooks/useVoice';
-import WebProjectLoader, { WebProject } from '../../components/WebProjectLoader';
-
-
 import { VoiceFallback } from '../../components/VoiceFallback';
 import {
   Database, Table2, Play, CheckCircle, ArrowRight, FileCode,
@@ -22,7 +19,6 @@ import {
   Award, X, Copy, Check, Volume2, VolumeX, AlertCircle, Star,
   Key, Globe, Link, Eye, EyeOff, Trash2, Plus, Code2,
   Package, Layers, Cpu, MessageSquarePlus, Github,
-  HelpCircle, SkipForward,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -55,7 +51,7 @@ interface SessionRecord {
 
 interface SupaCredentials { url: string; anonKey: string; }
 
-type RightTab = 'teaching' | 'code' | 'tables' | 'sql' | 'github';
+type RightTab = 'code' | 'tables' | 'sql' | 'github';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -64,7 +60,6 @@ const FS_ACTIVITY = 'fullstack_development';
 const LS_CREDS_KEY = 'fs_dev_supabase_creds';
 
 const TASKS: TaskDef[] = [
-  { id: 'load_web_project', label: 'Load Your Web Project',    phase: 1, icon: '📂', isOnboarding: true },
   { id: 'intro_fullstack',  label: 'Full-Stack Overview',      phase: 1, icon: '🏗️', isOnboarding: true },
   { id: 'supabase_setup',   label: 'Set Up Supabase Project',   phase: 1, icon: '🔑' },
   { id: 'schema_design',    label: 'Design Your Schema',        phase: 1, icon: '📐' },
@@ -861,83 +856,15 @@ const FullStackDevelopmentPage: React.FC = () => {
   const [evalError, setEvalError]           = useState<string | null>(null);
 
   // ── Right panel ──────────────────────────────────────────────────────
-  const [rightTab, setRightTab]       = useState<RightTab>('teaching');
+  const [rightTab, setRightTab]       = useState<RightTab>('code');
   const [generatedSql, setGeneratedSql] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [copied, setCopied]           = useState(false);
-  const [teachingExplanation, setTeachingExplanation] = useState<string | null>(null);
-  const [loadedWebProject, setLoadedWebProject] = useState<{ name: string; fileCount: number } | null>(null);
-  const [dataRoleAnswer, setDataRoleAnswer] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
   const currentTask  = TASKS[taskIndex];
   const currentPhase = currentTask?.phase ?? 1;
   const pm           = PHASE_META[currentPhase];
-
-  // Help Me Answer — inline state (no external hook to avoid TDZ)
-  const [showHelpMe, setShowHelpMe]         = useState(false);
-  const [helpMeMessages, setHelpMeMessages] = useState<{role:'assistant'|'user';text:string}[]>([]);
-  const [helpMeInput, setHelpMeInput]       = useState('');
-  const [helpMeLoading, setHelpMeLoading]   = useState(false);
-  const [helpMeDraft, setHelpMeDraft]       = useState<string|null>(null);
-  const helpMeInputRef = useRef<HTMLInputElement>(null);
-
-  const openHelpMe = useCallback(() => {
-    const q = taskInstruction?.subTasks?.[subTaskIndex] ?? '';
-    const t = taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '';
-    const opening = 'Let me help you answer this question about ' + (currentTask?.label ?? '') + '.\n\n'
-      + 'The question is asking: "' + q + '"\n\n'
-      + 'Here is what to think about: ' + t + '\n\n'
-      + 'What would you like me to explain? You can ask what specific terms mean, ask for options, or say "give me some options".';
-    setHelpMeMessages([{role:'assistant',text:opening}]);
-    setHelpMeInput(''); setHelpMeDraft(null); setShowHelpMe(true);
-    setTimeout(() => helpMeInputRef.current?.focus(), 80);
-  }, [taskInstruction, subTaskIndex, currentTask]);
-
-  const sendHelpMe = useCallback(async () => {
-    const text = helpMeInput.trim();
-    if (!text || helpMeLoading) return;
-    const q = taskInstruction?.subTasks?.[subTaskIndex] ?? '';
-    const t = taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '';
-    const newMsgs = [...helpMeMessages, {role:'user' as const, text}];
-    setHelpMeMessages(newMsgs); setHelpMeInput(''); setHelpMeLoading(true);
-    try {
-      const res = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ page:'WebDevelopmentPage', max_tokens:800,
-          system: 'You are a friendly helper for a first-generation digital learner. They are answering: "' + q + '". Background: ' + t + '. Explain in plain language, use real-world analogies for technical terms, offer 3-4 concrete options when asked. When you have enough info end with READY_TO_DRAFT. Max 6 sentences. No bullet points.',
-          messages: newMsgs.map(m => ({role:m.role, content:m.text})) }) });
-      const data = await res.json();
-      const reply = data.choices?.[0]?.message?.content ?? 'Sorry, something went wrong.';
-      const isReady = reply.includes('READY_TO_DRAFT');
-      const clean = reply.replace('READY_TO_DRAFT','').trim();
-      const withReply = [...newMsgs, {role:'assistant' as const, text:clean}];
-      setHelpMeMessages(withReply);
-      if (isReady) {
-        const r2 = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ page:'WebDevelopmentPage', max_tokens:300,
-            system: 'Write a complete 2-4 sentence answer in first person the learner can submit. Question: "' + q + '". Be specific, use details from the conversation. Plain English only.',
-            messages: [...withReply.map(m=>({role:m.role,content:m.text})), {role:'user',content:'Write my complete answer.'}] }) });
-        const d2 = await r2.json();
-        const draft = d2.choices?.[0]?.message?.content ?? '';
-        if (draft) setHelpMeDraft(draft);
-      }
-    } catch { setHelpMeMessages(p => [...p, {role:'assistant',text:'Sorry, something went wrong.'}]); }
-    finally { setHelpMeLoading(false); setTimeout(() => helpMeInputRef.current?.focus(), 80); }
-  }, [helpMeInput, helpMeLoading, helpMeMessages, taskInstruction, subTaskIndex]);
-
-  const requestHelpMeDraft = useCallback(async () => {
-    const q = taskInstruction?.subTasks?.[subTaskIndex] ?? '';
-    const t = taskInstruction?.subTaskTeaching?.[subTaskIndex] ?? '';
-    try {
-      const r = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ page:'WebDevelopmentPage', max_tokens:300,
-          system: 'Write a complete 2-4 sentence answer in first person. Question: "' + q + '". Context: ' + t + '. Plain English only.',
-          messages: [...helpMeMessages.map(m=>({role:m.role,content:m.text})), {role:'user',content:'Write my complete answer.'}] }) });
-      const d = await r.json();
-      const draft = d.choices?.[0]?.message?.content ?? '';
-      if (draft) setHelpMeDraft(draft);
-    } catch {}
-  }, [helpMeMessages, taskInstruction, subTaskIndex]);
 
   // ── Load sessions ─────────────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
@@ -1006,20 +933,6 @@ const FullStackDevelopmentPage: React.FC = () => {
     setTaskInstruction(null); setPrompt(''); setAiExplanation(null); setErrorMsg(null); setSubTaskCritique(null);
   }, []);
 
-  const handleWebProjectLoaded = useCallback(async (project: WebProject, answer: string) => {
-    const merged = mergeFiles(STARTER_FILES, project.files);
-    setProjectFiles(merged); setActiveFilePath('src/App.jsx');
-    setSessionName(project.name + ' (Full-Stack)');
-    setLoadedWebProject({ name: project.name, fileCount: project.files.length });
-    setDataRoleAnswer(answer);
-    const newCtx = { ...sessionContext, importedSiteName: project.name, dataRoleAnswer: answer };
-    setSessionContext(newCtx);
-    await ensureSession();
-    setTaskIndex(1); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
-    await fetchTaskInstruction(1, merged, newCtx);
-    setTimeout(() => persistSession(merged, promptHistory, 1, newCtx), 100);
-  }, [sessionContext, ensureSession, fetchTaskInstruction, promptHistory, persistSession]);
-
   const handleDeleteSession = useCallback(async (e: React.MouseEvent, sid: string) => {
     e.stopPropagation(); if (!userId) return;
     setDeletingSessionId(sid);
@@ -1042,9 +955,7 @@ const FullStackDevelopmentPage: React.FC = () => {
         projectFiles: fileSummary, sessionContext: ctx,
         completedTasks: TASKS.slice(0, idx).map(t => t.id),
         communicationStrategy, learningStrategy,
-        supabaseConnected:  !!(creds.url && creds.anonKey),
-        importedSiteName:   ctx.importedSiteName || null,
-        dataRoleAnswer:     ctx.dataRoleAnswer   || null,
+        supabaseConnected: !!(creds.url && creds.anonKey),
       });
       setTaskInstruction(result as TaskInstruction);
       if (result?.subTaskTeaching?.[0] && result?.subTasks?.[0]) {
@@ -1168,8 +1079,6 @@ const FullStackDevelopmentPage: React.FC = () => {
 
       entry.aiExplanation = result.explanation;
       setAiExplanation(result.explanation || null);
-      setTeachingExplanation(result.explanation || null);
-      if (result.explanation) setRightTab('teaching');
 
       // Critique the student's prompt
       if (prompt.trim().length > 10) {
@@ -1312,8 +1221,7 @@ const FullStackDevelopmentPage: React.FC = () => {
 
   // Tabs for the right panel
   const RIGHT_TABS: { id: RightTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'teaching', label: 'Teaching', icon: <Layers size={12} /> },
-    { id: 'code',     label: 'Code',     icon: <Code2 size={12} />   },
+    { id: 'code',   label: 'Code',   icon: <Code2 size={12} />   },
     { id: 'tables', label: 'Tables', icon: <Table2 size={12} />  },
     { id: 'sql',    label: 'SQL',    icon: <Database size={12} /> },
     { id: 'github', label: 'GitHub', icon: <Github size={12} />  },
@@ -1334,50 +1242,6 @@ const FullStackDevelopmentPage: React.FC = () => {
       {fallbackText && (
         <div className="fixed bottom-4 right-4 z-50 max-w-sm">
           <VoiceFallback text={fallbackText} onDismiss={clearFallback} />
-        </div>
-      )}
-
-      {showHelpMe && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:'rgba(0,0,0,0.75)',backdropFilter:'blur(5px)'}}>
-          <div className="w-full max-w-lg flex flex-col rounded-2xl shadow-2xl border overflow-hidden" style={{background:'#1a1025',borderColor:'#6040a0',maxHeight:'85vh'}}>
-            <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{borderColor:'#3a2060',background:'#12081a'}}>
-              <div className="flex items-center gap-2">
-                <HelpCircle size={16} style={{color:'#a080e0'}} />
-                <div><p className="text-[9px] font-bold uppercase tracking-widest" style={{color:'#a080e0'}}>{pm.label}</p>
-                <p className="text-sm font-bold text-white">Help Me Answer</p></div>
-              </div>
-              <button onClick={() => setShowHelpMe(false)} className="p-1.5 rounded-lg hover:bg-white/10"><X size={16} style={{color:'#a080e0'}} /></button>
-            </div>
-            <div className="px-5 pt-4 pb-2 flex-shrink-0">
-              <div className="rounded-xl p-3 border" style={{background:'#2a1845',borderColor:'#6040a0'}}>
-                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{color:'#a080e0'}}>Your question</p>
-                <p className="text-xs text-white leading-relaxed">{taskInstruction?.subTasks?.[subTaskIndex]}</p>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3 min-h-0">
-              {helpMeMessages.map((msg,i) => (
-                <div key={i} className={`flex ${msg.role==='user'?'justify-end':'justify-start'}`}>
-                  <div className="rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap" style={{maxWidth:'85%',background:msg.role==='user'?'#4a20a0':'#2a1845',color:msg.role==='user'?'white':'#e0d0ff',borderRadius:msg.role==='user'?'18px 18px 4px 18px':'18px 18px 18px 4px'}}>{msg.text}</div>
-                </div>
-              ))}
-              {helpMeLoading && (<div className="flex justify-start"><div className="rounded-2xl px-4 py-3" style={{background:'#2a1845'}}><div className="flex gap-1">{[0,1,2].map(i=><div key={i} className="w-2 h-2 rounded-full animate-bounce" style={{background:'#a080e0',animationDelay:`${i*0.15}s`}} />)}</div></div></div>)}
-            </div>
-            {helpMeDraft && (
-              <div className="mx-5 mb-3 rounded-xl border flex-shrink-0" style={{background:'#0f2a0f',borderColor:'#3a7a3a'}}>
-                <div className="px-4 pt-3 pb-1"><p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{color:'#7aba7a'}}>Your answer - ready to use</p><p className="text-xs leading-relaxed" style={{color:'#c0e8c0'}}>{helpMeDraft}</p></div>
-                <div className="px-4 pb-3 pt-2"><button onClick={() => { setPrompt(helpMeDraft!); setShowHelpMe(false); setTimeout(() => promptRef.current?.focus(), 80); }} className="w-full py-2 rounded-xl text-sm font-bold hover:opacity-90" style={{background:'#3a7a3a',color:'white'}}>Use this answer</button></div>
-              </div>
-            )}
-            <div className="px-5 pb-4 pt-2 flex gap-2 flex-shrink-0">
-              <input ref={helpMeInputRef} value={helpMeInput} onChange={e=>setHelpMeInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey)sendHelpMe();}} placeholder="Ask me anything..." disabled={helpMeLoading} className="flex-1 rounded-xl px-3 py-2 text-sm outline-none disabled:opacity-50" style={{background:'#2a1845',border:'1px solid #6040a0',color:'white'}} />
-              <button onClick={sendHelpMe} disabled={helpMeLoading||!helpMeInput.trim()} className="px-4 py-2 rounded-xl text-sm font-bold disabled:opacity-40" style={{background:'#6040a0',color:'white'}}>Send</button>
-            </div>
-            {!helpMeDraft && helpMeMessages.length >= 3 && (
-              <div className="px-5 pb-5 flex-shrink-0 border-t pt-3" style={{borderColor:'#3a2060'}}>
-                <button onClick={requestHelpMeDraft} disabled={helpMeLoading} className="w-full py-2.5 rounded-xl text-sm font-bold hover:opacity-90 disabled:opacity-40" style={{background:'#3a7a3a',color:'white'}}>Get an AI response you can use</button>
-              </div>
-            )}
-          </div>
         </div>
       )}
 
@@ -1534,7 +1398,6 @@ const FullStackDevelopmentPage: React.FC = () => {
               })}
               <span className="text-[10px] text-gray-500 ml-1">{taskIndex + 1}/{TASKS.length}</span>
             </div>
-            {loadedWebProject && (<div className="hidden md:flex items-center gap-1 px-2 py-0.5 bg-blue-500/10 border border-blue-500/25 rounded-full flex-shrink-0"><span className="text-[10px]">🌐</span><span className="text-[10px] text-blue-300 font-medium truncate max-w-[120px]">{loadedWebProject.name}</span></div>)}
             {/* Creds status */}
             {creds.url && creds.anonKey && (
               <div className="hidden md:flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/25 rounded-full flex-shrink-0">
@@ -1602,10 +1465,7 @@ const FullStackDevelopmentPage: React.FC = () => {
 
             {currentTask?.isOnboarding ? (
               <div className="flex-1 overflow-y-auto">
-                {currentTask.id === 'load_web_project'
-                  ? <WebProjectLoader userId={userId} onProjectLoaded={handleWebProjectLoaded} />
-                  : <FullStackOnboarding onComplete={handleOnboardingComplete} />
-                }
+                <FullStackOnboarding onComplete={handleOnboardingComplete} />
               </div>
             ) : (
               <>
@@ -1670,12 +1530,6 @@ const FullStackDevelopmentPage: React.FC = () => {
                             See example →
                           </button>
                         )}
-                        <div className="flex items-center gap-2 mt-2">
-                          <button onClick={openHelpMe} className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium rounded-lg border border-purple-500/40 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors"><HelpCircle size={11} /> Help Me Answer</button>
-                          {subTaskIndex < (taskInstruction?.subTasks?.length ?? 1) - 1 && (
-                            <button onClick={() => { setSubTaskIndex(subTaskIndex + 1); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); }} className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg border border-gray-600 text-gray-400 hover:text-white hover:border-gray-400 transition-colors"><SkipForward size={11} /> Skip</button>
-                          )}
-                        </div>
                       </div>
                     </div>
                   ) : null}
@@ -1799,17 +1653,6 @@ const FullStackDevelopmentPage: React.FC = () => {
 
             {/* Tab content */}
             <div className="flex-1 flex overflow-hidden">
-
-              {rightTab === 'teaching' && (
-                <div className="flex-1 overflow-y-auto p-5 space-y-4" style={{ background: '#fdf8f0' }}>
-                  {teachingExplanation && (<div className="rounded-xl border border-blue-200 overflow-hidden"><div className="px-4 py-2 bg-blue-50 border-b border-blue-200"><p className="text-[10px] font-bold text-blue-600 uppercase">What was built</p></div><p className="px-4 py-3 text-sm text-gray-700 leading-relaxed">{teachingExplanation}</p></div>)}
-                  {loadedWebProject && !teachingExplanation && (<div className="rounded-xl border border-blue-200 overflow-hidden"><div className="px-4 py-2 bg-blue-50 border-b border-blue-200"><p className="text-[10px] font-bold text-blue-600 uppercase">Starting from your web project</p></div><div className="px-4 py-3"><p className="text-sm font-semibold text-gray-800">{loadedWebProject.name}</p><p className="text-xs text-gray-500 mt-0.5">{loadedWebProject.fileCount} files imported</p>{dataRoleAnswer && (<div className="mt-2 p-2 bg-emerald-50 rounded-lg border border-emerald-200"><p className="text-[10px] font-bold text-emerald-700 uppercase mb-1">Your thinking about data</p><p className="text-xs text-gray-700 italic">{dataRoleAnswer}</p></div>)}</div></div>)}
-                  {taskInstruction?.subTaskTeaching?.[subTaskIndex] && (<div className="rounded-xl border border-amber-200 overflow-hidden"><div className="px-4 py-2 bg-amber-50 border-b border-amber-200"><p className="text-[10px] font-bold text-amber-700 uppercase">Why this matters</p></div><p className="px-4 py-3 text-sm text-gray-700 leading-relaxed italic">{taskInstruction.subTaskTeaching[subTaskIndex]}</p></div>)}
-                  {subTaskCritique && (<div className={`rounded-xl border overflow-hidden ${subTaskCritique.hasSuggestions ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50'}`}><div className="px-4 py-2 border-b border-inherit"><p className={`text-[10px] font-bold uppercase ${subTaskCritique.hasSuggestions ? 'text-amber-700' : 'text-emerald-700'}`}>{subTaskCritique.hasSuggestions ? 'Feedback' : 'Step complete'}</p></div><p className="px-4 py-3 text-sm text-gray-700 leading-relaxed">{subTaskCritique.feedback}</p></div>)}
-                  {taskInstruction?.subTasks?.[subTaskIndex] && (<div className="rounded-xl border border-gray-200 overflow-hidden"><div className={`px-4 py-2 border-b border-gray-200 ${pm.bg}`}><p className={`text-[10px] font-bold uppercase ${pm.color}`}>Step {subTaskIndex + 1} of {taskInstruction.subTasks.length}</p></div><p className="px-4 py-3 text-sm text-gray-800 font-medium leading-relaxed">{taskInstruction.subTasks[subTaskIndex]}</p></div>)}
-                  {!teachingExplanation && !loadedWebProject && !taskInstruction?.subTaskTeaching?.[subTaskIndex] && !subTaskCritique && (<div className="flex flex-col items-center justify-center py-16 text-center"><Layers size={32} className="text-gray-300 mb-3" /><p className="text-sm text-gray-500">Teaching panel</p><p className="text-xs text-gray-400 mt-1">Submit a response to see feedback here</p></div>)}
-                </div>
-              )}
 
               {/* Code tab: file tree + Monaco */}
               {rightTab === 'code' && (
