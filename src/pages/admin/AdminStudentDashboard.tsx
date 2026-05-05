@@ -145,7 +145,7 @@ const modelLabel = (m: string) => PRICING[m]?.label || m;
 
 const fmtCost = (n: number) => n < 0.001 ? '<$0.001' : `$${n.toFixed(3)}`;
 const fmtTokens = (n: number) =>
-  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : `${n}`;
+const numCost = (v: number | string): number => typeof v === "number" ? v : parseFloat(String(v)) || 0;const numCost = (v: number | string): number => typeof v === "number" ? v : parseFloat(String(v)) || 0;  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : `${n}`;
 
 const progressColor = (p: string) => {
   if (p === 'completed') return 'bg-green-100 text-green-800 border-green-200';
@@ -218,7 +218,7 @@ function groupCostRows(rows: CostRow[], by: 'page' | 'model' | 'provider') {
     const key = by === 'page' ? r.page : by === 'model' ? modelLabel(r.model) : r.provider;
     const existing = map.get(key) || { cost: 0, calls: 0, inTok: 0, outTok: 0, cacheHit: 0, provider: r.provider };
     map.set(key, {
-      cost:     existing.cost + r.estimated_cost_usd,
+      cost:     existing.cost + numCost(r.estimated_cost_usd),
       calls:    existing.calls + 1,
       inTok:    existing.inTok + r.input_tokens,
       outTok:   existing.outTok + r.output_tokens,
@@ -770,7 +770,7 @@ interface CostOverviewProps {
 const CostOverviewPanel: React.FC<CostOverviewProps> = ({
   rows, loading, error, days, setDays, groupBy, setGroupBy, onRefresh
 }) => {
-  const paidCost       = rows.filter(r => (PRICING[r.model]?.input ?? 0) > 0 || (PRICING[r.model]?.output ?? 0) > 0).reduce((s, r) => s + r.estimated_cost_usd, 0);
+  const paidCost       = rows.filter(r => (PRICING[r.model]?.input ?? 0) > 0 || (PRICING[r.model]?.output ?? 0) > 0).reduce((s, r) => s + numCost(r.estimated_cost_usd), 0);
   const totalInTok     = rows.reduce((s, r) => s + r.input_tokens, 0);
   const totalCacheHit  = rows.reduce((s, r) => s + r.cache_hit_tokens, 0);
   const cacheRate      = totalInTok > 0 ? (totalCacheHit / totalInTok * 100) : 0;
@@ -781,7 +781,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
   const byDay = new Map<string, number>();
   rows.forEach(r => {
     const day = r.logged_at.slice(0, 10);
-    byDay.set(day, (byDay.get(day) || 0) + r.estimated_cost_usd);
+    byDay.set(day, (byDay.get(day) || 0) + numCost(r.estimated_cost_usd));
   });
   const dayEntries = [...byDay.entries()].sort().slice(-14);
 
@@ -915,7 +915,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         {allProviders.map(provider => {
           const pRows = rows.filter(r => r.provider === provider);
-          const pCost = pRows.reduce((s, r) => s + r.estimated_cost_usd, 0);
+          const pCost = pRows.reduce((s, r) => s + numCost(r.estimated_cost_usd), 0);
           const pInTok = pRows.reduce((s, r) => s + r.input_tokens, 0);
           const pOutTok = pRows.reduce((s, r) => s + r.output_tokens, 0);
           const pCache = pRows.reduce((s, r) => s + r.cache_hit_tokens, 0);
@@ -981,7 +981,7 @@ const ModelOverviewPanel: React.FC<{
       existing.inTok += r.input_tokens;
       existing.outTok += r.output_tokens;
       existing.cacheHit += r.cache_hit_tokens;
-      existing.cost += r.estimated_cost_usd;
+      existing.cost += numCost(r.estimated_cost_usd);
       existing.pageCounts[r.page] = (existing.pageCounts[r.page] || 0) + 1;
     } else {
       const userSet = new Set<string>();
@@ -993,7 +993,7 @@ const ModelOverviewPanel: React.FC<{
         inTok: r.input_tokens,
         outTok: r.output_tokens,
         cacheHit: r.cache_hit_tokens,
-        cost: r.estimated_cost_usd,
+        cost: numCost(r.estimated_cost_usd),
         pageCounts: { [r.page]: 1 },
       });
     }
@@ -1040,7 +1040,7 @@ const ModelOverviewPanel: React.FC<{
     : <ChevronDown size={11} className="inline ml-0.5 text-purple-500" />;
 
   const totalRequests = rows.length;
-  const totalCost = rows.reduce((s, r) => s + r.estimated_cost_usd, 0);
+  const totalCost = rows.reduce((s, r) => s + numCost(r.estimated_cost_usd), 0);
   const freeRequests = rows.filter(r => (PRICING[r.model]?.input ?? 0) === 0 && (PRICING[r.model]?.output ?? 0) === 0).length;
   const freePct = totalRequests > 0 ? (freeRequests / totalRequests * 100) : 0;
   const maxReqs = Math.max(...modelStats.map(m => m.requests), 1);
@@ -1049,7 +1049,7 @@ const ModelOverviewPanel: React.FC<{
   const providerMap = new Map<string, { requests: number; cost: number }>();
   rows.forEach(r => {
     const existing = providerMap.get(r.provider) || { requests: 0, cost: 0 };
-    providerMap.set(r.provider, { requests: existing.requests + 1, cost: existing.cost + r.estimated_cost_usd });
+    providerMap.set(r.provider, { requests: existing.requests + 1, cost: existing.cost + numCost(r.estimated_cost_usd) });
   });
   const providerStats = [...providerMap.entries()].sort((a, b) => b[1].requests - a[1].requests);
   const maxProvReqs = providerStats[0]?.[1].requests || 1;
@@ -1375,7 +1375,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
       name: l.name || '(no name)',
       email: l.email || '',
       city: (l as any).city || '—',
-      totalCost: lRows.reduce((s, r) => s + r.estimated_cost_usd, 0),
+      totalCost: lRows.reduce((s, r) => s + numCost(r.estimated_cost_usd), 0),
       requests: lRows.length,
       freeReqs,
       paidReqs,
@@ -1415,7 +1415,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 
   // Detail view helpers
   const selectedLearner = filteredLearners.find(l => l.id === selectedId);
-  const totalCost = learnerRows.reduce((s, r) => s + r.estimated_cost_usd, 0);
+  const totalCost = learnerRows.reduce((s, r) => s + numCost(r.estimated_cost_usd), 0);
   const totalInTok = learnerRows.reduce((s, r) => s + r.input_tokens, 0);
   const totalOutTok = learnerRows.reduce((s, r) => s + r.output_tokens, 0);
   const freeRows = learnerRows.filter(r => (PRICING[r.model]?.input ?? 0) === 0);
@@ -1532,7 +1532,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
                         <td className="px-3 py-2 text-gray-600 text-[10px]">{modelLabel(r.model)}</td>
                         <td className="px-3 py-2 text-gray-600 font-mono">{r.input_tokens.toLocaleString()}</td>
                         <td className="px-3 py-2 text-gray-600 font-mono">{r.output_tokens.toLocaleString()}</td>
-                        <td className="px-3 py-2 font-semibold text-gray-800">{fmtCost(r.estimated_cost_usd)}</td>
+                        <td className="px-3 py-2 font-semibold text-gray-800">{fmtCost(numCost(r.estimated_cost_usd))}</td>
                       </tr>
                     ))}
                   </tbody>
