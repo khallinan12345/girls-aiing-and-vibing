@@ -1,12 +1,12 @@
 // src/pages/admin/AdminStudentDashboard.tsx
 //
-// Admin view: select any Nigerian learner from a dropdown and view their
+// Admin view: select any learner from a dropdown and view their
 // full dashboard — activity rows (progress, scores, sub-category) and
 // certification scores with evidence.
 //
 // Access: /admin/student-dashboard
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppLayout from '../../components/layout/AppLayout';
 import { supabase } from '../../lib/supabaseClient';
@@ -17,7 +17,7 @@ import {
   ChevronUp, Trophy, User, BarChart2, Code, Brain,
   Target, Lightbulb, MessageSquare, Cpu,
   DollarSign, TrendingUp, Zap, Activity,
-  Server,
+  Server, Building2, Search, Globe,
 } from 'lucide-react';
 import classNames from 'classnames';
 import { useImpersonation } from '../../contexts/ImpersonationContext';
@@ -31,6 +31,8 @@ interface Learner {
   grade_level: number | null;
   continent: string | null;
   country: string | null;
+  organization_id?: string | null;
+  join_code_used?: string | null;
 }
 
 interface ActivityRow {
@@ -51,8 +53,8 @@ interface StudentSessionRow {
   category_activity: string | null;
   progress: string | null;
   activity: string | null;
-  created_at: string | null;   // when activity was FIRST started — use for "this month"
-  updated_at: string | null;   // bumped every chat message — use for "last active" only
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 // ─── Cost types ──────────────────────────────────────────────────────────────
@@ -70,6 +72,20 @@ interface CostRow {
   estimated_cost_usd: number;
   user_id: string | null;
   city: string | null;
+}
+
+// ─── Organization type ───────────────────────────────────────────────────────
+
+interface OrgOption {
+  id: string;
+  name: string;
+  join_code: string;
+  join_codes: string[] | null;
+  continent: string | null;
+  country: string | null;
+  city: string | null;
+  leader_id: string | null;
+  learner_count?: number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -153,6 +169,56 @@ const normalizeCategory = (category: string | null | undefined): string => {
 
 const isEngagedSession = (progress: string | null | undefined): boolean =>
   progress === 'started' || progress === 'completed';
+
+// ─── Provider colors ─────────────────────────────────────────────────────────
+
+const PROVIDER_COLORS: Record<string, { bg: string; text: string; border: string; bar: string; light: string }> = {
+  anthropic:  { bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-200',    bar: 'bg-blue-500',    light: 'bg-blue-100' },
+  groq:       { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', bar: 'bg-emerald-500', light: 'bg-emerald-100' },
+  gemini:     { bg: 'bg-cyan-50',    text: 'text-cyan-700',    border: 'border-cyan-200',    bar: 'bg-cyan-500',    light: 'bg-cyan-100' },
+  cerebras:   { bg: 'bg-orange-50',  text: 'text-orange-700',  border: 'border-orange-200',  bar: 'bg-orange-500',  light: 'bg-orange-100' },
+  openrouter: { bg: 'bg-pink-50',    text: 'text-pink-700',    border: 'border-pink-200',    bar: 'bg-pink-500',    light: 'bg-pink-100' },
+  mistral:    { bg: 'bg-violet-50',  text: 'text-violet-700',  border: 'border-violet-200',  bar: 'bg-violet-500',  light: 'bg-violet-100' },
+};
+
+const getProviderColor = (provider: string) =>
+  PROVIDER_COLORS[provider] || { bg: 'bg-gray-50', text: 'text-gray-700', border: 'border-gray-200', bar: 'bg-gray-500', light: 'bg-gray-100' };
+
+// ─── Pricing ─────────────────────────────────────────────────────────────────
+
+const PRICING: Record<string, { input: number; output: number; label: string }> = {
+  'claude-sonnet-4-6':         { input: 3.00,  output: 15.00, label: 'Sonnet 4.6' },
+  'claude-haiku-4-5-20251001': { input: 1.00,  output: 5.00,  label: 'Haiku 4.5' },
+  'llama-3.3-70b-versatile':   { input: 0.00,  output: 0.00,  label: 'Groq Llama 70B' },
+  'gemini-2.0-flash':          { input: 0.00,  output: 0.00,  label: 'Gemini 2.0 Flash' },
+  'llama-3.3-70b':             { input: 0.00,  output: 0.00,  label: 'Cerebras Llama 70B' },
+  'meta-llama/llama-3.3-70b-instruct:free': { input: 0.00, output: 0.00, label: 'OpenRouter Llama 70B' },
+  'mistral-small-latest':      { input: 0.00,  output: 0.00,  label: 'Mistral Small' },
+};
+
+const modelLabel = (m: string) => PRICING[m]?.label || m;
+
+const fmtCost = (n: number) => n < 0.001 ? '<$0.001' : `$${n.toFixed(3)}`;
+const fmtTokens = (n: number) => n >= 1_000_000 ? `${(n/1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n/1000).toFixed(0)}k` : `${n}`;
+
+function groupCostRows(rows: CostRow[], by: 'page' | 'model' | 'provider') {
+  const map = new Map<string, { cost: number; calls: number; inTok: number; outTok: number; cacheHit: number; provider: string }>();
+  rows.forEach(r => {
+    const key = by === 'page' ? r.page : by === 'model' ? modelLabel(r.model) : r.provider;
+    const existing = map.get(key) || { cost: 0, calls: 0, inTok: 0, outTok: 0, cacheHit: 0, provider: r.provider };
+    map.set(key, {
+      cost:     existing.cost + r.estimated_cost_usd,
+      calls:    existing.calls + 1,
+      inTok:    existing.inTok + r.input_tokens,
+      outTok:   existing.outTok + r.output_tokens,
+      cacheHit: existing.cacheHit + r.cache_hit_tokens,
+      provider: r.provider,
+    });
+  });
+  return [...map.entries()].sort((a, b) => b[1].cost - a[1].cost);
+}
+
+// ─── StudentLearnerTable ──────────────────────────────────────────────────────
 
 const StudentLearnerTable: React.FC<{
   learners: Learner[];
@@ -460,8 +526,6 @@ const ActivityCard: React.FC<{ row: ActivityRow }> = ({ row }) => {
 
   return (
     <div className={classNames('border rounded-lg overflow-hidden', isCert ? 'border-purple-200' : 'border-gray-200')}>
-
-      {/* Header */}
       <div
         className={classNames(
           'flex items-center gap-3 px-4 py-3',
@@ -500,10 +564,8 @@ const ActivityCard: React.FC<{ row: ActivityRow }> = ({ row }) => {
         </div>
       </div>
 
-      {/* Expanded scores */}
       {open && hasDetail && (
         <div className="px-4 pb-4 pt-3 border-t border-gray-100 bg-gray-50 space-y-3">
-
           {certScores.length > 0 && (
             <div>
               <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Certification Scores</p>
@@ -572,62 +634,113 @@ const ActivityCard: React.FC<{ row: ActivityRow }> = ({ row }) => {
 };
 
 
-// ─── Cost helpers ─────────────────────────────────────────────────────────────
+// ─── OrgSelector ──────────────────────────────────────────────────────────────
+// Shown to platform admins on the Student Activity tab. Lets them pick an org
+// (or "All Organizations") before the learner table is displayed.
 
-const PRICING: Record<string, { input: number; output: number; label: string }> = {
-  'claude-sonnet-4-6':         { input: 3.00,  output: 15.00, label: 'Sonnet 4.6'   },
-  'claude-haiku-4-5-20251001': { input: 1.00,  output: 5.00,  label: 'Haiku 4.5'    },
-  'llama-3.3-70b-versatile':   { input: 0.00,  output: 0.00,  label: 'Groq Llama 70B'},
-  'gemini-2.0-flash':          { input: 0.00,  output: 0.00,  label: 'Gemini 2.0 Flash' },
-  'llama-3.3-70b':             { input: 0.00,  output: 0.00,  label: 'Cerebras Llama 70B' },
-  'meta-llama/llama-3.3-70b-instruct:free': { input: 0.00, output: 0.00, label: 'OpenRouter Llama 70B' },
-  'mistral-small-latest':      { input: 0.00,  output: 0.00,  label: 'Mistral Small' },
-};
+const OrgSelector: React.FC<{
+  orgs: OrgOption[];
+  loading: boolean;
+  selectedOrgId: string; // '' means "all"
+  onSelect: (orgId: string) => void;
+}> = ({ orgs, loading, selectedOrgId, onSelect }) => {
+  const [search, setSearch] = useState('');
 
-const modelLabel = (m: string) => PRICING[m]?.label || m;
+  const filtered = orgs.filter(o =>
+    search === '' ||
+    (o.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (o.country || '').toLowerCase().includes(search.toLowerCase()) ||
+    (o.city || '').toLowerCase().includes(search.toLowerCase())
+  );
 
-const fmtCost = (n: number) => n < 0.001 ? '<$0.001' : `$${n.toFixed(3)}`;
-const fmtTokens = (n: number) => n >= 1_000_000 ? `${(n/1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n/1000).toFixed(0)}k` : `${n}`;
+  const totalLearners = orgs.reduce((s, o) => s + (o.learner_count || 0), 0);
 
-function groupCostRows(rows: CostRow[], by: 'page' | 'model' | 'provider') {
-  const map = new Map<string, { cost: number; calls: number; inTok: number; outTok: number; cacheHit: number; provider: string }>();
-  rows.forEach(r => {
-    const key = by === 'page' ? r.page : by === 'model' ? modelLabel(r.model) : r.provider;
-    const existing = map.get(key) || { cost: 0, calls: 0, inTok: 0, outTok: 0, cacheHit: 0, provider: r.provider };
-    map.set(key, {
-      cost:     existing.cost + r.estimated_cost_usd,
-      calls:    existing.calls + 1,
-      inTok:    existing.inTok + r.input_tokens,
-      outTok:   existing.outTok + r.output_tokens,
-      cacheHit: existing.cacheHit + r.cache_hit_tokens,
-      provider: r.provider,
-    });
-  });
-  return [...map.entries()].sort((a, b) => b[1].cost - a[1].cost);
-}
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-12 text-gray-500">
+        <Loader2 size={18} className="animate-spin" /> Loading organizations…
+      </div>
+    );
+  }
 
-// ─── Provider color helpers ───────────────────────────────────────────────────
-
-const PROVIDER_COLORS: Record<string, { bg: string; text: string; border: string; bar: string }> = {
-  groq:       { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', bar: 'bg-emerald-500' },
-  gemini:     { bg: 'bg-sky-50',     text: 'text-sky-700',     border: 'border-sky-200',     bar: 'bg-sky-500' },
-  cerebras:   { bg: 'bg-orange-50',  text: 'text-orange-700',  border: 'border-orange-200',  bar: 'bg-orange-500' },
-  openrouter: { bg: 'bg-violet-50',  text: 'text-violet-700',  border: 'border-violet-200',  bar: 'bg-violet-500' },
-  mistral:    { bg: 'bg-rose-50',    text: 'text-rose-700',    border: 'border-rose-200',    bar: 'bg-rose-500' },
-  anthropic:  { bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-200',    bar: 'bg-blue-500' },
-};
-
-const getProviderColor = (p: string) => PROVIDER_COLORS[p] || PROVIDER_COLORS.anthropic;
-
-const providerBadge = (p: string) => {
-  const c = getProviderColor(p);
-  const label = p.charAt(0).toUpperCase() + p.slice(1);
   return (
-    <span className={classNames('text-[10px] px-1.5 py-0.5 rounded border font-semibold', c.bg, c.text, c.border)}>
-      {label}
-    </span>
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-6">
+      <div className="px-5 py-4 border-b border-gray-100">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Building2 size={16} className="text-purple-600" />
+          <h2 className="text-sm font-bold text-gray-800">Select Organization</h2>
+          <span className="text-xs text-gray-400">{orgs.length} orgs · {totalLearners} learners</span>
+          <div className="ml-auto relative w-full sm:w-72">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search orgs by name, country, city…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="p-4">
+        {/* "All Organizations" option */}
+        <button
+          onClick={() => onSelect('')}
+          className={classNames(
+            'w-full flex items-center gap-3 px-4 py-3 rounded-lg border mb-2 transition-colors text-left',
+            selectedOrgId === ''
+              ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-200'
+              : 'bg-gray-50 border-gray-200 hover:border-purple-200 hover:bg-purple-50/50'
+          )}
+        >
+          <Globe size={18} className={selectedOrgId === '' ? 'text-purple-600' : 'text-gray-400'} />
+          <div className="flex-1">
+            <div className="text-sm font-bold text-gray-900">All Organizations</div>
+            <div className="text-xs text-gray-500">View learners across all orgs</div>
+          </div>
+          <span className="text-xs font-mono font-bold text-gray-600">{totalLearners} learners</span>
+          {selectedOrgId === '' && <CheckCircle size={16} className="text-purple-600" />}
+        </button>
+
+        {/* Org grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[400px] overflow-y-auto">
+          {filtered.map(org => (
+            <button
+              key={org.id}
+              onClick={() => onSelect(org.id)}
+              className={classNames(
+                'flex items-start gap-3 px-4 py-3 rounded-lg border transition-colors text-left',
+                selectedOrgId === org.id
+                  ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-200'
+                  : 'bg-white border-gray-200 hover:border-purple-200 hover:bg-purple-50/30'
+              )}
+            >
+              <Building2 size={16} className={classNames('mt-0.5 flex-shrink-0', selectedOrgId === org.id ? 'text-purple-600' : 'text-gray-400')} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-gray-900 truncate">{org.name}</div>
+                <div className="text-[11px] text-gray-500 truncate">
+                  {[org.city, org.country].filter(Boolean).join(', ') || org.continent || '—'}
+                </div>
+                <div className="text-[10px] text-gray-400 mt-0.5">
+                  Code: <span className="font-mono font-bold text-indigo-700">{org.join_code}</span>
+                  {org.learner_count != null && <span className="ml-2">· {org.learner_count} learner{org.learner_count !== 1 ? 's' : ''}</span>}
+                </div>
+              </div>
+              {selectedOrgId === org.id && <CheckCircle size={14} className="text-purple-600 mt-0.5 flex-shrink-0" />}
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div className="col-span-full text-center py-8 text-sm text-gray-400">
+              No organizations match "{search}"
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
+
 
 // ─── CostOverviewPanel ────────────────────────────────────────────────────────
 
@@ -649,8 +762,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
   const totalInTok     = rows.reduce((s, r) => s + r.input_tokens, 0);
   const totalCacheHit  = rows.reduce((s, r) => s + r.cache_hit_tokens, 0);
   const cacheRate      = totalInTok > 0 ? (totalCacheHit / totalInTok * 100) : 0;
-  const freeProviders  = ['groq', 'gemini', 'cerebras', 'openrouter', 'mistral'];
-  const freeCalls      = rows.filter(r => freeProviders.includes(r.provider)).length;
+  const freeReqs       = rows.filter(r => r.provider !== 'anthropic').length;
   const anthropicCalls = rows.filter(r => r.provider === 'anthropic').length;
   const cacheSaved     = (totalCacheHit / 1_000_000) * 1.00 * 0.90;
 
@@ -664,6 +776,11 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
 
   const grouped = groupCostRows(rows, groupBy);
   const maxCost = grouped[0]?.[1].cost || 1;
+
+  const providerBadge = (p: string) => {
+    const c = getProviderColor(p);
+    return <span className={classNames('text-[10px] px-1.5 py-0.5 rounded border font-semibold', c.bg, c.text, c.border)}>{p}</span>;
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-20 text-gray-500">
@@ -681,7 +798,6 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
 
   return (
     <div className="space-y-6">
-
       {/* Controls */}
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
@@ -712,7 +828,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         {[
           { label: 'Anthropic cost', value: `$${anthropicCost.toFixed(2)}`, sub: `last ${days} days`, icon: <DollarSign size={16} className="text-blue-500" />, bg: 'bg-blue-50' },
           { label: 'Cache savings',  value: `$${cacheSaved.toFixed(2)}`,    sub: `${cacheRate.toFixed(0)}% hit rate`,    icon: <Zap size={16} className="text-amber-500" />,  bg: 'bg-amber-50' },
-          { label: 'Free-tier reqs', value: freeCalls.toLocaleString(),      sub: '$0 — free providers',    icon: <TrendingUp size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
+          { label: 'Free-tier reqs', value: freeReqs.toLocaleString(),      sub: '$0 — free tier',    icon: <TrendingUp size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
           { label: 'Anthropic reqs', value: anthropicCalls.toLocaleString(), sub: `${fmtTokens(totalInTok)} tokens in`, icon: <Activity size={16} className="text-purple-500" />, bg: 'bg-purple-50' },
         ].map(({ label, value, sub, icon, bg }) => (
           <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
@@ -737,24 +853,27 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
           <div className="py-12 text-center text-sm text-gray-400">No cost data yet — calls logged here after chat.js is deployed</div>
         ) : (
           <div className="p-5 space-y-3">
-            {grouped.map(([key, val]) => (
-              <div key={key} className="flex items-center gap-3">
-                <div className="w-40 flex-shrink-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-gray-700 truncate">{key}</span>
-                    {providerBadge(val.provider)}
+            {grouped.map(([key, val]) => {
+              const pc = getProviderColor(val.provider);
+              return (
+                <div key={key} className="flex items-center gap-3">
+                  <div className="w-40 flex-shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-gray-700 truncate">{key}</span>
+                      {providerBadge(val.provider)}
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-0.5">{val.calls.toLocaleString()} calls · {fmtTokens(val.inTok + val.outTok)} tokens</div>
                   </div>
-                  <div className="text-[10px] text-gray-400 mt-0.5">{val.calls.toLocaleString()} calls · {fmtTokens(val.inTok + val.outTok)} tokens</div>
+                  <div className="flex-1 bg-gray-100 rounded-full h-2">
+                    <div
+                      className={classNames('h-2 rounded-full transition-all', pc.bar)}
+                      style={{ width: `${(val.cost / maxCost * 100).toFixed(1)}%` }}
+                    />
+                  </div>
+                  <div className="w-16 text-right text-xs font-semibold text-gray-700 flex-shrink-0">{fmtCost(val.cost)}</div>
                 </div>
-                <div className="flex-1 bg-gray-100 rounded-full h-2">
-                  <div
-                    className={classNames('h-2 rounded-full transition-all', getProviderColor(val.provider).bar)}
-                    style={{ width: `${(val.cost / maxCost * 100).toFixed(1)}%` }}
-                  />
-                </div>
-                <div className="w-16 text-right text-xs font-semibold text-gray-700 flex-shrink-0">{fmtCost(val.cost)}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -785,12 +904,12 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         </div>
       )}
 
-      {/* Provider split — now shows all providers dynamically */}
+      {/* Provider split — dynamic for all providers */}
       {(() => {
-        const allProviders = [...new Set(rows.map(r => r.provider))].sort();
+        const providerNames = [...new Set(rows.map(r => r.provider))].sort();
         return (
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-            {allProviders.map(provider => {
+          <div className={classNames('grid gap-4', providerNames.length <= 2 ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-3')}>
+            {providerNames.map(provider => {
               const pRows = rows.filter(r => r.provider === provider);
               const pCost = pRows.reduce((s, r) => s + r.estimated_cost_usd, 0);
               const pInTok = pRows.reduce((s, r) => s + r.input_tokens, 0);
@@ -802,7 +921,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
                 <div key={provider} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
                   <div className="flex items-center gap-2 mb-3">
                     <span className={classNames('text-[11px] px-2 py-0.5 rounded-full border font-bold', pc.bg, pc.text, pc.border)}>
-                      {provider.charAt(0).toUpperCase() + provider.slice(1)} · {isFree ? 'Free' : 'Paid'}
+                      {provider}{isFree ? ' · Free' : ' · Paid'}
                     </span>
                   </div>
                   <div className="space-y-1.5 text-xs">
@@ -810,7 +929,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
                     <div className="flex justify-between"><span className="text-gray-500">Requests</span><span className="font-semibold text-gray-800">{pRows.length.toLocaleString()}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Input tokens</span><span className="font-semibold text-gray-800">{fmtTokens(pInTok)}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Output tokens</span><span className="font-semibold text-gray-800">{fmtTokens(pOutTok)}</span></div>
-                    {provider === 'anthropic' && <div className="flex justify-between"><span className="text-gray-500">Cache hits</span><span className="font-semibold text-emerald-700">{fmtTokens(pCache)}</span></div>}
+                    {pCache > 0 && <div className="flex justify-between"><span className="text-gray-500">Cache hits</span><span className="font-semibold text-emerald-700">{fmtTokens(pCache)}</span></div>}
                   </div>
                 </div>
               );
@@ -818,6 +937,374 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
           </div>
         );
       })()}
+    </div>
+  );
+};
+
+// ─── ModelOverviewPanel ───────────────────────────────────────────────────────
+
+interface ModelOverviewProps {
+  rows: CostRow[];
+  loading: boolean;
+  error: string | null;
+  days: number;
+  setDays: (d: number) => void;
+  onRefresh: () => void;
+}
+
+const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error, days, setDays, onRefresh }) => {
+  const [sortKey, setSortKey] = useState<'model' | 'provider' | 'requests' | 'users' | 'inTok' | 'outTok' | 'cost'>('requests');
+  const [sortAsc, setSortAsc] = useState(false);
+
+  // Build per-model summary
+  type ModelSummary = {
+    model: string;
+    label: string;
+    provider: string;
+    requests: number;
+    uniqueUsers: number;
+    inTok: number;
+    outTok: number;
+    cacheHit: number;
+    cost: number;
+    topPages: string[];
+  };
+
+  const modelSummaries: ModelSummary[] = useMemo(() => {
+    const map = new Map<string, { provider: string; requests: number; users: Set<string>; inTok: number; outTok: number; cacheHit: number; cost: number; pages: Record<string, number> }>();
+    rows.forEach(r => {
+      const existing = map.get(r.model) || { provider: r.provider, requests: 0, users: new Set<string>(), inTok: 0, outTok: 0, cacheHit: 0, cost: 0, pages: {} };
+      existing.requests += 1;
+      if (r.user_id) existing.users.add(r.user_id);
+      existing.inTok += r.input_tokens;
+      existing.outTok += r.output_tokens;
+      existing.cacheHit += r.cache_hit_tokens;
+      existing.cost += r.estimated_cost_usd;
+      existing.pages[r.page] = (existing.pages[r.page] || 0) + 1;
+      existing.provider = r.provider;
+      map.set(r.model, existing);
+    });
+    return [...map.entries()].map(([model, v]) => ({
+      model,
+      label: modelLabel(model),
+      provider: v.provider,
+      requests: v.requests,
+      uniqueUsers: v.users.size,
+      inTok: v.inTok,
+      outTok: v.outTok,
+      cacheHit: v.cacheHit,
+      cost: v.cost,
+      topPages: Object.entries(v.pages).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([p]) => p),
+    }));
+  }, [rows]);
+
+  const sorted = [...modelSummaries].sort((a, b) => {
+    let av: any, bv: any;
+    if (sortKey === 'model') { av = a.label.toLowerCase(); bv = b.label.toLowerCase(); }
+    else if (sortKey === 'provider') { av = a.provider; bv = b.provider; }
+    else if (sortKey === 'requests') { av = a.requests; bv = b.requests; }
+    else if (sortKey === 'users') { av = a.uniqueUsers; bv = b.uniqueUsers; }
+    else if (sortKey === 'inTok') { av = a.inTok; bv = b.inTok; }
+    else if (sortKey === 'outTok') { av = a.outTok; bv = b.outTok; }
+    else { av = a.cost; bv = b.cost; }
+    if (av < bv) return sortAsc ? -1 : 1;
+    if (av > bv) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
+  const toggleSort = (key: typeof sortKey) => {
+    if (sortKey === key) setSortAsc(a => !a);
+    else { setSortKey(key); setSortAsc(false); }
+  };
+
+  const SortIcon = ({ k }: { k: typeof sortKey }) => sortKey !== k ? null : sortAsc
+    ? <ChevronUp size={11} className="inline ml-0.5 text-purple-500" />
+    : <ChevronDown size={11} className="inline ml-0.5 text-purple-500" />;
+
+  const totalRequests = rows.length;
+  const totalCost = rows.reduce((s, r) => s + r.estimated_cost_usd, 0);
+  const freeRequests = rows.filter(r => r.provider !== 'anthropic').length;
+  const freePct = totalRequests > 0 ? (freeRequests / totalRequests * 100) : 0;
+  const maxReqs = Math.max(...modelSummaries.map(m => m.requests), 1);
+
+  // Provider distribution
+  const providerDist = useMemo(() => {
+    const map = new Map<string, { requests: number; cost: number }>();
+    rows.forEach(r => {
+      const existing = map.get(r.provider) || { requests: 0, cost: 0 };
+      existing.requests += 1;
+      existing.cost += r.estimated_cost_usd;
+      map.set(r.provider, existing);
+    });
+    return [...map.entries()].sort((a, b) => b[1].requests - a[1].requests);
+  }, [rows]);
+
+  // Daily model usage (last 14 days)
+  const dailyModelUsage = useMemo(() => {
+    const dayMap = new Map<string, Map<string, number>>();
+    rows.forEach(r => {
+      const day = r.logged_at.slice(0, 10);
+      if (!dayMap.has(day)) dayMap.set(day, new Map());
+      const modelMap = dayMap.get(day)!;
+      modelMap.set(r.model, (modelMap.get(r.model) || 0) + 1);
+    });
+    return [...dayMap.entries()].sort().slice(-14);
+  }, [rows]);
+
+  const allModelsInChart = useMemo(() => {
+    const s = new Set<string>();
+    dailyModelUsage.forEach(([, mm]) => mm.forEach((_, m) => s.add(m)));
+    return [...s].sort();
+  }, [dailyModelUsage]);
+
+  const MODEL_CHART_COLORS = ['bg-blue-400', 'bg-emerald-400', 'bg-cyan-400', 'bg-orange-400', 'bg-pink-400', 'bg-violet-400', 'bg-amber-400', 'bg-red-400'];
+
+  if (loading) return (
+    <div className="flex items-center justify-center gap-2 py-20 text-gray-500">
+      <Loader2 size={20} className="animate-spin" /> Loading model data…
+    </div>
+  );
+
+  if (error) return (
+    <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+      <p className="font-semibold mb-1">Model data unavailable</p>
+      <p>{error}</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Controls */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          {([7, 30, 90] as const).map(d => (
+            <button key={d} onClick={() => setDays(d)}
+              className={classNames('px-3 py-1.5 rounded text-xs font-semibold transition-colors',
+                days === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+              {d}d
+            </button>
+          ))}
+        </div>
+        <button onClick={onRefresh} className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors ml-auto">
+          <RefreshCw size={12} /> Refresh
+        </button>
+      </div>
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Total requests', value: totalRequests.toLocaleString(), sub: `last ${days} days`, icon: <Activity size={16} className="text-purple-500" />, bg: 'bg-purple-50' },
+          { label: 'Active models', value: modelSummaries.length.toString(), sub: 'unique models', icon: <Server size={16} className="text-blue-500" />, bg: 'bg-blue-50' },
+          { label: 'Free-tier %', value: `${freePct.toFixed(0)}%`, sub: `${freeRequests.toLocaleString()} free reqs`, icon: <Zap size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
+          { label: 'Total cost', value: fmtCost(totalCost), sub: 'paid models only', icon: <DollarSign size={16} className="text-amber-500" />, bg: 'bg-amber-50' },
+        ].map(({ label, value, sub, icon, bg }) => (
+          <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
+            {icon}
+            <div>
+              <p className="text-xl font-black text-gray-900">{value}</p>
+              <p className="text-xs text-gray-500 leading-tight">{label}</p>
+              <p className="text-[10px] text-gray-400">{sub}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-model table */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+          <Server size={14} className="text-gray-400" />
+          <span className="text-sm font-bold text-gray-700">Requests by Model</span>
+          <span className="text-xs text-gray-400 ml-auto">{modelSummaries.length} models</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                {([
+                  { key: 'model' as const, label: 'Model' },
+                  { key: 'provider' as const, label: 'Provider' },
+                  { key: 'requests' as const, label: 'Requests' },
+                  { key: 'users' as const, label: 'Users' },
+                  { key: 'inTok' as const, label: 'Input Tokens' },
+                  { key: 'outTok' as const, label: 'Output Tokens' },
+                  { key: 'cost' as const, label: 'Cost' },
+                  { key: null, label: 'Top Pages' },
+                ] as { key: typeof sortKey | null; label: string }[]).map(({ key, label }) => (
+                  <th key={label} onClick={() => key && toggleSort(key)}
+                    className={classNames('px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider',
+                      key ? 'cursor-pointer hover:text-purple-700 select-none' : '')}>
+                    {label}{key && <SortIcon k={key} />}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {sorted.map(m => {
+                const pc = getProviderColor(m.provider);
+                return (
+                  <tr key={m.model} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="font-semibold text-gray-900">{m.label}</div>
+                      <div className="text-[10px] text-gray-400 font-mono truncate max-w-[200px]">{m.model}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={classNames('text-[10px] px-1.5 py-0.5 rounded border font-semibold', pc.bg, pc.text, pc.border)}>{m.provider}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-semibold text-gray-800 font-mono">{m.requests.toLocaleString()}</div>
+                      <div className="mt-1 bg-gray-100 rounded-full h-1.5 w-24">
+                        <div className={classNames('h-1.5 rounded-full', pc.bar)} style={{ width: `${(m.requests / maxReqs * 100).toFixed(1)}%` }} />
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-gray-600">{m.uniqueUsers}</td>
+                    <td className="px-4 py-3 font-mono text-gray-600">
+                      {fmtTokens(m.inTok)}
+                      {m.cacheHit > 0 && <div className="text-[10px] text-emerald-600">({fmtTokens(m.cacheHit)} cached)</div>}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-gray-600">{fmtTokens(m.outTok)}</td>
+                    <td className="px-4 py-3 font-semibold text-gray-800">{m.cost > 0 ? fmtCost(m.cost) : <span className="text-emerald-600 font-bold">FREE</span>}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {m.topPages.map(p => (
+                          <span key={p} className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200 truncate max-w-[100px]">{p}</span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {sorted.length === 0 && (
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-gray-400">No model data yet.</td></tr>
+              )}
+            </tbody>
+            {sorted.length > 0 && (
+              <tfoot className="bg-gray-50 border-t border-gray-200">
+                <tr>
+                  <td className="px-4 py-2.5 text-[11px] font-bold text-gray-600">Total ({sorted.length} models)</td>
+                  <td></td>
+                  <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{totalRequests.toLocaleString()}</td>
+                  <td></td>
+                  <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{fmtTokens(rows.reduce((s, r) => s + r.input_tokens, 0))}</td>
+                  <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{fmtTokens(rows.reduce((s, r) => s + r.output_tokens, 0))}</td>
+                  <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800">{fmtCost(totalCost)}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      {/* Provider distribution */}
+      {providerDist.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100">
+            <span className="text-sm font-bold text-gray-700">Provider Distribution</span>
+          </div>
+          <div className="p-5 space-y-3">
+            {providerDist.map(([provider, val]) => {
+              const pc = getProviderColor(provider);
+              const pct = totalRequests > 0 ? (val.requests / totalRequests * 100) : 0;
+              return (
+                <div key={provider} className="flex items-center gap-3">
+                  <div className="w-28 flex-shrink-0">
+                    <span className={classNames('text-xs px-2 py-0.5 rounded border font-semibold', pc.bg, pc.text, pc.border)}>{provider}</span>
+                  </div>
+                  <div className="flex-1 bg-gray-100 rounded-full h-3">
+                    <div className={classNames('h-3 rounded-full transition-all', pc.bar)} style={{ width: `${pct.toFixed(1)}%` }} />
+                  </div>
+                  <div className="w-32 text-right text-xs text-gray-700 flex-shrink-0">
+                    <span className="font-semibold">{val.requests.toLocaleString()}</span>
+                    <span className="text-gray-400 ml-1">({pct.toFixed(1)}%)</span>
+                  </div>
+                  <div className="w-16 text-right text-xs font-semibold text-gray-600 flex-shrink-0">{fmtCost(val.cost)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Daily model usage chart */}
+      {dailyModelUsage.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100">
+            <span className="text-sm font-bold text-gray-700">Daily Model Usage</span>
+            <span className="text-xs text-gray-400 ml-2">(last 14 days)</span>
+          </div>
+          <div className="p-5">
+            {/* Legend */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              {allModelsInChart.map((m, i) => (
+                <div key={m} className="flex items-center gap-1.5">
+                  <div className={classNames('w-3 h-3 rounded', MODEL_CHART_COLORS[i % MODEL_CHART_COLORS.length])} />
+                  <span className="text-[10px] text-gray-600">{modelLabel(m)}</span>
+                </div>
+              ))}
+            </div>
+            {/* Stacked bars */}
+            <div className="flex items-end gap-1.5 h-32">
+              {dailyModelUsage.map(([day, modelMap]) => {
+                const dayTotal = [...modelMap.values()].reduce((s, v) => s + v, 0);
+                const maxDayTotal = Math.max(...dailyModelUsage.map(([, mm]) => [...mm.values()].reduce((s, v) => s + v, 0)), 1);
+                const heightPct = Math.max((dayTotal / maxDayTotal) * 100, 3);
+                return (
+                  <div key={day} className="flex-1 flex flex-col items-center gap-1 group relative">
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                      <div className="font-semibold mb-0.5">{day} — {dayTotal} reqs</div>
+                      {allModelsInChart.map(m => {
+                        const count = modelMap.get(m) || 0;
+                        if (count === 0) return null;
+                        return <div key={m}>{modelLabel(m)}: {count}</div>;
+                      })}
+                    </div>
+                    <div className="w-full flex flex-col rounded-t overflow-hidden" style={{ height: `${heightPct}%` }}>
+                      {allModelsInChart.map((m, i) => {
+                        const count = modelMap.get(m) || 0;
+                        if (count === 0) return null;
+                        const segPct = (count / dayTotal) * 100;
+                        return <div key={m} className={MODEL_CHART_COLORS[i % MODEL_CHART_COLORS.length]} style={{ height: `${segPct}%`, minHeight: '2px' }} />;
+                      })}
+                    </div>
+                    <div className="text-[9px] text-gray-400 rotate-45 origin-left mt-1 whitespace-nowrap">{day.slice(5)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fallback chain info */}
+      <div className="bg-gradient-to-r from-gray-50 to-purple-50 border border-gray-200 rounded-xl p-5 shadow-sm">
+        <div className="flex items-center gap-2 mb-3">
+          <Zap size={16} className="text-purple-600" />
+          <span className="text-sm font-bold text-gray-800">Fallback Chain</span>
+          <span className="text-xs text-gray-400">Free-tier pages cascade through providers</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {[
+            { name: 'Groq', model: 'Llama 70B', free: true },
+            { name: 'Gemini', model: '2.0 Flash', free: true },
+            { name: 'Cerebras', model: 'Llama 70B', free: true },
+            { name: 'OpenRouter', model: 'Llama 70B', free: true },
+            { name: 'Mistral', model: 'Small', free: true },
+            { name: 'Anthropic', model: 'Haiku 4.5', free: false },
+          ].map((p, i) => {
+            const pc = getProviderColor(p.name.toLowerCase());
+            return (
+              <React.Fragment key={p.name}>
+                {i > 0 && <span className="text-gray-300 text-lg">→</span>}
+                <div className={classNames('px-3 py-2 rounded-lg border', pc.bg, pc.border)}>
+                  <div className={classNames('text-xs font-bold', pc.text)}>{p.name}</div>
+                  <div className="text-[10px] text-gray-500">{p.model}</div>
+                  {p.free && <span className="text-[9px] font-bold text-emerald-600">FREE</span>}
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 };
@@ -835,12 +1322,12 @@ interface LearnerCostProps {
   onRefresh: () => void;
 }
 
-type SortKey = 'name' | 'cost' | 'requests' | 'groq' | 'anthropic' | 'city';
+type LearnerCostSortKey = 'name' | 'cost' | 'requests' | 'groq' | 'anthropic' | 'city';
 
 const LearnerCostPanel: React.FC<LearnerCostProps> = ({
   learners, selectedId, setSelectedId, allCostRows, learnerRows, loading, loadingDetail, onRefresh
 }) => {
-  const [sortKey,  setSortKey]  = useState<SortKey>('cost');
+  const [sortKey,  setSortKey]  = useState<LearnerCostSortKey>('cost');
   const [sortAsc,  setSortAsc]  = useState(false);
   const [groupBy,  setGroupBy]  = useState<'page' | 'model' | 'provider'>('page');
   const [search,   setSearch]   = useState('');
@@ -890,17 +1377,18 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
     return 0;
   });
 
-  const toggleSort = (key: SortKey) => {
+  const toggleSort = (key: LearnerCostSortKey) => {
     if (sortKey === key) setSortAsc(a => !a);
     else { setSortKey(key); setSortAsc(false); }
   };
 
-  const SortIcon = ({ k }: { k: SortKey }) => sortKey !== k ? null : sortAsc
+  const SortIcon = ({ k }: { k: LearnerCostSortKey }) => sortKey !== k ? null : sortAsc
     ? <ChevronUp size={11} className="inline ml-0.5 text-purple-500" />
     : <ChevronDown size={11} className="inline ml-0.5 text-purple-500" />;
 
   const maxCost = Math.max(...summaries.map(s => s.totalCost), 0.001);
 
+  // Detail view helpers
   const selectedLearner = learners.find(l => l.id === selectedId);
   const totalCost   = learnerRows.reduce((s, r) => s + r.estimated_cost_usd, 0);
   const totalInTok  = learnerRows.reduce((s, r) => s + r.input_tokens, 0);
@@ -950,7 +1438,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
               {[
                 { label: 'Total cost',      value: fmtCost(totalCost),              bg: 'bg-blue-50',    icon: <DollarSign size={16} className="text-blue-500" /> },
                 { label: 'Total requests',  value: learnerRows.length.toLocaleString(), bg: 'bg-purple-50', icon: <Activity size={16} className="text-purple-500" /> },
-                { label: 'Free-tier reqs',  value: groqRows.length.toLocaleString(), bg: 'bg-emerald-50', icon: <Zap size={16} className="text-emerald-500" /> },
+                { label: 'Groq requests',   value: groqRows.length.toLocaleString(), bg: 'bg-emerald-50', icon: <Zap size={16} className="text-emerald-500" /> },
                 { label: 'Anthropic reqs',  value: anthRows.length.toLocaleString(), bg: 'bg-amber-50',   icon: <TrendingUp size={16} className="text-amber-500" /> },
               ].map(({ label, value, bg, icon }) => (
                 <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
@@ -975,22 +1463,27 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
                 <span className="text-xs text-gray-400">{fmtTokens(totalInTok + totalOutTok)} tokens</span>
               </div>
               <div className="p-5 space-y-3">
-                {grouped.map(([key, val]) => (
-                  <div key={key} className="flex items-center gap-3">
-                    <div className="w-48 flex-shrink-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-xs text-gray-700 truncate">{key}</span>
-                        {providerBadge(val.provider)}
+                {grouped.map(([key, val]) => {
+                  const pc = getProviderColor(val.provider);
+                  return (
+                    <div key={key} className="flex items-center gap-3">
+                      <div className="w-48 flex-shrink-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs text-gray-700 truncate">{key}</span>
+                          <span className={classNames('text-[10px] px-1.5 py-0.5 rounded border font-semibold', pc.bg, pc.text, pc.border)}>
+                            {val.provider}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">{val.calls} calls</div>
                       </div>
-                      <div className="text-[10px] text-gray-400 mt-0.5">{val.calls} calls</div>
+                      <div className="flex-1 bg-gray-100 rounded-full h-2">
+                        <div className={classNames('h-2 rounded-full', pc.bar)}
+                          style={{ width: `${(val.cost / maxGroupCost * 100).toFixed(1)}%` }} />
+                      </div>
+                      <div className="w-16 text-right text-xs font-semibold text-gray-700 flex-shrink-0">{fmtCost(val.cost)}</div>
                     </div>
-                    <div className="flex-1 bg-gray-100 rounded-full h-2">
-                      <div className={classNames('h-2 rounded-full', getProviderColor(val.provider).bar)}
-                        style={{ width: `${(val.cost / maxGroupCost * 100).toFixed(1)}%` }} />
-                    </div>
-                    <div className="w-16 text-right text-xs font-semibold text-gray-700 flex-shrink-0">{fmtCost(val.cost)}</div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -1002,23 +1495,29 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 border-b border-gray-100">
-                    <tr>{['Time','Page','Provider','Model','In tok','Out tok','Cache','Cost'].map(h => (
+                    <tr>{['Time','Page','Provider','In tok','Out tok','Cache','Cost'].map(h => (
                       <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{h}</th>
                     ))}</tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {learnerRows.slice(0, 50).map(r => (
-                      <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{new Date(r.logged_at).toLocaleString('en-GB', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}</td>
-                        <td className="px-3 py-2 text-gray-700 font-medium max-w-[120px] truncate">{r.page}</td>
-                        <td className="px-3 py-2">{providerBadge(r.provider)}</td>
-                        <td className="px-3 py-2 text-gray-500 text-[10px] max-w-[100px] truncate">{modelLabel(r.model)}</td>
-                        <td className="px-3 py-2 text-gray-600 font-mono">{r.input_tokens.toLocaleString()}</td>
-                        <td className="px-3 py-2 text-gray-600 font-mono">{r.output_tokens.toLocaleString()}</td>
-                        <td className="px-3 py-2 text-emerald-600 font-mono">{r.cache_hit_tokens.toLocaleString()}</td>
-                        <td className="px-3 py-2 font-semibold text-gray-800">{fmtCost(r.estimated_cost_usd)}</td>
-                      </tr>
-                    ))}
+                    {learnerRows.slice(0, 50).map(r => {
+                      const pc = getProviderColor(r.provider);
+                      return (
+                        <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{new Date(r.logged_at).toLocaleString('en-GB', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}</td>
+                          <td className="px-3 py-2 text-gray-700 font-medium max-w-[120px] truncate">{r.page}</td>
+                          <td className="px-3 py-2">
+                            <span className={classNames('px-1.5 py-0.5 rounded border text-[10px] font-semibold', pc.bg, pc.text, pc.border)}>
+                              {r.provider}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-gray-600 font-mono">{r.input_tokens.toLocaleString()}</td>
+                          <td className="px-3 py-2 text-gray-600 font-mono">{r.output_tokens.toLocaleString()}</td>
+                          <td className="px-3 py-2 text-emerald-600 font-mono">{r.cache_hit_tokens.toLocaleString()}</td>
+                          <td className="px-3 py-2 font-semibold text-gray-800">{fmtCost(r.estimated_cost_usd)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
                 {learnerRows.length > 50 && (
@@ -1071,14 +1570,14 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   {([
-                    { key: 'name' as SortKey,       label: 'Student' },
-                    { key: 'city' as SortKey,       label: 'City'    },
-                    { key: 'cost' as SortKey,       label: 'Total cost' },
-                    { key: 'requests' as SortKey,   label: 'Requests' },
-                    { key: 'groq' as SortKey,       label: 'Free-tier' },
-                    { key: 'anthropic' as SortKey,  label: 'Anthropic' },
-                    { key: null,                    label: 'Top page'  },
-                  ] as { key: SortKey | null; label: string }[]).map(({ key, label }) => (
+                    { key: 'name' as LearnerCostSortKey,       label: 'Student' },
+                    { key: 'city' as LearnerCostSortKey,       label: 'City'    },
+                    { key: 'cost' as LearnerCostSortKey,       label: 'Total cost' },
+                    { key: 'requests' as LearnerCostSortKey,   label: 'Requests' },
+                    { key: 'groq' as LearnerCostSortKey,       label: 'Groq' },
+                    { key: 'anthropic' as LearnerCostSortKey,  label: 'Anthropic' },
+                    { key: null,                               label: 'Top page'  },
+                  ] as { key: LearnerCostSortKey | null; label: string }[]).map(({ key, label }) => (
                     <th
                       key={label}
                       onClick={() => key && toggleSort(key)}
@@ -1146,478 +1645,6 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
           </div>
         </div>
       )}
-    </div>
-  );
-};
-
-
-// ─── ModelOverviewPanel ───────────────────────────────────────────────────────
-// Shows per-model request counts, token usage, cost, and provider distribution
-// across all users. Data sourced from api_cost_log.
-
-interface ModelOverviewProps {
-  rows: CostRow[];
-  loading: boolean;
-  error: string | null;
-  days: number;
-  setDays: (d: number) => void;
-  onRefresh: () => void;
-}
-
-type ModelSortKey = 'model' | 'provider' | 'requests' | 'inputTokens' | 'outputTokens' | 'cost' | 'uniqueUsers';
-
-const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({
-  rows, loading, error, days, setDays, onRefresh,
-}) => {
-  const [sortKey, setSortKey] = useState<ModelSortKey>('requests');
-  const [sortAsc, setSortAsc] = useState(false);
-
-  // ── Aggregate by model ────────────────────────────────────────────────────
-  type ModelSummary = {
-    model: string;
-    label: string;
-    provider: string;
-    requests: number;
-    inputTokens: number;
-    outputTokens: number;
-    cacheHitTokens: number;
-    cacheWriteTokens: number;
-    cost: number;
-    uniqueUsers: number;
-    topPages: { page: string; count: number }[];
-  };
-
-  const modelMap = new Map<string, {
-    provider: string; requests: number; inputTokens: number; outputTokens: number;
-    cacheHitTokens: number; cacheWriteTokens: number; cost: number;
-    users: Set<string>; pages: Map<string, number>;
-  }>();
-
-  rows.forEach(r => {
-    const existing = modelMap.get(r.model);
-    if (existing) {
-      existing.requests += 1;
-      existing.inputTokens += r.input_tokens;
-      existing.outputTokens += r.output_tokens;
-      existing.cacheHitTokens += r.cache_hit_tokens;
-      existing.cacheWriteTokens += r.cache_write_tokens;
-      existing.cost += r.estimated_cost_usd;
-      if (r.user_id) existing.users.add(r.user_id);
-      existing.pages.set(r.page, (existing.pages.get(r.page) || 0) + 1);
-    } else {
-      const users = new Set<string>();
-      if (r.user_id) users.add(r.user_id);
-      const pages = new Map<string, number>();
-      pages.set(r.page, 1);
-      modelMap.set(r.model, {
-        provider: r.provider,
-        requests: 1,
-        inputTokens: r.input_tokens,
-        outputTokens: r.output_tokens,
-        cacheHitTokens: r.cache_hit_tokens,
-        cacheWriteTokens: r.cache_write_tokens,
-        cost: r.estimated_cost_usd,
-        users,
-        pages,
-      });
-    }
-  });
-
-  const summaries: ModelSummary[] = [...modelMap.entries()].map(([model, data]) => ({
-    model,
-    label: modelLabel(model),
-    provider: data.provider,
-    requests: data.requests,
-    inputTokens: data.inputTokens,
-    outputTokens: data.outputTokens,
-    cacheHitTokens: data.cacheHitTokens,
-    cacheWriteTokens: data.cacheWriteTokens,
-    cost: data.cost,
-    uniqueUsers: data.users.size,
-    topPages: [...data.pages.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([page, count]) => ({ page, count })),
-  }));
-
-  const sorted = [...summaries].sort((a, b) => {
-    let av: any, bv: any;
-    if (sortKey === 'model')        { av = a.label.toLowerCase();  bv = b.label.toLowerCase(); }
-    else if (sortKey === 'provider') { av = a.provider;            bv = b.provider; }
-    else if (sortKey === 'requests') { av = a.requests;            bv = b.requests; }
-    else if (sortKey === 'inputTokens')  { av = a.inputTokens;    bv = b.inputTokens; }
-    else if (sortKey === 'outputTokens') { av = a.outputTokens;   bv = b.outputTokens; }
-    else if (sortKey === 'cost')         { av = a.cost;            bv = b.cost; }
-    else                                 { av = a.uniqueUsers;     bv = b.uniqueUsers; }
-    if (av < bv) return sortAsc ? -1 : 1;
-    if (av > bv) return sortAsc ? 1 : -1;
-    return 0;
-  });
-
-  const toggleSort = (key: ModelSortKey) => {
-    if (sortKey === key) setSortAsc(a => !a);
-    else { setSortKey(key); setSortAsc(false); }
-  };
-
-  const SortIcon = ({ k }: { k: ModelSortKey }) => sortKey !== k ? null : sortAsc
-    ? <ChevronUp size={11} className="inline ml-0.5 text-purple-500" />
-    : <ChevronDown size={11} className="inline ml-0.5 text-purple-500" />;
-
-  // ── KPI values ────────────────────────────────────────────────────────────
-  const totalRequests = rows.length;
-  const uniqueModels = summaries.length;
-  const freeRequests = rows.filter(r => r.provider !== 'anthropic').length;
-  const freePct = totalRequests > 0 ? (freeRequests / totalRequests * 100) : 0;
-  const totalCost = rows.reduce((s, r) => s + r.estimated_cost_usd, 0);
-  const maxRequests = Math.max(...summaries.map(s => s.requests), 1);
-
-  // ── Daily model usage (stacked-ish view) ──────────────────────────────────
-  const dailyByModel = new Map<string, Map<string, number>>();
-  rows.forEach(r => {
-    const day = r.logged_at.slice(0, 10);
-    if (!dailyByModel.has(day)) dailyByModel.set(day, new Map());
-    const dayMap = dailyByModel.get(day)!;
-    const lbl = modelLabel(r.model);
-    dayMap.set(lbl, (dayMap.get(lbl) || 0) + 1);
-  });
-  const dailyEntries = [...dailyByModel.entries()].sort().slice(-14);
-  const allModelLabels = [...new Set(summaries.map(s => s.label))];
-  const maxDayTotal = Math.max(
-    ...dailyEntries.map(([, m]) => [...m.values()].reduce((s, v) => s + v, 0)),
-    1
-  );
-
-  // ── Provider summary ──────────────────────────────────────────────────────
-  const providerAgg = new Map<string, { requests: number; cost: number; models: Set<string> }>();
-  rows.forEach(r => {
-    const existing = providerAgg.get(r.provider);
-    if (existing) {
-      existing.requests += 1;
-      existing.cost += r.estimated_cost_usd;
-      existing.models.add(modelLabel(r.model));
-    } else {
-      const models = new Set<string>();
-      models.add(modelLabel(r.model));
-      providerAgg.set(r.provider, { requests: 1, cost: r.estimated_cost_usd, models });
-    }
-  });
-  const providerSummaries = [...providerAgg.entries()]
-    .sort((a, b) => b[1].requests - a[1].requests);
-  const maxProviderReqs = providerSummaries[0]?.[1].requests || 1;
-
-  // Model color palette for daily chart
-  const MODEL_CHART_COLORS = [
-    'bg-emerald-400', 'bg-sky-400', 'bg-orange-400', 'bg-violet-400',
-    'bg-rose-400', 'bg-blue-400', 'bg-amber-400',
-  ];
-  const modelColorMap = new Map<string, string>();
-  allModelLabels.forEach((lbl, i) => {
-    modelColorMap.set(lbl, MODEL_CHART_COLORS[i % MODEL_CHART_COLORS.length]);
-  });
-
-  if (loading) return (
-    <div className="flex items-center justify-center gap-2 py-20 text-gray-500">
-      <Loader2 size={20} className="animate-spin" /> Loading model data…
-    </div>
-  );
-
-  if (error) return (
-    <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
-      <p className="font-semibold mb-1">Model data unavailable</p>
-      <p>{error}</p>
-      <p className="mt-2 text-xs">Deploy the updated <code className="bg-amber-100 px-1 rounded">chat.js</code> and run <code className="bg-amber-100 px-1 rounded">create_api_cost_log.sql</code> in Supabase to enable cost tracking.</p>
-    </div>
-  );
-
-  return (
-    <div className="space-y-6">
-
-      {/* Controls */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          {([7, 30, 90] as const).map(d => (
-            <button key={d} onClick={() => setDays(d)}
-              className={classNames('px-3 py-1.5 rounded text-xs font-semibold transition-colors',
-                days === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
-              {d}d
-            </button>
-          ))}
-        </div>
-        <button onClick={onRefresh} className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors ml-auto">
-          <RefreshCw size={12} /> Refresh
-        </button>
-      </div>
-
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: 'Total requests',  value: totalRequests.toLocaleString(), sub: `last ${days} days`,                 icon: <Activity size={16} className="text-purple-500" />,  bg: 'bg-purple-50' },
-          { label: 'Models active',   value: uniqueModels.toString(),        sub: 'distinct models used',              icon: <Server size={16} className="text-blue-500" />,      bg: 'bg-blue-50' },
-          { label: 'Free-tier %',     value: `${freePct.toFixed(0)}%`,       sub: `${freeRequests.toLocaleString()} free reqs`, icon: <Zap size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
-          { label: 'Total cost',      value: `$${totalCost.toFixed(2)}`,     sub: 'paid models only',                 icon: <DollarSign size={16} className="text-amber-500" />, bg: 'bg-amber-50' },
-        ].map(({ label, value, sub, icon, bg }) => (
-          <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
-            {icon}
-            <div>
-              <p className="text-xl font-black text-gray-900">{value}</p>
-              <p className="text-xs text-gray-500 leading-tight">{label}</p>
-              <p className="text-[10px] text-gray-400">{sub}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Per-model table */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
-          <Server size={14} className="text-gray-400" />
-          <span className="text-sm font-bold text-gray-700">Requests by Model</span>
-          <span className="text-xs text-gray-400 ml-auto">{summaries.length} models</span>
-        </div>
-
-        {summaries.length === 0 ? (
-          <div className="py-12 text-center text-sm text-gray-400">No model data yet — calls will appear here after chat.js logs them.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  {([
-                    { key: 'model' as ModelSortKey,        label: 'Model' },
-                    { key: 'provider' as ModelSortKey,     label: 'Provider' },
-                    { key: 'requests' as ModelSortKey,     label: 'Requests' },
-                    { key: 'uniqueUsers' as ModelSortKey,  label: 'Users' },
-                    { key: 'inputTokens' as ModelSortKey,  label: 'Input Tokens' },
-                    { key: 'outputTokens' as ModelSortKey, label: 'Output Tokens' },
-                    { key: 'cost' as ModelSortKey,         label: 'Cost' },
-                    { key: null,                           label: 'Top Pages' },
-                  ] as { key: ModelSortKey | null; label: string }[]).map(({ key, label }) => (
-                    <th
-                      key={label}
-                      onClick={() => key && toggleSort(key)}
-                      className={classNames(
-                        'px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider',
-                        key ? 'cursor-pointer hover:text-purple-700 select-none' : ''
-                      )}
-                    >
-                      {label}{key && <SortIcon k={key} />}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {sorted.map(s => {
-                  const pc = getProviderColor(s.provider);
-                  const isFree = s.provider !== 'anthropic';
-                  return (
-                    <tr key={s.model} className="hover:bg-gray-50 transition-colors">
-                      {/* Model name */}
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-gray-900">{s.label}</div>
-                        <div className="text-[10px] text-gray-400 font-mono truncate max-w-[180px]">{s.model}</div>
-                      </td>
-                      {/* Provider */}
-                      <td className="px-4 py-3">
-                        <span className={classNames('text-[10px] px-2 py-0.5 rounded-full border font-bold', pc.bg, pc.text, pc.border)}>
-                          {s.provider.charAt(0).toUpperCase() + s.provider.slice(1)}
-                        </span>
-                        {isFree && <div className="text-[9px] text-emerald-600 mt-0.5 font-semibold">FREE</div>}
-                      </td>
-                      {/* Requests with bar */}
-                      <td className="px-4 py-3">
-                        <div className="font-bold text-gray-800 font-mono">{s.requests.toLocaleString()}</div>
-                        <div className="mt-1 bg-gray-100 rounded-full h-1.5 w-full max-w-[100px]">
-                          <div className={classNames('h-1.5 rounded-full', pc.bar)}
-                            style={{ width: `${(s.requests / maxRequests * 100).toFixed(1)}%` }} />
-                        </div>
-                      </td>
-                      {/* Users */}
-                      <td className="px-4 py-3 font-mono text-gray-600">{s.uniqueUsers}</td>
-                      {/* Input tokens */}
-                      <td className="px-4 py-3 font-mono text-gray-600">
-                        {fmtTokens(s.inputTokens)}
-                        {s.cacheHitTokens > 0 && (
-                          <div className="text-[9px] text-emerald-600">⚡ {fmtTokens(s.cacheHitTokens)} cached</div>
-                        )}
-                      </td>
-                      {/* Output tokens */}
-                      <td className="px-4 py-3 font-mono text-gray-600">{fmtTokens(s.outputTokens)}</td>
-                      {/* Cost */}
-                      <td className="px-4 py-3">
-                        <span className={classNames('font-semibold', s.cost > 0 ? 'text-gray-800' : 'text-emerald-700')}>
-                          {s.cost > 0 ? fmtCost(s.cost) : '$0.00'}
-                        </span>
-                      </td>
-                      {/* Top pages */}
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          {s.topPages.map(tp => (
-                            <span key={tp.page} className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200 text-[10px]">
-                              {tp.page} <span className="font-mono text-gray-400">({tp.count})</span>
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              {sorted.length > 0 && (
-                <tfoot className="bg-gray-50 border-t border-gray-200">
-                  <tr>
-                    <td className="px-4 py-2.5 text-[11px] font-bold text-gray-600">Total ({sorted.length} models)</td>
-                    <td></td>
-                    <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{totalRequests.toLocaleString()}</td>
-                    <td className="px-4 py-2.5 text-[11px] text-gray-400">—</td>
-                    <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{fmtTokens(rows.reduce((s, r) => s + r.input_tokens, 0))}</td>
-                    <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{fmtTokens(rows.reduce((s, r) => s + r.output_tokens, 0))}</td>
-                    <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800">{fmtCost(totalCost)}</td>
-                    <td></td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Provider distribution */}
-      {providerSummaries.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
-            <Cpu size={14} className="text-gray-400" />
-            <span className="text-sm font-bold text-gray-700">Provider Distribution</span>
-            <span className="text-xs text-gray-400 ml-auto">{providerSummaries.length} providers</span>
-          </div>
-          <div className="p-5 space-y-3">
-            {providerSummaries.map(([provider, data]) => {
-              const pc = getProviderColor(provider);
-              const pct = totalRequests > 0 ? (data.requests / totalRequests * 100) : 0;
-              const isFree = provider !== 'anthropic';
-              return (
-                <div key={provider} className="flex items-center gap-3">
-                  <div className="w-44 flex-shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className={classNames('text-[11px] px-2 py-0.5 rounded-full border font-bold', pc.bg, pc.text, pc.border)}>
-                        {provider.charAt(0).toUpperCase() + provider.slice(1)}
-                      </span>
-                      {isFree && <span className="text-[9px] text-emerald-600 font-bold">FREE</span>}
-                    </div>
-                    <div className="text-[10px] text-gray-400 mt-0.5">
-                      {data.requests.toLocaleString()} reqs · {[...data.models].length} model{[...data.models].length !== 1 ? 's' : ''}
-                    </div>
-                  </div>
-                  <div className="flex-1 bg-gray-100 rounded-full h-3">
-                    <div
-                      className={classNames('h-3 rounded-full transition-all flex items-center justify-end pr-1', pc.bar)}
-                      style={{ width: `${Math.max((data.requests / maxProviderReqs * 100), 3).toFixed(1)}%` }}
-                    >
-                      <span className="text-[9px] text-white font-bold">{pct.toFixed(0)}%</span>
-                    </div>
-                  </div>
-                  <div className="w-20 text-right flex-shrink-0">
-                    <div className="text-xs font-semibold text-gray-700">{data.requests.toLocaleString()}</div>
-                    <div className="text-[10px] text-gray-400">{fmtCost(data.cost)}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Daily model usage chart */}
-      {dailyEntries.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2 flex-wrap">
-            <BarChart2 size={14} className="text-gray-400" />
-            <span className="text-sm font-bold text-gray-700">Daily Model Usage</span>
-            <span className="text-xs text-gray-400 ml-2">(last {dailyEntries.length} days)</span>
-            {/* Legend */}
-            <div className="flex gap-2 flex-wrap ml-auto">
-              {allModelLabels.map(lbl => (
-                <div key={lbl} className="flex items-center gap-1">
-                  <div className={classNames('w-2.5 h-2.5 rounded-sm', modelColorMap.get(lbl))} />
-                  <span className="text-[10px] text-gray-500">{lbl}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="p-5">
-            <div className="flex items-end gap-1.5" style={{ height: '140px' }}>
-              {dailyEntries.map(([day, modelCounts]) => {
-                const dayTotal = [...modelCounts.values()].reduce((s, v) => s + v, 0);
-                return (
-                  <div key={day} className="flex-1 flex flex-col items-center gap-1 group relative">
-                    {/* Tooltip */}
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-gray-800 text-white text-[10px] px-2 py-1.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                      <div className="font-bold mb-0.5">{day} — {dayTotal} reqs</div>
-                      {allModelLabels.map(lbl => {
-                        const count = modelCounts.get(lbl) || 0;
-                        if (count === 0) return null;
-                        return <div key={lbl}>{lbl}: {count}</div>;
-                      })}
-                    </div>
-                    {/* Stacked bar */}
-                    <div className="w-full flex flex-col-reverse" style={{ height: `${(dayTotal / maxDayTotal * 100).toFixed(1)}%` }}>
-                      {allModelLabels.map(lbl => {
-                        const count = modelCounts.get(lbl) || 0;
-                        if (count === 0) return null;
-                        const segPct = dayTotal > 0 ? (count / dayTotal * 100) : 0;
-                        return (
-                          <div
-                            key={lbl}
-                            className={classNames('w-full first:rounded-b last:rounded-t', modelColorMap.get(lbl))}
-                            style={{ height: `${segPct}%`, minHeight: count > 0 ? '2px' : '0' }}
-                          />
-                        );
-                      })}
-                    </div>
-                    {/* Day label */}
-                    <div className="text-[9px] text-gray-400 rotate-45 origin-left mt-1 whitespace-nowrap">{day.slice(5)}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Fallback chain info card */}
-      <div className="bg-gradient-to-r from-gray-50 to-indigo-50 border border-gray-200 rounded-xl p-5 shadow-sm">
-        <h3 className="text-sm font-bold text-gray-800 mb-2 flex items-center gap-2">
-          <Zap size={14} className="text-indigo-500" /> Fallback Chain Order
-        </h3>
-        <p className="text-xs text-gray-500 mb-3">
-          For learning pages (AI Learning, English Skills, Skills Development, Consultants, Ambassadors), requests cascade through free providers before falling back to paid Anthropic Haiku.
-        </p>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {[
-            { name: 'Groq', model: 'Llama 3.3 70B', provider: 'groq' },
-            { name: 'Gemini', model: '2.0 Flash', provider: 'gemini' },
-            { name: 'Cerebras', model: 'Llama 3.3 70B', provider: 'cerebras' },
-            { name: 'OpenRouter', model: 'Llama 3.3 70B', provider: 'openrouter' },
-            { name: 'Mistral', model: 'Small', provider: 'mistral' },
-            { name: 'Anthropic', model: 'Haiku 4.5', provider: 'anthropic' },
-          ].map((step, i) => {
-            const pc = getProviderColor(step.provider);
-            const isFree = step.provider !== 'anthropic';
-            return (
-              <React.Fragment key={step.name}>
-                {i > 0 && <span className="text-gray-300 text-xs">→</span>}
-                <div className={classNames('px-2.5 py-1.5 rounded-lg border text-xs', pc.bg, pc.border)}>
-                  <span className={classNames('font-bold', pc.text)}>{step.name}</span>
-                  <span className="text-gray-500 ml-1">{step.model}</span>
-                  {isFree && <span className="ml-1 text-[9px] text-emerald-600 font-bold">FREE</span>}
-                </div>
-              </React.Fragment>
-            );
-          })}
-        </div>
-        <p className="text-[10px] text-gray-400 mt-3">
-          Code pages (Vibe Coding, Web Dev, Full Stack, AI Workflow) always use <strong>Claude Sonnet 4.6</strong> directly. AI Playground defaults to <strong>Claude Haiku 4.5</strong>.
-        </p>
-      </div>
     </div>
   );
 };
@@ -1848,6 +1875,11 @@ const AdminStudentDashboard: React.FC = () => {
   const isPlatformAdmin = ADMIN_IDS.has(user?.id ?? '') || userRole === 'platform_administrator';
   const isLeader        = userRole === 'leader' && !isPlatformAdmin;
 
+  // ── Multi-org support for leaders ──────────────────────────────────────────
+  const [leaderOrgs, setLeaderOrgs] = useState<{ id: string; name: string; join_code: string; city: string | null }[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [leaderJoinCodes, setLeaderJoinCodes] = useState<string[]>([]);
+
   useEffect(() => {
     if (!isLeader || !user?.id) return;
 
@@ -1892,6 +1924,49 @@ const AdminStudentDashboard: React.FC = () => {
     })();
   }, [isLeader, user?.id]);
 
+  // ── Organization list for platform admin org selector ──────────────────────
+  const [allOrgs, setAllOrgs] = useState<OrgOption[]>([]);
+  const [loadingOrgs, setLoadingOrgs] = useState(false);
+  // The org selected by platform admin on the Student Activity tab
+  // '' = "All Organizations", a UUID = specific org
+  const [adminSelectedOrgId, setAdminSelectedOrgId] = useState<string>('');
+
+  useEffect(() => {
+    if (!isPlatformAdmin || !authChecked) return;
+    (async () => {
+      setLoadingOrgs(true);
+      try {
+        const { data, error } = await supabase
+          .from('organizations')
+          .select('id, name, join_code, join_codes, continent, country, city, leader_id')
+          .order('name', { ascending: true });
+        if (error) throw error;
+
+        // Count learners per org from profiles
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('organization_id')
+          .not('organization_id', 'is', null);
+
+        const orgCounts: Record<string, number> = {};
+        (profileData || []).forEach((p: any) => {
+          if (p.organization_id && !EXCLUDED_IDS.has(p.id)) {
+            orgCounts[p.organization_id] = (orgCounts[p.organization_id] || 0) + 1;
+          }
+        });
+
+        setAllOrgs((data || []).map(o => ({
+          ...o,
+          learner_count: orgCounts[o.id] || 0,
+        })));
+      } catch (err: any) {
+        console.error('Failed to load orgs for selector:', err.message);
+      } finally {
+        setLoadingOrgs(false);
+      }
+    })();
+  }, [isPlatformAdmin, authChecked]);
+
   const [learners,        setLearners]        = useState<Learner[]>([]);
   const [loadingLearners, setLoadingLearners] = useState(true);
   const [learnersError,   setLearnersError]   = useState<string | null>(null);
@@ -1903,13 +1978,8 @@ const AdminStudentDashboard: React.FC = () => {
   const [filterCat,   setFilterCat]   = useState<string>('all');
 
   // ── Tab state ───────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'student' | 'platform-global' | 'cost-overview' | 'cost-learner' | 'model-overview'>('student');
+  const [activeTab, setActiveTab] = useState<'student' | 'platform-global' | 'model-overview' | 'cost-overview' | 'cost-learner'>('student');
   const [platformOrgFilter, setPlatformOrgFilter] = useState<{ id: string; name: string } | null>(null);
-
-  // ── Multi-org support for leaders ──────────────────────────────────────────
-  const [leaderOrgs, setLeaderOrgs] = useState<{ id: string; name: string; join_code: string; city: string | null }[]>([]);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
-  const [leaderJoinCodes, setLeaderJoinCodes] = useState<string[]>([]);
 
   // ── Cost data ───────────────────────────────────────────────────────────────
   const [costRows,        setCostRows]        = useState<CostRow[]>([]);
@@ -1917,14 +1987,12 @@ const AdminStudentDashboard: React.FC = () => {
   const [costError,       setCostError]       = useState<string | null>(null);
   const [costDays,        setCostDays]        = useState<number>(30);
   const [costGroupBy,     setCostGroupBy]     = useState<'page' | 'model' | 'provider'>('page');
+  const [modelDays,       setModelDays]       = useState<number>(30);
   const [learnerCostRows, setLearnerCostRows] = useState<CostRow[]>([]);
   const [loadingLearnerCost, setLoadingLearnerCost] = useState(false);
   const [studentSessionRows, setStudentSessionRows] = useState<StudentSessionRow[]>([]);
   const [loadingStudentSummary, setLoadingStudentSummary] = useState(false);
   const [studentSummaryError, setStudentSummaryError] = useState<string | null>(null);
-
-  // ── Model overview uses its own days state (independent of cost overview) ──
-  const [modelDays, setModelDays] = useState<number>(30);
 
   // Fetch overall cost data
   const fetchCostData = useCallback(async (days: number) => {
@@ -1963,12 +2031,7 @@ const AdminStudentDashboard: React.FC = () => {
     finally { setLoadingLearnerCost(false); }
   }, []);
 
-  // Fetch cost data when costDays changes OR when modelDays changes (use the larger window)
-  useEffect(() => {
-    const effectiveDays = Math.max(costDays, modelDays);
-    fetchCostData(effectiveDays);
-  }, [costDays, modelDays, fetchCostData]);
-
+  useEffect(() => { fetchCostData(costDays); }, [costDays, fetchCostData]);
   useEffect(() => {
     if (selectedId && activeTab === 'cost-learner') fetchLearnerCost(selectedId);
     if (!selectedId) setLearnerCostRows([]);
@@ -1998,10 +2061,24 @@ const AdminStudentDashboard: React.FC = () => {
     }
   }, [learners]);
 
+  // ── Resolve join codes for the admin-selected org ──────────────────────────
+  const adminOrgJoinCodes = useMemo(() => {
+    if (!isPlatformAdmin) return [];
+    if (adminSelectedOrgId === '') return []; // "All" — no code filter
+    const org = allOrgs.find(o => o.id === adminSelectedOrgId);
+    if (!org) return [];
+    const codes: string[] = Array.isArray(org.join_codes) && org.join_codes.length
+      ? org.join_codes
+      : org.join_code ? [org.join_code] : [];
+    return [...new Set(codes)];
+  }, [isPlatformAdmin, adminSelectedOrgId, allOrgs]);
+
+  // Fetch learners scoped correctly per role
   useEffect(() => {
     if (!authChecked) return;
     (async () => {
       setLoadingLearners(true);
+      setLearnersError(null);
       try {
         let query = supabase
           .from('profiles')
@@ -2009,14 +2086,24 @@ const AdminStudentDashboard: React.FC = () => {
           .order('name', { ascending: true });
 
         if (isLeader) {
+          // Leader: filter by their own join codes
           if (leaderJoinCodes.length > 0) {
             query = query.in('join_code_used', leaderJoinCodes);
           } else {
             const orgId = selectedOrgId || userOrgId;
             if (orgId) query = query.eq('organization_id', orgId);
           }
-        } else {
-          query = query.eq('continent', 'Africa');
+        } else if (isPlatformAdmin) {
+          // Platform admin: filter by selected org, or show all
+          if (adminSelectedOrgId !== '') {
+            // Specific org selected — filter by org's join codes or org id
+            if (adminOrgJoinCodes.length > 0) {
+              query = query.in('join_code_used', adminOrgJoinCodes);
+            } else {
+              query = query.eq('organization_id', adminSelectedOrgId);
+            }
+          }
+          // If adminSelectedOrgId === '' → no filter, show all
         }
 
         const { data, error } = await query;
@@ -2028,13 +2115,21 @@ const AdminStudentDashboard: React.FC = () => {
         setLoadingLearners(false);
       }
     })();
-  }, [authChecked, isLeader, leaderJoinCodes, selectedOrgId, userOrgId]);
+  }, [authChecked, isLeader, isPlatformAdmin, leaderJoinCodes, selectedOrgId, userOrgId, adminSelectedOrgId, adminOrgJoinCodes]);
 
   useEffect(() => {
     if (activeTab !== 'student') return;
     fetchStudentSummary();
-  }, [activeTab, fetchStudentSummary, selectedOrgId]);
+  }, [activeTab, fetchStudentSummary, selectedOrgId, adminSelectedOrgId]);
 
+  // Handle drill-down from Global Overview → Student Activity
+  useEffect(() => {
+    if (platformOrgFilter && isPlatformAdmin) {
+      setAdminSelectedOrgId(platformOrgFilter.id);
+    }
+  }, [platformOrgFilter, isPlatformAdmin]);
+
+  // Fetch selected learner's dashboard rows
   const fetchData = useCallback(async (userId: string) => {
     if (!userId) return;
     setLoadingData(true);
@@ -2058,12 +2153,6 @@ const AdminStudentDashboard: React.FC = () => {
 
   useEffect(() => { if (selectedId) fetchData(selectedId); }, [selectedId, fetchData]);
 
-  // ── Filter cost rows for model overview based on modelDays ────────────────
-  const modelCostRows = (() => {
-    const since = Date.now() - modelDays * 86400000;
-    return costRows.filter(r => new Date(r.logged_at).getTime() >= since);
-  })();
-
   // ── Auth guard — after ALL hooks ─────────────────────────────────────────────
   if (authLoading || !user || !authChecked) {
     return (
@@ -2082,6 +2171,8 @@ const AdminStudentDashboard: React.FC = () => {
   const completedLearning = learningRows.filter(a => a.progress === 'completed').length;
   const completedCerts    = certRows.filter(a => a.progress === 'completed').length;
 
+  const adminSelectedOrg = allOrgs.find(o => o.id === adminSelectedOrgId);
+
   return (
     <AppLayout>
       <div className="max-w-5xl mx-auto px-4 py-8">
@@ -2092,7 +2183,7 @@ const AdminStudentDashboard: React.FC = () => {
             <Users size={22} className="text-purple-600" />
             <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
           </div>
-          <p className="text-sm text-gray-500 ml-9">Student activity, certification scores, model usage, and API cost analytics.</p>
+          <p className="text-sm text-gray-500 ml-9">Student activity, certification scores, and API cost analytics.</p>
         </div>
 
         {/* Tab bar */}
@@ -2122,6 +2213,52 @@ const AdminStudentDashboard: React.FC = () => {
         {/* ── STUDENT ACTIVITY TAB ────────────────────────────────────── */}
         {activeTab === 'student' && <div>
 
+        {/* ── Platform admin: Org selector ─────────────────────────────── */}
+        {isPlatformAdmin && !platformOrgFilter && (
+          <OrgSelector
+            orgs={allOrgs}
+            loading={loadingOrgs}
+            selectedOrgId={adminSelectedOrgId}
+            onSelect={(orgId) => {
+              setAdminSelectedOrgId(orgId);
+              setSelectedId(''); // clear learner selection when switching orgs
+            }}
+          />
+        )}
+
+        {/* Currently viewing banner for platform admin */}
+        {isPlatformAdmin && adminSelectedOrgId !== '' && adminSelectedOrg && (
+          <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+            <Building2 size={16} className="text-indigo-600" />
+            <span className="text-sm font-semibold text-indigo-800">
+              Viewing: {adminSelectedOrg.name}
+              {adminSelectedOrg.city && <span className="text-xs font-normal text-indigo-600 ml-1">· {adminSelectedOrg.city}</span>}
+            </span>
+            <span className="text-xs text-indigo-500 ml-1">({learners.length} learners)</span>
+            {platformOrgFilter && (
+              <button onClick={() => { setPlatformOrgFilter(null); setAdminSelectedOrgId(''); setActiveTab('platform-global'); }}
+                className="ml-auto text-xs text-indigo-600 hover:text-indigo-900 border border-indigo-300 rounded px-2 py-1">
+                ← Back to Global
+              </button>
+            )}
+            {!platformOrgFilter && (
+              <button onClick={() => { setAdminSelectedOrgId(''); setSelectedId(''); }}
+                className="ml-auto text-xs text-indigo-600 hover:text-indigo-900 border border-indigo-300 rounded px-2 py-1">
+                ← All Organizations
+              </button>
+            )}
+          </div>
+        )}
+
+        {isPlatformAdmin && adminSelectedOrgId === '' && !platformOrgFilter && (
+          <div className="flex items-center gap-2 mb-4 px-4 py-2.5 bg-purple-50 border border-purple-200 rounded-xl">
+            <Globe size={14} className="text-purple-600" />
+            <span className="text-sm font-semibold text-purple-800">Viewing all organizations</span>
+            <span className="text-xs text-purple-500 ml-1">({learners.length} learners)</span>
+          </div>
+        )}
+
+        {/* Multi-org selector for leaders */}
         {isLeader && leaderOrgs.length > 1 && (
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <span className="text-sm font-semibold text-gray-600">Viewing org:</span>
@@ -2143,22 +2280,13 @@ const AdminStudentDashboard: React.FC = () => {
           </div>
         )}
 
+        {/* Scope notice for leaders */}
         {isLeader && leaderJoinCodes.length > 0 && (
           <div className="mb-4 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-indigo-700">Showing learners who joined with your code{leaderJoinCodes.length > 1 ? 's' : ''}:</span>
             {leaderJoinCodes.map(code => (
               <span key={code} className="font-mono text-xs font-black text-indigo-900 bg-white border border-indigo-200 rounded px-2 py-0.5">{code}</span>
             ))}
-          </div>
-        )}
-
-        {platformOrgFilter && (
-          <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
-            <span className="text-sm font-semibold text-indigo-800">Viewing: {platformOrgFilter.name}</span>
-            <button onClick={() => { setPlatformOrgFilter(null); setActiveTab('platform-global'); }}
-              className="ml-auto text-xs text-indigo-600 hover:text-indigo-900 border border-indigo-300 rounded px-2 py-1">
-              ← Back to Global
-            </button>
           </div>
         )}
 
@@ -2242,7 +2370,6 @@ const AdminStudentDashboard: React.FC = () => {
 
         {!loadingData && selectedId && activities.length > 0 && (
           <div className="space-y-6">
-
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { label: 'Learning Activities', value: learningRows.length,  icon: <BookOpen size={18} className="text-blue-500" />,  bg: 'bg-blue-50'   },
@@ -2303,7 +2430,6 @@ const AdminStudentDashboard: React.FC = () => {
                 </div>
               </section>
             )}
-
           </div>
         )}
 
@@ -2327,8 +2453,9 @@ const AdminStudentDashboard: React.FC = () => {
         {activeTab === 'platform-global' && (
           <PlatformGlobalPanel
             onSelectOrg={(orgId, orgName) => {
-              setActiveTab('student');
               setPlatformOrgFilter({ id: orgId, name: orgName });
+              setAdminSelectedOrgId(orgId);
+              setActiveTab('student');
             }}
           />
         )}
@@ -2336,12 +2463,12 @@ const AdminStudentDashboard: React.FC = () => {
         {/* ── MODEL OVERVIEW TAB ──────────────────────────────────────── */}
         {activeTab === 'model-overview' && (
           <ModelOverviewPanel
-            rows={modelCostRows}
+            rows={costRows}
             loading={loadingCost}
             error={costError}
             days={modelDays}
-            setDays={setModelDays}
-            onRefresh={() => fetchCostData(Math.max(costDays, modelDays))}
+            setDays={(d) => { setModelDays(d); setCostDays(d); fetchCostData(d); }}
+            onRefresh={() => fetchCostData(modelDays)}
           />
         )}
 
