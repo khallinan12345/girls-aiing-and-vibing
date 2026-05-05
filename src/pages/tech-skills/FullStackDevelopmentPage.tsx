@@ -1157,14 +1157,14 @@ const FullStackDevelopmentPage: React.FC = () => {
     await persistSession(projectFiles, promptHistory, nextIdx, sessionContext);
   }, [taskIndex, projectFiles, promptHistory, sessionContext, persistSession]);
 
+  // Called when Phase 0 (WebProjectLoader) completes — shows the intro overview card
   const handleOnboardingComplete = useCallback(async () => {
     await ensureSession();
-    // Advance to intro_fullstack (index 1) to show the overview card
     setTaskIndex(1); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
     setTimeout(() => persistSession(projectFiles, promptHistory, 1, sessionContext), 100);
   }, [ensureSession, projectFiles, promptHistory, sessionContext, persistSession]);
 
-  // Called from the Full-Stack Overview card to move to actual tasks
+  // Called when the intro overview card button is clicked — starts the first real task
   const handleIntroComplete = useCallback(async () => {
     await ensureSession();
     setTaskIndex(2); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
