@@ -143,9 +143,9 @@ const PRICING: Record<string, { input: number; output: number; label: string }> 
 
 const modelLabel = (m: string) => PRICING[m]?.label || m;
 
-const fmtCost = (n: number) => n < 0.001 ? '<$0.001' : `$${n.toFixed(3)}`;
 const fmtTokens = (n: number) =>
-const numCost = (v: number | string): number => typeof v === "number" ? v : parseFloat(String(v)) || 0;const numCost = (v: number | string): number => typeof v === "number" ? v : parseFloat(String(v)) || 0;  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : `${n}`;
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : `${n}`;
+const numCost = (v: number | string): number => typeof v === "number" ? v : parseFloat(String(v)) || 0;
 
 const progressColor = (p: string) => {
   if (p === 'completed') return 'bg-green-100 text-green-800 border-green-200';
