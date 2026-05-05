@@ -551,7 +551,7 @@ const HealthcareNavigatorPage: React.FC = () => {
     setIsTriaging(true);
     try {
       const systemPrompt = buildTriagePrompt(selectedPatient, assessment);
-      const reply = await chatText(systemPrompt, [{ role: 'user', content: 'Please analyse this patient assessment and provide your triage classification.' }]);
+      const reply = await chatText({ page: 'HealthcareNavigatorPage', messages: [{ role: 'user', content: 'Please analyse this patient assessment and provide your triage classification.' }], system: systemPrompt, max_tokens: 800 });
       const level = detectTriage(reply);
       setTriageResult({ level, summary: reply });
       speak(reply.slice(0, 200));
@@ -599,7 +599,7 @@ const HealthcareNavigatorPage: React.FC = () => {
     try {
       const history = [...messages, userMsg];
       const systemPrompt = buildFollowupPrompt(selectedPatient, selectedAssessment);
-      const reply = await chatText(systemPrompt, history.map(m => ({ role: m.role, content: m.content })));
+      const reply = await chatText({ page: 'HealthcareNavigatorPage', messages: history.map(m => ({ role: m.role, content: m.content })), system: systemPrompt, max_tokens: 800 });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       const updated = [...history, aiMsg];
       setMessages(updated);

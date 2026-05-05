@@ -601,7 +601,7 @@ const AgricultureConsultantPage: React.FC = () => {
             created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
           }).select('id').single();
           if (data?.id) setLearnDashId(data.id);
-          const reply = await chatText(LEARN_SYSTEM_PROMPTS[selectedTopic.id], [{
+          const reply = await chatText({ page: 'AgricultureConsultantPage', system: LEARN_SYSTEM_PROMPTS[selectedTopic.id], max_tokens: 800, messages: [{
             role: 'user',
             content: 'Start with a warm, engaging 2-3 sentence introduction to this topic. Tell me the 2 or 3 most important things I will learn. Then ask one question to begin exploring what I already know.',
           }]);
@@ -634,7 +634,7 @@ const AgricultureConsultantPage: React.FC = () => {
     const withUser = [...learnMessages, userMsg];
     setLearnMessages(withUser); setInputText(''); setIsSending(true);
     try {
-      const reply = await chatText(LEARN_SYSTEM_PROMPTS[selectedTopic.id], withUser.map(m => ({ role: m.role, content: m.content })));
+      const reply = await chatText({ page: 'AgricultureConsultantPage', messages: withUser.map(m => ({ role: m.role, content: m.content })), system: LEARN_SYSTEM_PROMPTS[selectedTopic.id], max_tokens: 800 });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       const final = [...withUser, aiMsg];
       setLearnMessages(final); speak(reply); await persistLearn(final);
@@ -680,7 +680,7 @@ const AgricultureConsultantPage: React.FC = () => {
     setApplyMessages(prev => [...prev, userMsg]); setInputText(''); setIsSending(true);
     try {
       const history = [...applyMessages, userMsg];
-      const reply = await chatText(buildApplyPrompt(consultationType, selectedFarmer), history.map(m => ({ role: m.role, content: m.content })));
+      const reply = await chatText({ page: 'AgricultureConsultantPage', messages: history.map(m => ({ role: m.role, content: m.content })), system: buildApplyPrompt(consultationType, selectedFarmer), max_tokens: 800 });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       setApplyMessages(prev => [...prev, aiMsg]); speak(reply);
       const urgency = extractUrgency(reply);

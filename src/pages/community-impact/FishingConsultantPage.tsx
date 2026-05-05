@@ -663,7 +663,7 @@ const FishingConsultantPage: React.FC = () => {
       const history = [...messages, userMsg];
       const systemPrompt = buildSystemPrompt(consultationType, selectedClient);
       const apiMessages = history.map(m => ({ role: m.role, content: m.content }));
-      const reply = await chatText(systemPrompt, apiMessages);
+      const reply = await chatText({ page: 'FishingConsultantPage', messages: apiMessages, system: systemPrompt, max_tokens: 800 });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       setMessages(prev => [...prev, aiMsg]);
       speak(reply);
