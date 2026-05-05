@@ -17,6 +17,7 @@ import {
   ChevronUp, Trophy, User, BarChart2, Code, Brain,
   Target, Lightbulb, MessageSquare, Cpu,
   DollarSign, TrendingUp, Zap, Activity,
+  Server,
 } from 'lucide-react';
 import classNames from 'classnames';
 import { useImpersonation } from '../../contexts/ImpersonationContext';
@@ -60,7 +61,7 @@ interface CostRow {
   id: string;
   logged_at: string;
   page: string;
-  provider: 'anthropic' | 'groq';
+  provider: string;
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -176,8 +177,6 @@ const StudentLearnerTable: React.FC<{
     }
   };
 
-  // Use scrollIntoView so right-click "open in new tab" on the name/button
-  // doesn't reload the admin dashboard (the old <a href="#..."> caused this).
   const handleViewDashboard = (learnerId: string) => {
     onSelectLearner(learnerId);
     setTimeout(() => {
@@ -187,11 +186,6 @@ const StudentLearnerTable: React.FC<{
   };
   const [sortKey, setSortKey] = useState<'name' | 'total' | 'monthTotal' | 'certAttempted' | 'certAchieved' | 'completionRate' | 'lastActive'>('total');
   const [sortAsc, setSortAsc] = useState(false);
-  // monthStartMs = UTC midnight on the 1st of the current month.
-  // We use created_at (not updated_at) for the "this month" count because
-  // updated_at is bumped on every chat message and would make nearly every
-  // row appear as current-month. created_at records when the activity was
-  // first started and never changes.
   const _now = new Date();
   const monthStartMs = Date.UTC(_now.getUTCFullYear(), _now.getUTCMonth(), 1);
 
@@ -584,6 +578,10 @@ const PRICING: Record<string, { input: number; output: number; label: string }> 
   'claude-sonnet-4-6':         { input: 3.00,  output: 15.00, label: 'Sonnet 4.6'   },
   'claude-haiku-4-5-20251001': { input: 1.00,  output: 5.00,  label: 'Haiku 4.5'    },
   'llama-3.3-70b-versatile':   { input: 0.00,  output: 0.00,  label: 'Groq Llama 70B'},
+  'gemini-2.0-flash':          { input: 0.00,  output: 0.00,  label: 'Gemini 2.0 Flash' },
+  'llama-3.3-70b':             { input: 0.00,  output: 0.00,  label: 'Cerebras Llama 70B' },
+  'meta-llama/llama-3.3-70b-instruct:free': { input: 0.00, output: 0.00, label: 'OpenRouter Llama 70B' },
+  'mistral-small-latest':      { input: 0.00,  output: 0.00,  label: 'Mistral Small' },
 };
 
 const modelLabel = (m: string) => PRICING[m]?.label || m;
@@ -608,6 +606,29 @@ function groupCostRows(rows: CostRow[], by: 'page' | 'model' | 'provider') {
   return [...map.entries()].sort((a, b) => b[1].cost - a[1].cost);
 }
 
+// ─── Provider color helpers ───────────────────────────────────────────────────
+
+const PROVIDER_COLORS: Record<string, { bg: string; text: string; border: string; bar: string }> = {
+  groq:       { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', bar: 'bg-emerald-500' },
+  gemini:     { bg: 'bg-sky-50',     text: 'text-sky-700',     border: 'border-sky-200',     bar: 'bg-sky-500' },
+  cerebras:   { bg: 'bg-orange-50',  text: 'text-orange-700',  border: 'border-orange-200',  bar: 'bg-orange-500' },
+  openrouter: { bg: 'bg-violet-50',  text: 'text-violet-700',  border: 'border-violet-200',  bar: 'bg-violet-500' },
+  mistral:    { bg: 'bg-rose-50',    text: 'text-rose-700',    border: 'border-rose-200',    bar: 'bg-rose-500' },
+  anthropic:  { bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-200',    bar: 'bg-blue-500' },
+};
+
+const getProviderColor = (p: string) => PROVIDER_COLORS[p] || PROVIDER_COLORS.anthropic;
+
+const providerBadge = (p: string) => {
+  const c = getProviderColor(p);
+  const label = p.charAt(0).toUpperCase() + p.slice(1);
+  return (
+    <span className={classNames('text-[10px] px-1.5 py-0.5 rounded border font-semibold', c.bg, c.text, c.border)}>
+      {label}
+    </span>
+  );
+};
+
 // ─── CostOverviewPanel ────────────────────────────────────────────────────────
 
 interface CostOverviewProps {
@@ -628,9 +649,10 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
   const totalInTok     = rows.reduce((s, r) => s + r.input_tokens, 0);
   const totalCacheHit  = rows.reduce((s, r) => s + r.cache_hit_tokens, 0);
   const cacheRate      = totalInTok > 0 ? (totalCacheHit / totalInTok * 100) : 0;
-  const groqCalls      = rows.filter(r => r.provider === 'groq').length;
+  const freeProviders  = ['groq', 'gemini', 'cerebras', 'openrouter', 'mistral'];
+  const freeCalls      = rows.filter(r => freeProviders.includes(r.provider)).length;
   const anthropicCalls = rows.filter(r => r.provider === 'anthropic').length;
-  const cacheSaved     = (totalCacheHit / 1_000_000) * 1.00 * 0.90; // ~90% savings on cached input
+  const cacheSaved     = (totalCacheHit / 1_000_000) * 1.00 * 0.90;
 
   // Daily cost breakdown
   const byDay = new Map<string, number>();
@@ -638,15 +660,10 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
     const day = r.logged_at.slice(0, 10);
     byDay.set(day, (byDay.get(day) || 0) + r.estimated_cost_usd);
   });
-  const dayEntries = [...byDay.entries()].sort().slice(-14); // last 14 days
+  const dayEntries = [...byDay.entries()].sort().slice(-14);
 
   const grouped = groupCostRows(rows, groupBy);
   const maxCost = grouped[0]?.[1].cost || 1;
-
-  const providerColor = (p: string) => p === 'groq' ? 'bg-emerald-500' : 'bg-blue-500';
-  const providerBadge = (p: string) => p === 'groq'
-    ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">Groq</span>
-    : <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-semibold">Anthropic</span>;
 
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-20 text-gray-500">
@@ -695,7 +712,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         {[
           { label: 'Anthropic cost', value: `$${anthropicCost.toFixed(2)}`, sub: `last ${days} days`, icon: <DollarSign size={16} className="text-blue-500" />, bg: 'bg-blue-50' },
           { label: 'Cache savings',  value: `$${cacheSaved.toFixed(2)}`,    sub: `${cacheRate.toFixed(0)}% hit rate`,    icon: <Zap size={16} className="text-amber-500" />,  bg: 'bg-amber-50' },
-          { label: 'Groq requests',  value: groqCalls.toLocaleString(),      sub: '$0 — free tier',    icon: <TrendingUp size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
+          { label: 'Free-tier reqs', value: freeCalls.toLocaleString(),      sub: '$0 — free providers',    icon: <TrendingUp size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
           { label: 'Anthropic reqs', value: anthropicCalls.toLocaleString(), sub: `${fmtTokens(totalInTok)} tokens in`, icon: <Activity size={16} className="text-purple-500" />, bg: 'bg-purple-50' },
         ].map(({ label, value, sub, icon, bg }) => (
           <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
@@ -731,7 +748,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
                 </div>
                 <div className="flex-1 bg-gray-100 rounded-full h-2">
                   <div
-                    className={classNames('h-2 rounded-full transition-all', providerColor(val.provider))}
+                    className={classNames('h-2 rounded-full transition-all', getProviderColor(val.provider).bar)}
                     style={{ width: `${(val.cost / maxCost * 100).toFixed(1)}%` }}
                   />
                 </div>
@@ -768,47 +785,51 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         </div>
       )}
 
-      {/* Provider split */}
-      <div className="grid grid-cols-2 gap-4">
-        {(['anthropic', 'groq'] as const).map(provider => {
-          const pRows = rows.filter(r => r.provider === provider);
-          const pCost = pRows.reduce((s, r) => s + r.estimated_cost_usd, 0);
-          const pInTok = pRows.reduce((s, r) => s + r.input_tokens, 0);
-          const pOutTok = pRows.reduce((s, r) => s + r.output_tokens, 0);
-          const pCache = pRows.reduce((s, r) => s + r.cache_hit_tokens, 0);
-          return (
-            <div key={provider} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-              <div className="flex items-center gap-2 mb-3">
-                {provider === 'groq'
-                  ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">Groq · Free</span>
-                  : <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-bold">Anthropic · Paid</span>}
-              </div>
-              <div className="space-y-1.5 text-xs">
-                <div className="flex justify-between"><span className="text-gray-500">Total cost</span><span className="font-semibold text-gray-800">{fmtCost(pCost)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Requests</span><span className="font-semibold text-gray-800">{pRows.length.toLocaleString()}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Input tokens</span><span className="font-semibold text-gray-800">{fmtTokens(pInTok)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Output tokens</span><span className="font-semibold text-gray-800">{fmtTokens(pOutTok)}</span></div>
-                {provider === 'anthropic' && <div className="flex justify-between"><span className="text-gray-500">Cache hits</span><span className="font-semibold text-emerald-700">{fmtTokens(pCache)}</span></div>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {/* Provider split — now shows all providers dynamically */}
+      {(() => {
+        const allProviders = [...new Set(rows.map(r => r.provider))].sort();
+        return (
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            {allProviders.map(provider => {
+              const pRows = rows.filter(r => r.provider === provider);
+              const pCost = pRows.reduce((s, r) => s + r.estimated_cost_usd, 0);
+              const pInTok = pRows.reduce((s, r) => s + r.input_tokens, 0);
+              const pOutTok = pRows.reduce((s, r) => s + r.output_tokens, 0);
+              const pCache = pRows.reduce((s, r) => s + r.cache_hit_tokens, 0);
+              const pc = getProviderColor(provider);
+              const isFree = provider !== 'anthropic';
+              return (
+                <div key={provider} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className={classNames('text-[11px] px-2 py-0.5 rounded-full border font-bold', pc.bg, pc.text, pc.border)}>
+                      {provider.charAt(0).toUpperCase() + provider.slice(1)} · {isFree ? 'Free' : 'Paid'}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between"><span className="text-gray-500">Total cost</span><span className="font-semibold text-gray-800">{fmtCost(pCost)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Requests</span><span className="font-semibold text-gray-800">{pRows.length.toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Input tokens</span><span className="font-semibold text-gray-800">{fmtTokens(pInTok)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Output tokens</span><span className="font-semibold text-gray-800">{fmtTokens(pOutTok)}</span></div>
+                    {provider === 'anthropic' && <div className="flex justify-between"><span className="text-gray-500">Cache hits</span><span className="font-semibold text-emerald-700">{fmtTokens(pCache)}</span></div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
     </div>
   );
 };
 
 // ─── LearnerCostPanel ─────────────────────────────────────────────────────────
-// Two-view design:
-//   VIEW 1 (default): Summary table — all students, sortable, click a name to drill in
-//   VIEW 2 (detail):  Individual student breakdown — back button returns to table
 
 interface LearnerCostProps {
   learners: Learner[];
   selectedId: string;
   setSelectedId: (id: string) => void;
-  allCostRows: CostRow[];   // all rows across all learners (fetched once)
-  learnerRows: CostRow[];   // rows for the currently selected learner
+  allCostRows: CostRow[];
+  learnerRows: CostRow[];
   loading: boolean;
   loadingDetail: boolean;
   onRefresh: () => void;
@@ -824,7 +845,6 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
   const [groupBy,  setGroupBy]  = useState<'page' | 'model' | 'provider'>('page');
   const [search,   setSearch]   = useState('');
 
-  // ── Build per-learner summary from allCostRows ──────────────────────────────
   type LearnerSummary = {
     id: string; name: string; email: string; city: string;
     totalCost: number; requests: number; groqReqs: number; anthReqs: number;
@@ -835,7 +855,6 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
     const lRows = allCostRows.filter(r => r.user_id === l.id);
     const groqReqs = lRows.filter(r => r.provider === 'groq').length;
     const anthReqs = lRows.filter(r => r.provider === 'anthropic').length;
-    // find top page by call count
     const pageCounts: Record<string, number> = {};
     lRows.forEach(r => { pageCounts[r.page] = (pageCounts[r.page] || 0) + 1; });
     const topPage = Object.entries(pageCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
@@ -882,7 +901,6 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 
   const maxCost = Math.max(...summaries.map(s => s.totalCost), 0.001);
 
-  // ── Detail view helpers ─────────────────────────────────────────────────────
   const selectedLearner = learners.find(l => l.id === selectedId);
   const totalCost   = learnerRows.reduce((s, r) => s + r.estimated_cost_usd, 0);
   const totalInTok  = learnerRows.reduce((s, r) => s + r.input_tokens, 0);
@@ -892,12 +910,10 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
   const grouped     = groupCostRows(learnerRows, groupBy);
   const maxGroupCost = grouped[0]?.[1].cost || 1;
 
-  // ── VIEW 2: Individual detail ───────────────────────────────────────────────
+  // VIEW 2: Individual detail
   if (selectedId) {
     return (
       <div className="space-y-5">
-
-        {/* Back button + learner name */}
         <div className="flex items-center gap-3">
           <button
             onClick={() => setSelectedId('')}
@@ -930,12 +946,11 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 
         {!loadingDetail && learnerRows.length > 0 && (
           <>
-            {/* KPIs */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { label: 'Total cost',      value: fmtCost(totalCost),              bg: 'bg-blue-50',    icon: <DollarSign size={16} className="text-blue-500" /> },
                 { label: 'Total requests',  value: learnerRows.length.toLocaleString(), bg: 'bg-purple-50', icon: <Activity size={16} className="text-purple-500" /> },
-                { label: 'Groq requests',   value: groqRows.length.toLocaleString(), bg: 'bg-emerald-50', icon: <Zap size={16} className="text-emerald-500" /> },
+                { label: 'Free-tier reqs',  value: groqRows.length.toLocaleString(), bg: 'bg-emerald-50', icon: <Zap size={16} className="text-emerald-500" /> },
                 { label: 'Anthropic reqs',  value: anthRows.length.toLocaleString(), bg: 'bg-amber-50',   icon: <TrendingUp size={16} className="text-amber-500" /> },
               ].map(({ label, value, bg, icon }) => (
                 <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
@@ -944,7 +959,6 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
               ))}
             </div>
 
-            {/* Group by + breakdown bars */}
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3">
                 <DollarSign size={14} className="text-gray-400" />
@@ -966,15 +980,12 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
                     <div className="w-48 flex-shrink-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-xs text-gray-700 truncate">{key}</span>
-                        <span className={classNames('text-[10px] px-1.5 py-0.5 rounded border font-semibold',
-                          val.provider === 'groq' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200')}>
-                          {val.provider === 'groq' ? 'Groq' : 'Anthropic'}
-                        </span>
+                        {providerBadge(val.provider)}
                       </div>
                       <div className="text-[10px] text-gray-400 mt-0.5">{val.calls} calls</div>
                     </div>
                     <div className="flex-1 bg-gray-100 rounded-full h-2">
-                      <div className={classNames('h-2 rounded-full', val.provider === 'groq' ? 'bg-emerald-500' : 'bg-blue-500')}
+                      <div className={classNames('h-2 rounded-full', getProviderColor(val.provider).bar)}
                         style={{ width: `${(val.cost / maxGroupCost * 100).toFixed(1)}%` }} />
                     </div>
                     <div className="w-16 text-right text-xs font-semibold text-gray-700 flex-shrink-0">{fmtCost(val.cost)}</div>
@@ -983,7 +994,6 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
               </div>
             </div>
 
-            {/* Recent requests */}
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
                 <span className="text-sm font-bold text-gray-700">Recent requests</span>
@@ -992,7 +1002,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 border-b border-gray-100">
-                    <tr>{['Time','Page','Provider','In tok','Out tok','Cache','Cost'].map(h => (
+                    <tr>{['Time','Page','Provider','Model','In tok','Out tok','Cache','Cost'].map(h => (
                       <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{h}</th>
                     ))}</tr>
                   </thead>
@@ -1001,12 +1011,8 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
                       <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{new Date(r.logged_at).toLocaleString('en-GB', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}</td>
                         <td className="px-3 py-2 text-gray-700 font-medium max-w-[120px] truncate">{r.page}</td>
-                        <td className="px-3 py-2">
-                          <span className={classNames('px-1.5 py-0.5 rounded border text-[10px] font-semibold',
-                            r.provider === 'groq' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200')}>
-                            {r.provider === 'groq' ? 'Groq' : 'Anthropic'}
-                          </span>
-                        </td>
+                        <td className="px-3 py-2">{providerBadge(r.provider)}</td>
+                        <td className="px-3 py-2 text-gray-500 text-[10px] max-w-[100px] truncate">{modelLabel(r.model)}</td>
                         <td className="px-3 py-2 text-gray-600 font-mono">{r.input_tokens.toLocaleString()}</td>
                         <td className="px-3 py-2 text-gray-600 font-mono">{r.output_tokens.toLocaleString()}</td>
                         <td className="px-3 py-2 text-emerald-600 font-mono">{r.cache_hit_tokens.toLocaleString()}</td>
@@ -1026,11 +1032,9 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
     );
   }
 
-  // ── VIEW 1: Summary table of all students ───────────────────────────────────
+  // VIEW 1: Summary table
   return (
     <div className="space-y-4">
-
-      {/* Controls */}
       <div className="flex items-center gap-3 flex-wrap">
         <input
           type="text"
@@ -1071,7 +1075,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
                     { key: 'city' as SortKey,       label: 'City'    },
                     { key: 'cost' as SortKey,       label: 'Total cost' },
                     { key: 'requests' as SortKey,   label: 'Requests' },
-                    { key: 'groq' as SortKey,       label: 'Groq' },
+                    { key: 'groq' as SortKey,       label: 'Free-tier' },
                     { key: 'anthropic' as SortKey,  label: 'Anthropic' },
                     { key: null,                    label: 'Top page'  },
                   ] as { key: SortKey | null; label: string }[]).map(({ key, label }) => (
@@ -1095,14 +1099,11 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
                     className="hover:bg-purple-50 transition-colors cursor-pointer group"
                     onClick={() => setSelectedId(s.id)}
                   >
-                    {/* Name — clickable, highlighted */}
                     <td className="px-4 py-3">
                       <div className="font-semibold text-purple-700 group-hover:underline truncate">{s.name}</div>
                       <div className="text-[11px] text-gray-400 truncate">{s.email}</div>
                     </td>
-                    {/* City */}
                     <td className="px-4 py-3 text-xs text-gray-500">{s.city}</td>
-                    {/* Cost with mini bar */}
                     <td className="px-4 py-3">
                       <div className="font-semibold text-gray-800 text-xs">{fmtCost(s.totalCost)}</div>
                       <div className="mt-1 bg-gray-100 rounded-full h-1.5 w-full">
@@ -1110,19 +1111,15 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
                           style={{ width: `${(s.totalCost / maxCost * 100).toFixed(1)}%` }} />
                       </div>
                     </td>
-                    {/* Requests */}
                     <td className="px-4 py-3 text-xs text-gray-600 font-mono">{s.requests.toLocaleString()}</td>
-                    {/* Groq */}
                     <td className="px-4 py-3">
                       <span className="text-xs font-mono text-emerald-700">{s.groqReqs.toLocaleString()}</span>
                       {s.requests > 0 && <div className="text-[10px] text-gray-400">{(s.groqReqs / s.requests * 100).toFixed(0)}%</div>}
                     </td>
-                    {/* Anthropic */}
                     <td className="px-4 py-3">
                       <span className="text-xs font-mono text-blue-700">{s.anthReqs.toLocaleString()}</span>
                       {s.requests > 0 && <div className="text-[10px] text-gray-400">{(s.anthReqs / s.requests * 100).toFixed(0)}%</div>}
                     </td>
-                    {/* Top page */}
                     <td className="px-4 py-3 text-[11px] text-gray-500 truncate">{s.topPage}</td>
                   </tr>
                 ))}
@@ -1132,7 +1129,6 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
                   </td></tr>
                 )}
               </tbody>
-              {/* Totals footer */}
               {sorted.length > 0 && (
                 <tfoot className="bg-gray-50 border-t border-gray-200">
                   <tr>
@@ -1155,8 +1151,479 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 };
 
 
+// ─── ModelOverviewPanel ───────────────────────────────────────────────────────
+// Shows per-model request counts, token usage, cost, and provider distribution
+// across all users. Data sourced from api_cost_log.
+
+interface ModelOverviewProps {
+  rows: CostRow[];
+  loading: boolean;
+  error: string | null;
+  days: number;
+  setDays: (d: number) => void;
+  onRefresh: () => void;
+}
+
+type ModelSortKey = 'model' | 'provider' | 'requests' | 'inputTokens' | 'outputTokens' | 'cost' | 'uniqueUsers';
+
+const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({
+  rows, loading, error, days, setDays, onRefresh,
+}) => {
+  const [sortKey, setSortKey] = useState<ModelSortKey>('requests');
+  const [sortAsc, setSortAsc] = useState(false);
+
+  // ── Aggregate by model ────────────────────────────────────────────────────
+  type ModelSummary = {
+    model: string;
+    label: string;
+    provider: string;
+    requests: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheHitTokens: number;
+    cacheWriteTokens: number;
+    cost: number;
+    uniqueUsers: number;
+    topPages: { page: string; count: number }[];
+  };
+
+  const modelMap = new Map<string, {
+    provider: string; requests: number; inputTokens: number; outputTokens: number;
+    cacheHitTokens: number; cacheWriteTokens: number; cost: number;
+    users: Set<string>; pages: Map<string, number>;
+  }>();
+
+  rows.forEach(r => {
+    const existing = modelMap.get(r.model);
+    if (existing) {
+      existing.requests += 1;
+      existing.inputTokens += r.input_tokens;
+      existing.outputTokens += r.output_tokens;
+      existing.cacheHitTokens += r.cache_hit_tokens;
+      existing.cacheWriteTokens += r.cache_write_tokens;
+      existing.cost += r.estimated_cost_usd;
+      if (r.user_id) existing.users.add(r.user_id);
+      existing.pages.set(r.page, (existing.pages.get(r.page) || 0) + 1);
+    } else {
+      const users = new Set<string>();
+      if (r.user_id) users.add(r.user_id);
+      const pages = new Map<string, number>();
+      pages.set(r.page, 1);
+      modelMap.set(r.model, {
+        provider: r.provider,
+        requests: 1,
+        inputTokens: r.input_tokens,
+        outputTokens: r.output_tokens,
+        cacheHitTokens: r.cache_hit_tokens,
+        cacheWriteTokens: r.cache_write_tokens,
+        cost: r.estimated_cost_usd,
+        users,
+        pages,
+      });
+    }
+  });
+
+  const summaries: ModelSummary[] = [...modelMap.entries()].map(([model, data]) => ({
+    model,
+    label: modelLabel(model),
+    provider: data.provider,
+    requests: data.requests,
+    inputTokens: data.inputTokens,
+    outputTokens: data.outputTokens,
+    cacheHitTokens: data.cacheHitTokens,
+    cacheWriteTokens: data.cacheWriteTokens,
+    cost: data.cost,
+    uniqueUsers: data.users.size,
+    topPages: [...data.pages.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([page, count]) => ({ page, count })),
+  }));
+
+  const sorted = [...summaries].sort((a, b) => {
+    let av: any, bv: any;
+    if (sortKey === 'model')        { av = a.label.toLowerCase();  bv = b.label.toLowerCase(); }
+    else if (sortKey === 'provider') { av = a.provider;            bv = b.provider; }
+    else if (sortKey === 'requests') { av = a.requests;            bv = b.requests; }
+    else if (sortKey === 'inputTokens')  { av = a.inputTokens;    bv = b.inputTokens; }
+    else if (sortKey === 'outputTokens') { av = a.outputTokens;   bv = b.outputTokens; }
+    else if (sortKey === 'cost')         { av = a.cost;            bv = b.cost; }
+    else                                 { av = a.uniqueUsers;     bv = b.uniqueUsers; }
+    if (av < bv) return sortAsc ? -1 : 1;
+    if (av > bv) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
+  const toggleSort = (key: ModelSortKey) => {
+    if (sortKey === key) setSortAsc(a => !a);
+    else { setSortKey(key); setSortAsc(false); }
+  };
+
+  const SortIcon = ({ k }: { k: ModelSortKey }) => sortKey !== k ? null : sortAsc
+    ? <ChevronUp size={11} className="inline ml-0.5 text-purple-500" />
+    : <ChevronDown size={11} className="inline ml-0.5 text-purple-500" />;
+
+  // ── KPI values ────────────────────────────────────────────────────────────
+  const totalRequests = rows.length;
+  const uniqueModels = summaries.length;
+  const freeRequests = rows.filter(r => r.provider !== 'anthropic').length;
+  const freePct = totalRequests > 0 ? (freeRequests / totalRequests * 100) : 0;
+  const totalCost = rows.reduce((s, r) => s + r.estimated_cost_usd, 0);
+  const maxRequests = Math.max(...summaries.map(s => s.requests), 1);
+
+  // ── Daily model usage (stacked-ish view) ──────────────────────────────────
+  const dailyByModel = new Map<string, Map<string, number>>();
+  rows.forEach(r => {
+    const day = r.logged_at.slice(0, 10);
+    if (!dailyByModel.has(day)) dailyByModel.set(day, new Map());
+    const dayMap = dailyByModel.get(day)!;
+    const lbl = modelLabel(r.model);
+    dayMap.set(lbl, (dayMap.get(lbl) || 0) + 1);
+  });
+  const dailyEntries = [...dailyByModel.entries()].sort().slice(-14);
+  const allModelLabels = [...new Set(summaries.map(s => s.label))];
+  const maxDayTotal = Math.max(
+    ...dailyEntries.map(([, m]) => [...m.values()].reduce((s, v) => s + v, 0)),
+    1
+  );
+
+  // ── Provider summary ──────────────────────────────────────────────────────
+  const providerAgg = new Map<string, { requests: number; cost: number; models: Set<string> }>();
+  rows.forEach(r => {
+    const existing = providerAgg.get(r.provider);
+    if (existing) {
+      existing.requests += 1;
+      existing.cost += r.estimated_cost_usd;
+      existing.models.add(modelLabel(r.model));
+    } else {
+      const models = new Set<string>();
+      models.add(modelLabel(r.model));
+      providerAgg.set(r.provider, { requests: 1, cost: r.estimated_cost_usd, models });
+    }
+  });
+  const providerSummaries = [...providerAgg.entries()]
+    .sort((a, b) => b[1].requests - a[1].requests);
+  const maxProviderReqs = providerSummaries[0]?.[1].requests || 1;
+
+  // Model color palette for daily chart
+  const MODEL_CHART_COLORS = [
+    'bg-emerald-400', 'bg-sky-400', 'bg-orange-400', 'bg-violet-400',
+    'bg-rose-400', 'bg-blue-400', 'bg-amber-400',
+  ];
+  const modelColorMap = new Map<string, string>();
+  allModelLabels.forEach((lbl, i) => {
+    modelColorMap.set(lbl, MODEL_CHART_COLORS[i % MODEL_CHART_COLORS.length]);
+  });
+
+  if (loading) return (
+    <div className="flex items-center justify-center gap-2 py-20 text-gray-500">
+      <Loader2 size={20} className="animate-spin" /> Loading model data…
+    </div>
+  );
+
+  if (error) return (
+    <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+      <p className="font-semibold mb-1">Model data unavailable</p>
+      <p>{error}</p>
+      <p className="mt-2 text-xs">Deploy the updated <code className="bg-amber-100 px-1 rounded">chat.js</code> and run <code className="bg-amber-100 px-1 rounded">create_api_cost_log.sql</code> in Supabase to enable cost tracking.</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+
+      {/* Controls */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          {([7, 30, 90] as const).map(d => (
+            <button key={d} onClick={() => setDays(d)}
+              className={classNames('px-3 py-1.5 rounded text-xs font-semibold transition-colors',
+                days === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+              {d}d
+            </button>
+          ))}
+        </div>
+        <button onClick={onRefresh} className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors ml-auto">
+          <RefreshCw size={12} /> Refresh
+        </button>
+      </div>
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Total requests',  value: totalRequests.toLocaleString(), sub: `last ${days} days`,                 icon: <Activity size={16} className="text-purple-500" />,  bg: 'bg-purple-50' },
+          { label: 'Models active',   value: uniqueModels.toString(),        sub: 'distinct models used',              icon: <Server size={16} className="text-blue-500" />,      bg: 'bg-blue-50' },
+          { label: 'Free-tier %',     value: `${freePct.toFixed(0)}%`,       sub: `${freeRequests.toLocaleString()} free reqs`, icon: <Zap size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
+          { label: 'Total cost',      value: `$${totalCost.toFixed(2)}`,     sub: 'paid models only',                 icon: <DollarSign size={16} className="text-amber-500" />, bg: 'bg-amber-50' },
+        ].map(({ label, value, sub, icon, bg }) => (
+          <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
+            {icon}
+            <div>
+              <p className="text-xl font-black text-gray-900">{value}</p>
+              <p className="text-xs text-gray-500 leading-tight">{label}</p>
+              <p className="text-[10px] text-gray-400">{sub}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-model table */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+          <Server size={14} className="text-gray-400" />
+          <span className="text-sm font-bold text-gray-700">Requests by Model</span>
+          <span className="text-xs text-gray-400 ml-auto">{summaries.length} models</span>
+        </div>
+
+        {summaries.length === 0 ? (
+          <div className="py-12 text-center text-sm text-gray-400">No model data yet — calls will appear here after chat.js logs them.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  {([
+                    { key: 'model' as ModelSortKey,        label: 'Model' },
+                    { key: 'provider' as ModelSortKey,     label: 'Provider' },
+                    { key: 'requests' as ModelSortKey,     label: 'Requests' },
+                    { key: 'uniqueUsers' as ModelSortKey,  label: 'Users' },
+                    { key: 'inputTokens' as ModelSortKey,  label: 'Input Tokens' },
+                    { key: 'outputTokens' as ModelSortKey, label: 'Output Tokens' },
+                    { key: 'cost' as ModelSortKey,         label: 'Cost' },
+                    { key: null,                           label: 'Top Pages' },
+                  ] as { key: ModelSortKey | null; label: string }[]).map(({ key, label }) => (
+                    <th
+                      key={label}
+                      onClick={() => key && toggleSort(key)}
+                      className={classNames(
+                        'px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider',
+                        key ? 'cursor-pointer hover:text-purple-700 select-none' : ''
+                      )}
+                    >
+                      {label}{key && <SortIcon k={key} />}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {sorted.map(s => {
+                  const pc = getProviderColor(s.provider);
+                  const isFree = s.provider !== 'anthropic';
+                  return (
+                    <tr key={s.model} className="hover:bg-gray-50 transition-colors">
+                      {/* Model name */}
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-gray-900">{s.label}</div>
+                        <div className="text-[10px] text-gray-400 font-mono truncate max-w-[180px]">{s.model}</div>
+                      </td>
+                      {/* Provider */}
+                      <td className="px-4 py-3">
+                        <span className={classNames('text-[10px] px-2 py-0.5 rounded-full border font-bold', pc.bg, pc.text, pc.border)}>
+                          {s.provider.charAt(0).toUpperCase() + s.provider.slice(1)}
+                        </span>
+                        {isFree && <div className="text-[9px] text-emerald-600 mt-0.5 font-semibold">FREE</div>}
+                      </td>
+                      {/* Requests with bar */}
+                      <td className="px-4 py-3">
+                        <div className="font-bold text-gray-800 font-mono">{s.requests.toLocaleString()}</div>
+                        <div className="mt-1 bg-gray-100 rounded-full h-1.5 w-full max-w-[100px]">
+                          <div className={classNames('h-1.5 rounded-full', pc.bar)}
+                            style={{ width: `${(s.requests / maxRequests * 100).toFixed(1)}%` }} />
+                        </div>
+                      </td>
+                      {/* Users */}
+                      <td className="px-4 py-3 font-mono text-gray-600">{s.uniqueUsers}</td>
+                      {/* Input tokens */}
+                      <td className="px-4 py-3 font-mono text-gray-600">
+                        {fmtTokens(s.inputTokens)}
+                        {s.cacheHitTokens > 0 && (
+                          <div className="text-[9px] text-emerald-600">⚡ {fmtTokens(s.cacheHitTokens)} cached</div>
+                        )}
+                      </td>
+                      {/* Output tokens */}
+                      <td className="px-4 py-3 font-mono text-gray-600">{fmtTokens(s.outputTokens)}</td>
+                      {/* Cost */}
+                      <td className="px-4 py-3">
+                        <span className={classNames('font-semibold', s.cost > 0 ? 'text-gray-800' : 'text-emerald-700')}>
+                          {s.cost > 0 ? fmtCost(s.cost) : '$0.00'}
+                        </span>
+                      </td>
+                      {/* Top pages */}
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {s.topPages.map(tp => (
+                            <span key={tp.page} className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200 text-[10px]">
+                              {tp.page} <span className="font-mono text-gray-400">({tp.count})</span>
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              {sorted.length > 0 && (
+                <tfoot className="bg-gray-50 border-t border-gray-200">
+                  <tr>
+                    <td className="px-4 py-2.5 text-[11px] font-bold text-gray-600">Total ({sorted.length} models)</td>
+                    <td></td>
+                    <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{totalRequests.toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-[11px] text-gray-400">—</td>
+                    <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{fmtTokens(rows.reduce((s, r) => s + r.input_tokens, 0))}</td>
+                    <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800 font-mono">{fmtTokens(rows.reduce((s, r) => s + r.output_tokens, 0))}</td>
+                    <td className="px-4 py-2.5 text-[11px] font-bold text-gray-800">{fmtCost(totalCost)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Provider distribution */}
+      {providerSummaries.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+            <Cpu size={14} className="text-gray-400" />
+            <span className="text-sm font-bold text-gray-700">Provider Distribution</span>
+            <span className="text-xs text-gray-400 ml-auto">{providerSummaries.length} providers</span>
+          </div>
+          <div className="p-5 space-y-3">
+            {providerSummaries.map(([provider, data]) => {
+              const pc = getProviderColor(provider);
+              const pct = totalRequests > 0 ? (data.requests / totalRequests * 100) : 0;
+              const isFree = provider !== 'anthropic';
+              return (
+                <div key={provider} className="flex items-center gap-3">
+                  <div className="w-44 flex-shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className={classNames('text-[11px] px-2 py-0.5 rounded-full border font-bold', pc.bg, pc.text, pc.border)}>
+                        {provider.charAt(0).toUpperCase() + provider.slice(1)}
+                      </span>
+                      {isFree && <span className="text-[9px] text-emerald-600 font-bold">FREE</span>}
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-0.5">
+                      {data.requests.toLocaleString()} reqs · {[...data.models].length} model{[...data.models].length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                  <div className="flex-1 bg-gray-100 rounded-full h-3">
+                    <div
+                      className={classNames('h-3 rounded-full transition-all flex items-center justify-end pr-1', pc.bar)}
+                      style={{ width: `${Math.max((data.requests / maxProviderReqs * 100), 3).toFixed(1)}%` }}
+                    >
+                      <span className="text-[9px] text-white font-bold">{pct.toFixed(0)}%</span>
+                    </div>
+                  </div>
+                  <div className="w-20 text-right flex-shrink-0">
+                    <div className="text-xs font-semibold text-gray-700">{data.requests.toLocaleString()}</div>
+                    <div className="text-[10px] text-gray-400">{fmtCost(data.cost)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Daily model usage chart */}
+      {dailyEntries.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+            <BarChart2 size={14} className="text-gray-400" />
+            <span className="text-sm font-bold text-gray-700">Daily Model Usage</span>
+            <span className="text-xs text-gray-400 ml-2">(last {dailyEntries.length} days)</span>
+            {/* Legend */}
+            <div className="flex gap-2 flex-wrap ml-auto">
+              {allModelLabels.map(lbl => (
+                <div key={lbl} className="flex items-center gap-1">
+                  <div className={classNames('w-2.5 h-2.5 rounded-sm', modelColorMap.get(lbl))} />
+                  <span className="text-[10px] text-gray-500">{lbl}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="p-5">
+            <div className="flex items-end gap-1.5" style={{ height: '140px' }}>
+              {dailyEntries.map(([day, modelCounts]) => {
+                const dayTotal = [...modelCounts.values()].reduce((s, v) => s + v, 0);
+                return (
+                  <div key={day} className="flex-1 flex flex-col items-center gap-1 group relative">
+                    {/* Tooltip */}
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-gray-800 text-white text-[10px] px-2 py-1.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                      <div className="font-bold mb-0.5">{day} — {dayTotal} reqs</div>
+                      {allModelLabels.map(lbl => {
+                        const count = modelCounts.get(lbl) || 0;
+                        if (count === 0) return null;
+                        return <div key={lbl}>{lbl}: {count}</div>;
+                      })}
+                    </div>
+                    {/* Stacked bar */}
+                    <div className="w-full flex flex-col-reverse" style={{ height: `${(dayTotal / maxDayTotal * 100).toFixed(1)}%` }}>
+                      {allModelLabels.map(lbl => {
+                        const count = modelCounts.get(lbl) || 0;
+                        if (count === 0) return null;
+                        const segPct = dayTotal > 0 ? (count / dayTotal * 100) : 0;
+                        return (
+                          <div
+                            key={lbl}
+                            className={classNames('w-full first:rounded-b last:rounded-t', modelColorMap.get(lbl))}
+                            style={{ height: `${segPct}%`, minHeight: count > 0 ? '2px' : '0' }}
+                          />
+                        );
+                      })}
+                    </div>
+                    {/* Day label */}
+                    <div className="text-[9px] text-gray-400 rotate-45 origin-left mt-1 whitespace-nowrap">{day.slice(5)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fallback chain info card */}
+      <div className="bg-gradient-to-r from-gray-50 to-indigo-50 border border-gray-200 rounded-xl p-5 shadow-sm">
+        <h3 className="text-sm font-bold text-gray-800 mb-2 flex items-center gap-2">
+          <Zap size={14} className="text-indigo-500" /> Fallback Chain Order
+        </h3>
+        <p className="text-xs text-gray-500 mb-3">
+          For learning pages (AI Learning, English Skills, Skills Development, Consultants, Ambassadors), requests cascade through free providers before falling back to paid Anthropic Haiku.
+        </p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {[
+            { name: 'Groq', model: 'Llama 3.3 70B', provider: 'groq' },
+            { name: 'Gemini', model: '2.0 Flash', provider: 'gemini' },
+            { name: 'Cerebras', model: 'Llama 3.3 70B', provider: 'cerebras' },
+            { name: 'OpenRouter', model: 'Llama 3.3 70B', provider: 'openrouter' },
+            { name: 'Mistral', model: 'Small', provider: 'mistral' },
+            { name: 'Anthropic', model: 'Haiku 4.5', provider: 'anthropic' },
+          ].map((step, i) => {
+            const pc = getProviderColor(step.provider);
+            const isFree = step.provider !== 'anthropic';
+            return (
+              <React.Fragment key={step.name}>
+                {i > 0 && <span className="text-gray-300 text-xs">→</span>}
+                <div className={classNames('px-2.5 py-1.5 rounded-lg border text-xs', pc.bg, pc.border)}>
+                  <span className={classNames('font-bold', pc.text)}>{step.name}</span>
+                  <span className="text-gray-500 ml-1">{step.model}</span>
+                  {isFree && <span className="ml-1 text-[9px] text-emerald-600 font-bold">FREE</span>}
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-gray-400 mt-3">
+          Code pages (Vibe Coding, Web Dev, Full Stack, AI Workflow) always use <strong>Claude Sonnet 4.6</strong> directly. AI Playground defaults to <strong>Claude Haiku 4.5</strong>.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+
 // ─── PlatformGlobalPanel ──────────────────────────────────────────────────────
-// Shown only to platform_administrator role. Displays all orgs with usage stats.
 
 interface OrgSummaryRow {
   id: string;
@@ -1239,7 +1706,6 @@ const PlatformGlobalPanel: React.FC<{
 
   return (
     <div className="space-y-5">
-      {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Organizations', value: orgs.length, bg: 'bg-purple-50', icon: <BarChart2 size={16} className="text-purple-500" /> },
@@ -1257,12 +1723,10 @@ const PlatformGlobalPanel: React.FC<{
         ))}
       </div>
 
-      {/* Search */}
       <input type="text" placeholder="Search by org, country, or city…"
         value={search} onChange={e => setSearch(e.target.value)}
         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
 
-      {/* Table */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -1335,15 +1799,12 @@ const PlatformGlobalPanel: React.FC<{
 
 // ─── Admin & excluded IDs ─────────────────────────────────────────────────────
 
-// ADMIN_IDS: legacy hard-coded list kept for backwards compatibility.
-// The dashboard now also allows access based on role from the profiles table.
 const ADMIN_IDS = new Set([
   '0e738663-a70e-4fd3-9ba6-718c02e116c2',
   '5d5e0486-e768-4c5d-ba63-d1e4570a352d',
   '8b3f70dc-e5d0-4eb0-af7d-ec6181968213',
 ]);
 
-// Roles that can access the admin dashboard
 const DASHBOARD_ROLES = new Set(['leader', 'platform_administrator']);
 
 const EXCLUDED_IDS = new Set([
@@ -1371,7 +1832,6 @@ const AdminStudentDashboard: React.FC = () => {
   useEffect(() => {
     if (authLoading) return;
     if (!user) { navigate('/home', { replace: true }); return; }
-    // Check role from profiles table
     supabase.from('profiles').select('role, organization_id')
       .eq('id', user.id).single()
       .then(({ data }) => {
@@ -1388,21 +1848,15 @@ const AdminStudentDashboard: React.FC = () => {
   const isPlatformAdmin = ADMIN_IDS.has(user?.id ?? '') || userRole === 'platform_administrator';
   const isLeader        = userRole === 'leader' && !isPlatformAdmin;
 
-  // Fetch orgs and resolve which join codes belong to this leader specifically.
-  // A leader's "own" codes are those stored in organizations where leader_id = user.id.
-  // Co-leaders (joined via a code but not primary leader_id) see only learners
-  // who used the specific code they joined with (stored in their own join_code_used).
   useEffect(() => {
     if (!isLeader || !user?.id) return;
 
     (async () => {
-      // 1. Orgs where this user is the PRIMARY leader
       const { data: ownedOrgs } = await supabase
         .from('organizations')
         .select('id, name, join_code, join_codes, city')
         .eq('leader_id', user.id);
 
-      // 2. This user's own profile — to find the join_code_used (co-leader case)
       const { data: myProfile } = await supabase
         .from('profiles')
         .select('join_code_used, organization_id')
@@ -1413,7 +1867,6 @@ const AdminStudentDashboard: React.FC = () => {
       const orgs: typeof leaderOrgs = [];
 
       if (ownedOrgs?.length) {
-        // Primary leader: all codes in their org's join_codes array are theirs
         for (const org of ownedOrgs) {
           orgs.push({ id: org.id, name: org.name, join_code: org.join_code, city: org.city });
           const orgCodes: string[] = Array.isArray(org.join_codes) && org.join_codes.length
@@ -1422,9 +1875,7 @@ const AdminStudentDashboard: React.FC = () => {
           codes.push(...orgCodes);
         }
       } else if (myProfile?.join_code_used) {
-        // Co-leader: only the specific code they signed up with
         codes.push(myProfile.join_code_used);
-        // Fetch the org name for display
         if (myProfile.organization_id) {
           const { data: orgData } = await supabase
             .from('organizations')
@@ -1436,7 +1887,7 @@ const AdminStudentDashboard: React.FC = () => {
       }
 
       setLeaderOrgs(orgs);
-      setLeaderJoinCodes([...new Set(codes)]); // deduplicate
+      setLeaderJoinCodes([...new Set(codes)]);
       setSelectedOrgId(orgs[0]?.id ?? myProfile?.organization_id ?? null);
     })();
   }, [isLeader, user?.id]);
@@ -1452,13 +1903,12 @@ const AdminStudentDashboard: React.FC = () => {
   const [filterCat,   setFilterCat]   = useState<string>('all');
 
   // ── Tab state ───────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'student' | 'platform-global' | 'cost-overview' | 'cost-learner'>('student');
+  const [activeTab, setActiveTab] = useState<'student' | 'platform-global' | 'cost-overview' | 'cost-learner' | 'model-overview'>('student');
   const [platformOrgFilter, setPlatformOrgFilter] = useState<{ id: string; name: string } | null>(null);
 
   // ── Multi-org support for leaders ──────────────────────────────────────────
   const [leaderOrgs, setLeaderOrgs] = useState<{ id: string; name: string; join_code: string; city: string | null }[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
-  // The join codes that belong to this leader (used to scope the learner list)
   const [leaderJoinCodes, setLeaderJoinCodes] = useState<string[]>([]);
 
   // ── Cost data ───────────────────────────────────────────────────────────────
@@ -1472,6 +1922,9 @@ const AdminStudentDashboard: React.FC = () => {
   const [studentSessionRows, setStudentSessionRows] = useState<StudentSessionRow[]>([]);
   const [loadingStudentSummary, setLoadingStudentSummary] = useState(false);
   const [studentSummaryError, setStudentSummaryError] = useState<string | null>(null);
+
+  // ── Model overview uses its own days state (independent of cost overview) ──
+  const [modelDays, setModelDays] = useState<number>(30);
 
   // Fetch overall cost data
   const fetchCostData = useCallback(async (days: number) => {
@@ -1494,7 +1947,7 @@ const AdminStudentDashboard: React.FC = () => {
     }
   }, []);
 
-  // Fetch per-learner cost data (detail view — filtered by userId)
+  // Fetch per-learner cost data
   const fetchLearnerCost = useCallback(async (userId: string) => {
     if (!userId) return;
     setLoadingLearnerCost(true);
@@ -1510,8 +1963,12 @@ const AdminStudentDashboard: React.FC = () => {
     finally { setLoadingLearnerCost(false); }
   }, []);
 
-  useEffect(() => { fetchCostData(costDays); }, [costDays, fetchCostData]);
-  // When a learner is selected in the cost-learner tab, fetch their detail rows
+  // Fetch cost data when costDays changes OR when modelDays changes (use the larger window)
+  useEffect(() => {
+    const effectiveDays = Math.max(costDays, modelDays);
+    fetchCostData(effectiveDays);
+  }, [costDays, modelDays, fetchCostData]);
+
   useEffect(() => {
     if (selectedId && activeTab === 'cost-learner') fetchLearnerCost(selectedId);
     if (!selectedId) setLearnerCostRows([]);
@@ -1541,10 +1998,6 @@ const AdminStudentDashboard: React.FC = () => {
     }
   }, [learners]);
 
-  // Fetch learners scoped correctly per role:
-  //   platform_admin → all African learners
-  //   leader (primary) → learners whose join_code_used is in leader's own join_codes[]
-  //   leader (co-leader) → learners whose join_code_used matches the code they joined with
   useEffect(() => {
     if (!authChecked) return;
     (async () => {
@@ -1557,15 +2010,12 @@ const AdminStudentDashboard: React.FC = () => {
 
         if (isLeader) {
           if (leaderJoinCodes.length > 0) {
-            // Filter to only learners who used one of this leader's codes
             query = query.in('join_code_used', leaderJoinCodes);
           } else {
-            // Codes not loaded yet — fall back to org filter to avoid showing everyone
             const orgId = selectedOrgId || userOrgId;
             if (orgId) query = query.eq('organization_id', orgId);
           }
         } else {
-          // Platform admin sees all African learners
           query = query.eq('continent', 'Africa');
         }
 
@@ -1585,7 +2035,6 @@ const AdminStudentDashboard: React.FC = () => {
     fetchStudentSummary();
   }, [activeTab, fetchStudentSummary, selectedOrgId]);
 
-  // Fetch selected learner's dashboard rows
   const fetchData = useCallback(async (userId: string) => {
     if (!userId) return;
     setLoadingData(true);
@@ -1608,6 +2057,12 @@ const AdminStudentDashboard: React.FC = () => {
   }, []);
 
   useEffect(() => { if (selectedId) fetchData(selectedId); }, [selectedId, fetchData]);
+
+  // ── Filter cost rows for model overview based on modelDays ────────────────
+  const modelCostRows = (() => {
+    const since = Date.now() - modelDays * 86400000;
+    return costRows.filter(r => new Date(r.logged_at).getTime() >= since);
+  })();
 
   // ── Auth guard — after ALL hooks ─────────────────────────────────────────────
   if (authLoading || !user || !authChecked) {
@@ -1637,16 +2092,17 @@ const AdminStudentDashboard: React.FC = () => {
             <Users size={22} className="text-purple-600" />
             <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
           </div>
-          <p className="text-sm text-gray-500 ml-9">Student activity, certification scores, and API cost analytics.</p>
+          <p className="text-sm text-gray-500 ml-9">Student activity, certification scores, model usage, and API cost analytics.</p>
         </div>
 
-        {/* Tab bar — platform admins see all tabs; leaders see only Student Activity */}
+        {/* Tab bar */}
         <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit flex-wrap">
           {([
-            { id: 'student',        label: 'Student Activity',  icon: <BookOpen size={14} />,    show: true },
-            { id: 'platform-global',label: 'Global Overview',   icon: <Users size={14} />,       show: isPlatformAdmin },
-            { id: 'cost-overview',  label: 'Cost Overview',     icon: <DollarSign size={14} />,  show: isPlatformAdmin },
-            { id: 'cost-learner',   label: 'Per-Learner Cost',  icon: <Activity size={14} />,    show: isPlatformAdmin },
+            { id: 'student',         label: 'Student Activity',  icon: <BookOpen size={14} />,    show: true },
+            { id: 'platform-global', label: 'Global Overview',   icon: <Users size={14} />,       show: isPlatformAdmin },
+            { id: 'model-overview',  label: 'Model Overview',    icon: <Server size={14} />,      show: isPlatformAdmin },
+            { id: 'cost-overview',   label: 'Cost Overview',     icon: <DollarSign size={14} />,  show: isPlatformAdmin },
+            { id: 'cost-learner',    label: 'Per-Learner Cost',  icon: <Activity size={14} />,    show: isPlatformAdmin },
           ] as const).filter(t => t.show).map(tab => (
             <button
               key={tab.id}
@@ -1666,7 +2122,6 @@ const AdminStudentDashboard: React.FC = () => {
         {/* ── STUDENT ACTIVITY TAB ────────────────────────────────────── */}
         {activeTab === 'student' && <div>
 
-        {/* Multi-org selector for leaders */}
         {isLeader && leaderOrgs.length > 1 && (
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <span className="text-sm font-semibold text-gray-600">Viewing org:</span>
@@ -1688,7 +2143,6 @@ const AdminStudentDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Scope notice for leaders — shows which codes they can see */}
         {isLeader && leaderJoinCodes.length > 0 && (
           <div className="mb-4 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-indigo-700">Showing learners who joined with your code{leaderJoinCodes.length > 1 ? 's' : ''}:</span>
@@ -1698,7 +2152,6 @@ const AdminStudentDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Org drill-down banner (set when platform admin clicks into an org from global view) */}
         {platformOrgFilter && (
           <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
             <span className="text-sm font-semibold text-indigo-800">Viewing: {platformOrgFilter.name}</span>
@@ -1761,7 +2214,6 @@ const AdminStudentDashboard: React.FC = () => {
             </div>
           )}
 
-          {/* Profile strip */}
           {selectedLearner && (
             <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 bg-gray-50 rounded-lg px-4 py-2.5 border border-gray-100">
               <span className="flex items-center gap-1"><User size={11} className="text-gray-400" />{selectedLearner.name || '—'}</span>
@@ -1776,25 +2228,21 @@ const AdminStudentDashboard: React.FC = () => {
         </div>
 
         <div id="student-dashboard-detail">
-        {/* Loading */}
         {loadingData && (
           <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
             <Loader2 size={20} className="animate-spin" /> Loading dashboard…
           </div>
         )}
 
-        {/* Error */}
         {dataError && (
           <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 mb-4">
             <AlertCircle size={16} /> {dataError}
           </div>
         )}
 
-        {/* Content */}
         {!loadingData && selectedId && activities.length > 0 && (
           <div className="space-y-6">
 
-            {/* Summary cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { label: 'Learning Activities', value: learningRows.length,  icon: <BookOpen size={18} className="text-blue-500" />,  bg: 'bg-blue-50'   },
@@ -1812,7 +2260,6 @@ const AdminStudentDashboard: React.FC = () => {
               ))}
             </div>
 
-            {/* Certifications */}
             {certRows.length > 0 && (
               <section>
                 <h2 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
@@ -1825,7 +2272,6 @@ const AdminStudentDashboard: React.FC = () => {
               </section>
             )}
 
-            {/* Learning activities */}
             {learningRows.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -1861,7 +2307,6 @@ const AdminStudentDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Empty state */}
         {!loadingData && selectedId && activities.length === 0 && !dataError && (
           <div className="text-center py-16 text-gray-400">
             <BarChart2 size={40} className="mx-auto mb-3 opacity-30" />
@@ -1869,7 +2314,6 @@ const AdminStudentDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* No selection */}
         {!selectedId && !loadingLearners && (
           <div className="text-center py-20 text-gray-400">
             <Users size={44} className="mx-auto mb-4 opacity-20" />
@@ -1883,11 +2327,21 @@ const AdminStudentDashboard: React.FC = () => {
         {activeTab === 'platform-global' && (
           <PlatformGlobalPanel
             onSelectOrg={(orgId, orgName) => {
-              // Switch to student tab filtered to that org's learners
-              // We do this by setting a filter state
               setActiveTab('student');
               setPlatformOrgFilter({ id: orgId, name: orgName });
             }}
+          />
+        )}
+
+        {/* ── MODEL OVERVIEW TAB ──────────────────────────────────────── */}
+        {activeTab === 'model-overview' && (
+          <ModelOverviewPanel
+            rows={modelCostRows}
+            loading={loadingCost}
+            error={costError}
+            days={modelDays}
+            setDays={setModelDays}
+            onRefresh={() => fetchCostData(Math.max(costDays, modelDays))}
           />
         )}
 
