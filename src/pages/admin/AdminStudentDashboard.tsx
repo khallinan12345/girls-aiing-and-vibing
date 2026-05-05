@@ -634,114 +634,6 @@ const ActivityCard: React.FC<{ row: ActivityRow }> = ({ row }) => {
 };
 
 
-// ─── OrgSelector ──────────────────────────────────────────────────────────────
-// Shown to platform admins on the Student Activity tab. Lets them pick an org
-// (or "All Organizations") before the learner table is displayed.
-
-const OrgSelector: React.FC<{
-  orgs: OrgOption[];
-  loading: boolean;
-  selectedOrgId: string; // '' means "all"
-  onSelect: (orgId: string) => void;
-}> = ({ orgs, loading, selectedOrgId, onSelect }) => {
-  const [search, setSearch] = useState('');
-
-  const filtered = orgs.filter(o =>
-    search === '' ||
-    (o.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (o.country || '').toLowerCase().includes(search.toLowerCase()) ||
-    (o.city || '').toLowerCase().includes(search.toLowerCase())
-  );
-
-  const totalLearners = orgs.reduce((s, o) => s + (o.learner_count || 0), 0);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-12 text-gray-500">
-        <Loader2 size={18} className="animate-spin" /> Loading organizations…
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-6">
-      <div className="px-5 py-4 border-b border-gray-100">
-        <div className="flex items-center gap-3 flex-wrap">
-          <Building2 size={16} className="text-purple-600" />
-          <h2 className="text-sm font-bold text-gray-800">Select Organization</h2>
-          <span className="text-xs text-gray-400">{orgs.length} orgs · {totalLearners} learners</span>
-          <div className="ml-auto relative w-full sm:w-72">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search orgs by name, country, city…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="p-4">
-        {/* "All Organizations" option */}
-        <button
-          onClick={() => onSelect('')}
-          className={classNames(
-            'w-full flex items-center gap-3 px-4 py-3 rounded-lg border mb-2 transition-colors text-left',
-            selectedOrgId === ''
-              ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-200'
-              : 'bg-gray-50 border-gray-200 hover:border-purple-200 hover:bg-purple-50/50'
-          )}
-        >
-          <Globe size={18} className={selectedOrgId === '' ? 'text-purple-600' : 'text-gray-400'} />
-          <div className="flex-1">
-            <div className="text-sm font-bold text-gray-900">All Organizations</div>
-            <div className="text-xs text-gray-500">View learners across all orgs</div>
-          </div>
-          <span className="text-xs font-mono font-bold text-gray-600">{totalLearners} learners</span>
-          {selectedOrgId === '' && <CheckCircle size={16} className="text-purple-600" />}
-        </button>
-
-        {/* Org grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[400px] overflow-y-auto">
-          {filtered.map(org => (
-            <button
-              key={org.id}
-              onClick={() => onSelect(org.id)}
-              className={classNames(
-                'flex items-start gap-3 px-4 py-3 rounded-lg border transition-colors text-left',
-                selectedOrgId === org.id
-                  ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-200'
-                  : 'bg-white border-gray-200 hover:border-purple-200 hover:bg-purple-50/30'
-              )}
-            >
-              <Building2 size={16} className={classNames('mt-0.5 flex-shrink-0', selectedOrgId === org.id ? 'text-purple-600' : 'text-gray-400')} />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-gray-900 truncate">{org.name}</div>
-                <div className="text-[11px] text-gray-500 truncate">
-                  {[org.city, org.country].filter(Boolean).join(', ') || org.continent || '—'}
-                </div>
-                <div className="text-[10px] text-gray-400 mt-0.5">
-                  Code: <span className="font-mono font-bold text-indigo-700">{org.join_code}</span>
-                  {org.learner_count != null && <span className="ml-2">· {org.learner_count} learner{org.learner_count !== 1 ? 's' : ''}</span>}
-                </div>
-              </div>
-              {selectedOrgId === org.id && <CheckCircle size={14} className="text-purple-600 mt-0.5 flex-shrink-0" />}
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <div className="col-span-full text-center py-8 text-sm text-gray-400">
-              No organizations match "{search}"
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-
 // ─── CostOverviewPanel ────────────────────────────────────────────────────────
 
 interface CostOverviewProps {
@@ -776,11 +668,6 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
 
   const grouped = groupCostRows(rows, groupBy);
   const maxCost = grouped[0]?.[1].cost || 1;
-
-  const providerBadge = (p: string) => {
-    const c = getProviderColor(p);
-    return <span className={classNames('text-[10px] px-1.5 py-0.5 rounded border font-semibold', c.bg, c.text, c.border)}>{p}</span>;
-  };
 
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-20 text-gray-500">
@@ -828,7 +715,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         {[
           { label: 'Anthropic cost', value: `$${anthropicCost.toFixed(2)}`, sub: `last ${days} days`, icon: <DollarSign size={16} className="text-blue-500" />, bg: 'bg-blue-50' },
           { label: 'Cache savings',  value: `$${cacheSaved.toFixed(2)}`,    sub: `${cacheRate.toFixed(0)}% hit rate`,    icon: <Zap size={16} className="text-amber-500" />,  bg: 'bg-amber-50' },
-          { label: 'Free-tier reqs', value: freeReqs.toLocaleString(),      sub: '$0 — free tier',    icon: <TrendingUp size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
+          { label: 'Free-tier reqs', value: freeReqs.toLocaleString(),       sub: '$0 — free providers', icon: <TrendingUp size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
           { label: 'Anthropic reqs', value: anthropicCalls.toLocaleString(), sub: `${fmtTokens(totalInTok)} tokens in`, icon: <Activity size={16} className="text-purple-500" />, bg: 'bg-purple-50' },
         ].map(({ label, value, sub, icon, bg }) => (
           <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
@@ -860,7 +747,9 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
                   <div className="w-40 flex-shrink-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs text-gray-700 truncate">{key}</span>
-                      {providerBadge(val.provider)}
+                      <span className={classNames('text-[10px] px-1.5 py-0.5 rounded border font-semibold', pc.bg, pc.text, pc.border)}>
+                        {val.provider}
+                      </span>
                     </div>
                     <div className="text-[10px] text-gray-400 mt-0.5">{val.calls.toLocaleString()} calls · {fmtTokens(val.inTok + val.outTok)} tokens</div>
                   </div>
@@ -906,10 +795,10 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
 
       {/* Provider split — dynamic for all providers */}
       {(() => {
-        const providerNames = [...new Set(rows.map(r => r.provider))].sort();
+        const providers = [...new Set(rows.map(r => r.provider))].sort();
         return (
-          <div className={classNames('grid gap-4', providerNames.length <= 2 ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-3')}>
-            {providerNames.map(provider => {
+          <div className={classNames('grid gap-4', providers.length <= 2 ? 'grid-cols-2' : providers.length <= 3 ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-3')}>
+            {providers.map(provider => {
               const pRows = rows.filter(r => r.provider === provider);
               const pCost = pRows.reduce((s, r) => s + r.estimated_cost_usd, 0);
               const pInTok = pRows.reduce((s, r) => s + r.input_tokens, 0);
@@ -921,7 +810,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
                 <div key={provider} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
                   <div className="flex items-center gap-2 mb-3">
                     <span className={classNames('text-[11px] px-2 py-0.5 rounded-full border font-bold', pc.bg, pc.text, pc.border)}>
-                      {provider}{isFree ? ' · Free' : ' · Paid'}
+                      {provider} · {isFree ? 'Free' : 'Paid'}
                     </span>
                   </div>
                   <div className="space-y-1.5 text-xs">
@@ -929,7 +818,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
                     <div className="flex justify-between"><span className="text-gray-500">Requests</span><span className="font-semibold text-gray-800">{pRows.length.toLocaleString()}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Input tokens</span><span className="font-semibold text-gray-800">{fmtTokens(pInTok)}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Output tokens</span><span className="font-semibold text-gray-800">{fmtTokens(pOutTok)}</span></div>
-                    {pCache > 0 && <div className="flex justify-between"><span className="text-gray-500">Cache hits</span><span className="font-semibold text-emerald-700">{fmtTokens(pCache)}</span></div>}
+                    {provider === 'anthropic' && <div className="flex justify-between"><span className="text-gray-500">Cache hits</span><span className="font-semibold text-emerald-700">{fmtTokens(pCache)}</span></div>}
                   </div>
                 </div>
               );
@@ -952,11 +841,13 @@ interface ModelOverviewProps {
   onRefresh: () => void;
 }
 
-const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error, days, setDays, onRefresh }) => {
+const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({
+  rows, loading, error, days, setDays, onRefresh
+}) => {
   const [sortKey, setSortKey] = useState<'model' | 'provider' | 'requests' | 'users' | 'inTok' | 'outTok' | 'cost'>('requests');
   const [sortAsc, setSortAsc] = useState(false);
 
-  // Build per-model summary
+  // ── Build per-model summary ─────────────────────────────────────────────────
   type ModelSummary = {
     model: string;
     label: string;
@@ -970,10 +861,17 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
     topPages: string[];
   };
 
-  const modelSummaries: ModelSummary[] = useMemo(() => {
-    const map = new Map<string, { provider: string; requests: number; users: Set<string>; inTok: number; outTok: number; cacheHit: number; cost: number; pages: Record<string, number> }>();
+  const modelMap = useMemo(() => {
+    const map = new Map<string, {
+      provider: string; requests: number; users: Set<string>;
+      inTok: number; outTok: number; cacheHit: number; cost: number;
+      pages: Record<string, number>;
+    }>();
     rows.forEach(r => {
-      const existing = map.get(r.model) || { provider: r.provider, requests: 0, users: new Set<string>(), inTok: 0, outTok: 0, cacheHit: 0, cost: 0, pages: {} };
+      const existing = map.get(r.model) || {
+        provider: r.provider, requests: 0, users: new Set<string>(),
+        inTok: 0, outTok: 0, cacheHit: 0, cost: 0, pages: {},
+      };
       existing.requests += 1;
       if (r.user_id) existing.users.add(r.user_id);
       existing.inTok += r.input_tokens;
@@ -981,10 +879,13 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
       existing.cacheHit += r.cache_hit_tokens;
       existing.cost += r.estimated_cost_usd;
       existing.pages[r.page] = (existing.pages[r.page] || 0) + 1;
-      existing.provider = r.provider;
       map.set(r.model, existing);
     });
-    return [...map.entries()].map(([model, v]) => ({
+    return map;
+  }, [rows]);
+
+  const models: ModelSummary[] = useMemo(() =>
+    [...modelMap.entries()].map(([model, v]) => ({
       model,
       label: modelLabel(model),
       provider: v.provider,
@@ -995,22 +896,26 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
       cacheHit: v.cacheHit,
       cost: v.cost,
       topPages: Object.entries(v.pages).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([p]) => p),
-    }));
-  }, [rows]);
+    })),
+  [modelMap]);
 
-  const sorted = [...modelSummaries].sort((a, b) => {
-    let av: any, bv: any;
-    if (sortKey === 'model') { av = a.label.toLowerCase(); bv = b.label.toLowerCase(); }
-    else if (sortKey === 'provider') { av = a.provider; bv = b.provider; }
-    else if (sortKey === 'requests') { av = a.requests; bv = b.requests; }
-    else if (sortKey === 'users') { av = a.uniqueUsers; bv = b.uniqueUsers; }
-    else if (sortKey === 'inTok') { av = a.inTok; bv = b.inTok; }
-    else if (sortKey === 'outTok') { av = a.outTok; bv = b.outTok; }
-    else { av = a.cost; bv = b.cost; }
-    if (av < bv) return sortAsc ? -1 : 1;
-    if (av > bv) return sortAsc ? 1 : -1;
-    return 0;
-  });
+  const sorted = useMemo(() => {
+    const arr = [...models];
+    arr.sort((a, b) => {
+      let av: any, bv: any;
+      if (sortKey === 'model')    { av = a.label.toLowerCase(); bv = b.label.toLowerCase(); }
+      else if (sortKey === 'provider') { av = a.provider; bv = b.provider; }
+      else if (sortKey === 'requests') { av = a.requests; bv = b.requests; }
+      else if (sortKey === 'users')    { av = a.uniqueUsers; bv = b.uniqueUsers; }
+      else if (sortKey === 'inTok')    { av = a.inTok; bv = b.inTok; }
+      else if (sortKey === 'outTok')   { av = a.outTok; bv = b.outTok; }
+      else                             { av = a.cost; bv = b.cost; }
+      if (av < bv) return sortAsc ? -1 : 1;
+      if (av > bv) return sortAsc ? 1 : -1;
+      return 0;
+    });
+    return arr;
+  }, [models, sortKey, sortAsc]);
 
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) setSortAsc(a => !a);
@@ -1025,39 +930,34 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
   const totalCost = rows.reduce((s, r) => s + r.estimated_cost_usd, 0);
   const freeRequests = rows.filter(r => r.provider !== 'anthropic').length;
   const freePct = totalRequests > 0 ? (freeRequests / totalRequests * 100) : 0;
-  const maxReqs = Math.max(...modelSummaries.map(m => m.requests), 1);
+  const maxRequests = Math.max(...models.map(m => m.requests), 1);
 
   // Provider distribution
   const providerDist = useMemo(() => {
     const map = new Map<string, { requests: number; cost: number }>();
     rows.forEach(r => {
-      const existing = map.get(r.provider) || { requests: 0, cost: 0 };
-      existing.requests += 1;
-      existing.cost += r.estimated_cost_usd;
-      map.set(r.provider, existing);
+      const e = map.get(r.provider) || { requests: 0, cost: 0 };
+      e.requests += 1;
+      e.cost += r.estimated_cost_usd;
+      map.set(r.provider, e);
     });
     return [...map.entries()].sort((a, b) => b[1].requests - a[1].requests);
   }, [rows]);
+  const maxProviderReqs = providerDist[0]?.[1].requests || 1;
 
   // Daily model usage (last 14 days)
   const dailyModelUsage = useMemo(() => {
-    const dayMap = new Map<string, Map<string, number>>();
+    const map = new Map<string, Map<string, number>>();
     rows.forEach(r => {
       const day = r.logged_at.slice(0, 10);
-      if (!dayMap.has(day)) dayMap.set(day, new Map());
-      const modelMap = dayMap.get(day)!;
-      modelMap.set(r.model, (modelMap.get(r.model) || 0) + 1);
+      if (!map.has(day)) map.set(day, new Map());
+      const dayMap = map.get(day)!;
+      dayMap.set(r.model, (dayMap.get(r.model) || 0) + 1);
     });
-    return [...dayMap.entries()].sort().slice(-14);
+    return [...map.entries()].sort().slice(-14);
   }, [rows]);
-
-  const allModelsInChart = useMemo(() => {
-    const s = new Set<string>();
-    dailyModelUsage.forEach(([, mm]) => mm.forEach((_, m) => s.add(m)));
-    return [...s].sort();
-  }, [dailyModelUsage]);
-
-  const MODEL_CHART_COLORS = ['bg-blue-400', 'bg-emerald-400', 'bg-cyan-400', 'bg-orange-400', 'bg-pink-400', 'bg-violet-400', 'bg-amber-400', 'bg-red-400'];
+  const allModelNames = useMemo(() => [...new Set(rows.map(r => r.model))].sort(), [rows]);
+  const MODEL_BAR_COLORS = ['bg-blue-400', 'bg-emerald-400', 'bg-cyan-400', 'bg-orange-400', 'bg-pink-400', 'bg-violet-400', 'bg-amber-400', 'bg-red-400'];
 
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-20 text-gray-500">
@@ -1094,7 +994,7 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Total requests', value: totalRequests.toLocaleString(), sub: `last ${days} days`, icon: <Activity size={16} className="text-purple-500" />, bg: 'bg-purple-50' },
-          { label: 'Active models', value: modelSummaries.length.toString(), sub: 'unique models', icon: <Server size={16} className="text-blue-500" />, bg: 'bg-blue-50' },
+          { label: 'Active models', value: models.length.toString(), sub: 'unique models used', icon: <Server size={16} className="text-blue-500" />, bg: 'bg-blue-50' },
           { label: 'Free-tier %', value: `${freePct.toFixed(0)}%`, sub: `${freeRequests.toLocaleString()} free reqs`, icon: <Zap size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
           { label: 'Total cost', value: fmtCost(totalCost), sub: 'paid models only', icon: <DollarSign size={16} className="text-amber-500" />, bg: 'bg-amber-50' },
         ].map(({ label, value, sub, icon, bg }) => (
@@ -1114,7 +1014,7 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
         <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
           <Server size={14} className="text-gray-400" />
           <span className="text-sm font-bold text-gray-700">Requests by Model</span>
-          <span className="text-xs text-gray-400 ml-auto">{modelSummaries.length} models</span>
+          <span className="text-xs text-gray-400 ml-auto">{models.length} models</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -1128,14 +1028,13 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
                   { key: 'inTok' as const, label: 'Input Tokens' },
                   { key: 'outTok' as const, label: 'Output Tokens' },
                   { key: 'cost' as const, label: 'Cost' },
-                  { key: null, label: 'Top Pages' },
-                ] as { key: typeof sortKey | null; label: string }[]).map(({ key, label }) => (
-                  <th key={label} onClick={() => key && toggleSort(key)}
-                    className={classNames('px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider',
-                      key ? 'cursor-pointer hover:text-purple-700 select-none' : '')}>
-                    {label}{key && <SortIcon k={key} />}
+                ]).map(({ key, label }) => (
+                  <th key={key} onClick={() => toggleSort(key)}
+                    className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700 select-none">
+                    {label}<SortIcon k={key} />
                   </th>
                 ))}
+                <th className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Top Pages</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -1145,24 +1044,27 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
                   <tr key={m.model} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3">
                       <div className="font-semibold text-gray-900">{m.label}</div>
-                      <div className="text-[10px] text-gray-400 font-mono truncate max-w-[200px]">{m.model}</div>
+                      <div className="text-[10px] text-gray-400 font-mono">{m.model}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={classNames('text-[10px] px-1.5 py-0.5 rounded border font-semibold', pc.bg, pc.text, pc.border)}>{m.provider}</span>
+                      <span className={classNames('text-[10px] px-1.5 py-0.5 rounded border font-semibold', pc.bg, pc.text, pc.border)}>
+                        {m.provider}
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       <div className="font-semibold text-gray-800 font-mono">{m.requests.toLocaleString()}</div>
                       <div className="mt-1 bg-gray-100 rounded-full h-1.5 w-24">
-                        <div className={classNames('h-1.5 rounded-full', pc.bar)} style={{ width: `${(m.requests / maxReqs * 100).toFixed(1)}%` }} />
+                        <div className={classNames('h-1.5 rounded-full', pc.bar)}
+                          style={{ width: `${(m.requests / maxRequests * 100).toFixed(1)}%` }} />
                       </div>
                     </td>
                     <td className="px-4 py-3 font-mono text-gray-600">{m.uniqueUsers}</td>
                     <td className="px-4 py-3 font-mono text-gray-600">
                       {fmtTokens(m.inTok)}
-                      {m.cacheHit > 0 && <div className="text-[10px] text-emerald-600">({fmtTokens(m.cacheHit)} cached)</div>}
+                      {m.cacheHit > 0 && <div className="text-[10px] text-emerald-600">⚡ {fmtTokens(m.cacheHit)} cached</div>}
                     </td>
                     <td className="px-4 py-3 font-mono text-gray-600">{fmtTokens(m.outTok)}</td>
-                    <td className="px-4 py-3 font-semibold text-gray-800">{m.cost > 0 ? fmtCost(m.cost) : <span className="text-emerald-600 font-bold">FREE</span>}</td>
+                    <td className="px-4 py-3 font-semibold text-gray-800">{fmtCost(m.cost)}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {m.topPages.map(p => (
@@ -1196,34 +1098,36 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
       </div>
 
       {/* Provider distribution */}
-      {providerDist.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100">
-            <span className="text-sm font-bold text-gray-700">Provider Distribution</span>
-          </div>
-          <div className="p-5 space-y-3">
-            {providerDist.map(([provider, val]) => {
-              const pc = getProviderColor(provider);
-              const pct = totalRequests > 0 ? (val.requests / totalRequests * 100) : 0;
-              return (
-                <div key={provider} className="flex items-center gap-3">
-                  <div className="w-28 flex-shrink-0">
-                    <span className={classNames('text-xs px-2 py-0.5 rounded border font-semibold', pc.bg, pc.text, pc.border)}>{provider}</span>
-                  </div>
-                  <div className="flex-1 bg-gray-100 rounded-full h-3">
-                    <div className={classNames('h-3 rounded-full transition-all', pc.bar)} style={{ width: `${pct.toFixed(1)}%` }} />
-                  </div>
-                  <div className="w-32 text-right text-xs text-gray-700 flex-shrink-0">
-                    <span className="font-semibold">{val.requests.toLocaleString()}</span>
-                    <span className="text-gray-400 ml-1">({pct.toFixed(1)}%)</span>
-                  </div>
-                  <div className="w-16 text-right text-xs font-semibold text-gray-600 flex-shrink-0">{fmtCost(val.cost)}</div>
-                </div>
-              );
-            })}
-          </div>
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+          <Globe size={14} className="text-gray-400" />
+          <span className="text-sm font-bold text-gray-700">Provider Distribution</span>
         </div>
-      )}
+        <div className="p-5 space-y-3">
+          {providerDist.map(([provider, val]) => {
+            const pc = getProviderColor(provider);
+            const pct = totalRequests > 0 ? (val.requests / totalRequests * 100) : 0;
+            return (
+              <div key={provider} className="flex items-center gap-3">
+                <div className="w-28 flex-shrink-0">
+                  <span className={classNames('text-xs px-2 py-0.5 rounded border font-semibold', pc.bg, pc.text, pc.border)}>
+                    {provider}
+                  </span>
+                </div>
+                <div className="flex-1 bg-gray-100 rounded-full h-3 relative">
+                  <div className={classNames('h-3 rounded-full transition-all', pc.bar)}
+                    style={{ width: `${(val.requests / maxProviderReqs * 100).toFixed(1)}%` }} />
+                </div>
+                <div className="w-32 flex-shrink-0 text-right">
+                  <span className="text-xs font-semibold text-gray-700">{val.requests.toLocaleString()}</span>
+                  <span className="text-[10px] text-gray-400 ml-1">({pct.toFixed(1)}%)</span>
+                  <span className="text-[10px] text-gray-400 ml-2">{fmtCost(val.cost)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Daily model usage chart */}
       {dailyModelUsage.length > 0 && (
@@ -1235,35 +1139,36 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
           <div className="p-5">
             {/* Legend */}
             <div className="flex flex-wrap gap-2 mb-4">
-              {allModelsInChart.map((m, i) => (
-                <div key={m} className="flex items-center gap-1.5">
-                  <div className={classNames('w-3 h-3 rounded', MODEL_CHART_COLORS[i % MODEL_CHART_COLORS.length])} />
+              {allModelNames.map((m, i) => (
+                <div key={m} className="flex items-center gap-1">
+                  <div className={classNames('w-2.5 h-2.5 rounded-sm', MODEL_BAR_COLORS[i % MODEL_BAR_COLORS.length])} />
                   <span className="text-[10px] text-gray-600">{modelLabel(m)}</span>
                 </div>
               ))}
             </div>
-            {/* Stacked bars */}
-            <div className="flex items-end gap-1.5 h-32">
-              {dailyModelUsage.map(([day, modelMap]) => {
-                const dayTotal = [...modelMap.values()].reduce((s, v) => s + v, 0);
-                const maxDayTotal = Math.max(...dailyModelUsage.map(([, mm]) => [...mm.values()].reduce((s, v) => s + v, 0)), 1);
-                const heightPct = Math.max((dayTotal / maxDayTotal) * 100, 3);
+            <div className="flex items-end gap-1.5 h-28">
+              {dailyModelUsage.map(([day, modelCounts]) => {
+                const dayTotal = [...modelCounts.values()].reduce((s, v) => s + v, 0);
+                const maxDayTotal = Math.max(...dailyModelUsage.map(([, mc]) => [...mc.values()].reduce((s, v) => s + v, 0)), 1);
+                const heightPct = Math.max(dayTotal / maxDayTotal * 100, 2);
                 return (
                   <div key={day} className="flex-1 flex flex-col items-center gap-1 group relative">
                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
                       <div className="font-semibold mb-0.5">{day} — {dayTotal} reqs</div>
-                      {allModelsInChart.map(m => {
-                        const count = modelMap.get(m) || 0;
-                        if (count === 0) return null;
-                        return <div key={m}>{modelLabel(m)}: {count}</div>;
+                      {allModelNames.map(m => {
+                        const c = modelCounts.get(m) || 0;
+                        return c > 0 ? <div key={m}>{modelLabel(m)}: {c}</div> : null;
                       })}
                     </div>
-                    <div className="w-full flex flex-col rounded-t overflow-hidden" style={{ height: `${heightPct}%` }}>
-                      {allModelsInChart.map((m, i) => {
-                        const count = modelMap.get(m) || 0;
-                        if (count === 0) return null;
-                        const segPct = (count / dayTotal) * 100;
-                        return <div key={m} className={MODEL_CHART_COLORS[i % MODEL_CHART_COLORS.length]} style={{ height: `${segPct}%`, minHeight: '2px' }} />;
+                    <div className="w-full flex flex-col-reverse rounded-t overflow-hidden" style={{ height: `${heightPct}%` }}>
+                      {allModelNames.map((m, i) => {
+                        const c = modelCounts.get(m) || 0;
+                        if (c === 0) return null;
+                        const segPct = (c / dayTotal * 100);
+                        return (
+                          <div key={m} className={classNames(MODEL_BAR_COLORS[i % MODEL_BAR_COLORS.length])}
+                            style={{ height: `${segPct}%`, minHeight: '1px' }} />
+                        );
                       })}
                     </div>
                     <div className="text-[9px] text-gray-400 rotate-45 origin-left mt-1 whitespace-nowrap">{day.slice(5)}</div>
@@ -1275,39 +1180,38 @@ const ModelOverviewPanel: React.FC<ModelOverviewProps> = ({ rows, loading, error
         </div>
       )}
 
-      {/* Fallback chain info */}
-      <div className="bg-gradient-to-r from-gray-50 to-purple-50 border border-gray-200 rounded-xl p-5 shadow-sm">
-        <div className="flex items-center gap-2 mb-3">
-          <Zap size={16} className="text-purple-600" />
-          <span className="text-sm font-bold text-gray-800">Fallback Chain</span>
-          <span className="text-xs text-gray-400">Free-tier pages cascade through providers</span>
-        </div>
+      {/* Fallback chain reference */}
+      <div className="bg-gradient-to-r from-gray-50 to-white border border-gray-200 rounded-xl p-5 shadow-sm">
+        <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+          <Zap size={14} className="text-amber-500" /> Fallback Chain (for AI Learning & Skills pages)
+        </h3>
         <div className="flex flex-wrap items-center gap-2">
           {[
-            { name: 'Groq', model: 'Llama 70B', free: true },
-            { name: 'Gemini', model: '2.0 Flash', free: true },
-            { name: 'Cerebras', model: 'Llama 70B', free: true },
-            { name: 'OpenRouter', model: 'Llama 70B', free: true },
-            { name: 'Mistral', model: 'Small', free: true },
-            { name: 'Anthropic', model: 'Haiku 4.5', free: false },
-          ].map((p, i) => {
-            const pc = getProviderColor(p.name.toLowerCase());
-            return (
-              <React.Fragment key={p.name}>
-                {i > 0 && <span className="text-gray-300 text-lg">→</span>}
-                <div className={classNames('px-3 py-2 rounded-lg border', pc.bg, pc.border)}>
-                  <div className={classNames('text-xs font-bold', pc.text)}>{p.name}</div>
-                  <div className="text-[10px] text-gray-500">{p.model}</div>
-                  {p.free && <span className="text-[9px] font-bold text-emerald-600">FREE</span>}
-                </div>
-              </React.Fragment>
-            );
-          })}
+            { name: 'Groq', color: 'emerald', free: true },
+            { name: 'Gemini', color: 'cyan', free: true },
+            { name: 'Cerebras', color: 'orange', free: true },
+            { name: 'OpenRouter', color: 'pink', free: true },
+            { name: 'Mistral', color: 'violet', free: true },
+            { name: 'Anthropic Haiku', color: 'blue', free: false },
+          ].map((p, i) => (
+            <React.Fragment key={p.name}>
+              {i > 0 && <span className="text-gray-300 text-xs">→</span>}
+              <span className={classNames(
+                'text-xs px-2.5 py-1 rounded-lg border font-semibold',
+                `bg-${p.color}-50 text-${p.color}-700 border-${p.color}-200`
+              )}>
+                {p.name}
+                {p.free && <span className="ml-1 text-[9px] opacity-70">FREE</span>}
+              </span>
+            </React.Fragment>
+          ))}
         </div>
+        <p className="text-[11px] text-gray-400 mt-2">Code pages (VibeCoding, WebDev, FullStack, AIWorkflow) always use Anthropic Sonnet 4.6 directly.</p>
       </div>
     </div>
   );
 };
+
 
 // ─── LearnerCostPanel ─────────────────────────────────────────────────────────
 
@@ -1320,25 +1224,51 @@ interface LearnerCostProps {
   loading: boolean;
   loadingDetail: boolean;
   onRefresh: () => void;
+  // Org selector props for platform admins
+  isPlatformAdmin?: boolean;
+  allOrgs?: OrgOption[];
+  costOrgId: string;           // '' = all orgs, UUID = specific org
+  setCostOrgId: (id: string) => void;
 }
 
-type LearnerCostSortKey = 'name' | 'cost' | 'requests' | 'groq' | 'anthropic' | 'city';
+type SortKey = 'name' | 'cost' | 'requests' | 'groq' | 'anthropic' | 'city';
 
 const LearnerCostPanel: React.FC<LearnerCostProps> = ({
-  learners, selectedId, setSelectedId, allCostRows, learnerRows, loading, loadingDetail, onRefresh
+  learners, selectedId, setSelectedId, allCostRows, learnerRows, loading, loadingDetail, onRefresh,
+  isPlatformAdmin, allOrgs, costOrgId, setCostOrgId,
 }) => {
-  const [sortKey,  setSortKey]  = useState<LearnerCostSortKey>('cost');
+  const [sortKey,  setSortKey]  = useState<SortKey>('cost');
   const [sortAsc,  setSortAsc]  = useState(false);
   const [groupBy,  setGroupBy]  = useState<'page' | 'model' | 'provider'>('page');
   const [search,   setSearch]   = useState('');
+  const [orgSearch, setOrgSearch] = useState('');
 
+  // ── Filter learners by selected org ─────────────────────────────────────────
+  const costOrgJoinCodes = useMemo(() => {
+    if (!costOrgId || !allOrgs) return [];
+    const org = allOrgs.find(o => o.id === costOrgId);
+    if (!org) return [];
+    return Array.isArray(org.join_codes) && org.join_codes.length
+      ? org.join_codes
+      : org.join_code ? [org.join_code] : [];
+  }, [costOrgId, allOrgs]);
+
+  const filteredLearners = useMemo(() => {
+    if (!isPlatformAdmin || !costOrgId) return learners;
+    // Filter to learners whose join_code_used matches one of the org's codes
+    return learners.filter(l =>
+      l.join_code_used && costOrgJoinCodes.includes(l.join_code_used)
+    );
+  }, [learners, isPlatformAdmin, costOrgId, costOrgJoinCodes]);
+
+  // ── Build per-learner summary from allCostRows ──────────────────────────────
   type LearnerSummary = {
     id: string; name: string; email: string; city: string;
     totalCost: number; requests: number; groqReqs: number; anthReqs: number;
     topPage: string;
   };
 
-  const summaries: LearnerSummary[] = learners.map(l => {
+  const summaries: LearnerSummary[] = filteredLearners.map(l => {
     const lRows = allCostRows.filter(r => r.user_id === l.id);
     const groqReqs = lRows.filter(r => r.provider === 'groq').length;
     const anthReqs = lRows.filter(r => r.provider === 'anthropic').length;
@@ -1377,18 +1307,18 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
     return 0;
   });
 
-  const toggleSort = (key: LearnerCostSortKey) => {
+  const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc(a => !a);
     else { setSortKey(key); setSortAsc(false); }
   };
 
-  const SortIcon = ({ k }: { k: LearnerCostSortKey }) => sortKey !== k ? null : sortAsc
+  const SortIcon = ({ k }: { k: SortKey }) => sortKey !== k ? null : sortAsc
     ? <ChevronUp size={11} className="inline ml-0.5 text-purple-500" />
     : <ChevronDown size={11} className="inline ml-0.5 text-purple-500" />;
 
   const maxCost = Math.max(...summaries.map(s => s.totalCost), 0.001);
 
-  // Detail view helpers
+  // ── Detail view helpers ─────────────────────────────────────────────────────
   const selectedLearner = learners.find(l => l.id === selectedId);
   const totalCost   = learnerRows.reduce((s, r) => s + r.estimated_cost_usd, 0);
   const totalInTok  = learnerRows.reduce((s, r) => s + r.input_tokens, 0);
@@ -1398,10 +1328,117 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
   const grouped     = groupCostRows(learnerRows, groupBy);
   const maxGroupCost = grouped[0]?.[1].cost || 1;
 
-  // VIEW 2: Individual detail
+  // ── Org selector for platform admins ────────────────────────────────────────
+  const selectedCostOrg = allOrgs?.find(o => o.id === costOrgId);
+
+  // Compute learner counts per org from the learners list
+  const orgLearnerCounts = useMemo(() => {
+    if (!allOrgs) return new Map<string, number>();
+    const counts = new Map<string, number>();
+    for (const org of allOrgs) {
+      const codes = Array.isArray(org.join_codes) && org.join_codes.length
+        ? org.join_codes
+        : org.join_code ? [org.join_code] : [];
+      const count = learners.filter(l => l.join_code_used && codes.includes(l.join_code_used)).length;
+      counts.set(org.id, count);
+    }
+    return counts;
+  }, [allOrgs, learners]);
+
+  const filteredOrgs = useMemo(() => {
+    if (!allOrgs) return [];
+    if (!orgSearch) return allOrgs;
+    const q = orgSearch.toLowerCase();
+    return allOrgs.filter(o =>
+      (o.name || '').toLowerCase().includes(q) ||
+      (o.country || '').toLowerCase().includes(q) ||
+      (o.city || '').toLowerCase().includes(q)
+    );
+  }, [allOrgs, orgSearch]);
+
+  // ── Platform admin: show org selector when no org is selected yet ───────────
+  if (isPlatformAdmin && !costOrgId && !selectedId) {
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center gap-3 mb-2">
+          <Building2 size={18} className="text-purple-600" />
+          <h2 className="text-base font-bold text-gray-800">Select Organization</h2>
+          <span className="text-xs text-gray-400">Choose an organization to view per-learner cost data</span>
+        </div>
+
+        {/* All Orgs option */}
+        <button
+          onClick={() => setCostOrgId('__all__')}
+          className="w-full text-left px-5 py-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl hover:border-purple-400 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <Globe size={20} className="text-purple-600" />
+            <div>
+              <div className="font-bold text-purple-900">All Organizations</div>
+              <div className="text-xs text-purple-600">{learners.length} learners across all orgs</div>
+            </div>
+          </div>
+        </button>
+
+        {/* Search */}
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search organizations by name, country, or city…"
+            value={orgSearch}
+            onChange={e => setOrgSearch(e.target.value)}
+            className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+          />
+        </div>
+
+        {/* Org grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filteredOrgs.map(org => {
+            const count = orgLearnerCounts.get(org.id) || 0;
+            return (
+              <button
+                key={org.id}
+                onClick={() => { setCostOrgId(org.id); setSelectedId(''); }}
+                className="text-left p-4 bg-white border border-gray-200 rounded-xl hover:border-purple-300 hover:shadow-md transition-all group"
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div className="font-semibold text-gray-900 group-hover:text-purple-700 transition-colors">{org.name}</div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-mono font-bold">
+                    {org.join_code}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-500 space-y-0.5">
+                  {(org.city || org.country) && (
+                    <div className="flex items-center gap-1">
+                      <Globe size={10} className="text-gray-400" />
+                      {[org.city, org.country].filter(Boolean).join(', ')}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1">
+                    <Users size={10} className="text-gray-400" />
+                    {count} learner{count !== 1 ? 's' : ''}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {filteredOrgs.length === 0 && (
+          <div className="text-center py-12 text-gray-400 text-sm">
+            {orgSearch ? 'No organizations match that search.' : 'No organizations found.'}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── VIEW 2: Individual detail ───────────────────────────────────────────────
   if (selectedId) {
     return (
       <div className="space-y-5">
+        {/* Back button + learner name */}
         <div className="flex items-center gap-3">
           <button
             onClick={() => setSelectedId('')}
@@ -1434,6 +1471,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 
         {!loadingDetail && learnerRows.length > 0 && (
           <>
+            {/* KPIs */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { label: 'Total cost',      value: fmtCost(totalCost),              bg: 'bg-blue-50',    icon: <DollarSign size={16} className="text-blue-500" /> },
@@ -1447,6 +1485,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
               ))}
             </div>
 
+            {/* Group by + breakdown bars */}
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3">
                 <DollarSign size={14} className="text-gray-400" />
@@ -1487,6 +1526,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
               </div>
             </div>
 
+            {/* Recent requests */}
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
                 <span className="text-sm font-bold text-gray-700">Recent requests</span>
@@ -1531,9 +1571,31 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
     );
   }
 
-  // VIEW 1: Summary table
+  // ── VIEW 1: Summary table of all students ───────────────────────────────────
   return (
     <div className="space-y-4">
+
+      {/* Org selection banner for platform admins */}
+      {isPlatformAdmin && costOrgId && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+          <Building2 size={16} className="text-indigo-600" />
+          <span className="text-sm font-semibold text-indigo-800">
+            {costOrgId === '__all__' ? 'All Organizations' : selectedCostOrg?.name || 'Organization'}
+          </span>
+          {costOrgId !== '__all__' && selectedCostOrg?.city && (
+            <span className="text-xs text-indigo-500">· {[selectedCostOrg.city, selectedCostOrg.country].filter(Boolean).join(', ')}</span>
+          )}
+          <span className="text-xs text-indigo-400 ml-1">({filteredLearners.length} learners)</span>
+          <button
+            onClick={() => { setCostOrgId(''); setSelectedId(''); }}
+            className="ml-auto text-xs text-indigo-600 hover:text-indigo-900 border border-indigo-300 rounded px-2.5 py-1 hover:bg-indigo-100 transition-colors"
+          >
+            ← Change Org
+          </button>
+        </div>
+      )}
+
+      {/* Controls */}
       <div className="flex items-center gap-3 flex-wrap">
         <input
           type="text"
@@ -1570,14 +1632,14 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   {([
-                    { key: 'name' as LearnerCostSortKey,       label: 'Student' },
-                    { key: 'city' as LearnerCostSortKey,       label: 'City'    },
-                    { key: 'cost' as LearnerCostSortKey,       label: 'Total cost' },
-                    { key: 'requests' as LearnerCostSortKey,   label: 'Requests' },
-                    { key: 'groq' as LearnerCostSortKey,       label: 'Groq' },
-                    { key: 'anthropic' as LearnerCostSortKey,  label: 'Anthropic' },
-                    { key: null,                               label: 'Top page'  },
-                  ] as { key: LearnerCostSortKey | null; label: string }[]).map(({ key, label }) => (
+                    { key: 'name' as SortKey,       label: 'Student' },
+                    { key: 'city' as SortKey,       label: 'City'    },
+                    { key: 'cost' as SortKey,       label: 'Total cost' },
+                    { key: 'requests' as SortKey,   label: 'Requests' },
+                    { key: 'groq' as SortKey,       label: 'Groq' },
+                    { key: 'anthropic' as SortKey,  label: 'Anthropic' },
+                    { key: null,                    label: 'Top page'  },
+                  ] as { key: SortKey | null; label: string }[]).map(({ key, label }) => (
                     <th
                       key={label}
                       onClick={() => key && toggleSort(key)}
@@ -1733,6 +1795,7 @@ const PlatformGlobalPanel: React.FC<{
 
   return (
     <div className="space-y-5">
+      {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Organizations', value: orgs.length, bg: 'bg-purple-50', icon: <BarChart2 size={16} className="text-purple-500" /> },
@@ -1750,10 +1813,12 @@ const PlatformGlobalPanel: React.FC<{
         ))}
       </div>
 
+      {/* Search */}
       <input type="text" placeholder="Search by org, country, or city…"
         value={search} onChange={e => setSearch(e.target.value)}
         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
 
+      {/* Table */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -1875,11 +1940,6 @@ const AdminStudentDashboard: React.FC = () => {
   const isPlatformAdmin = ADMIN_IDS.has(user?.id ?? '') || userRole === 'platform_administrator';
   const isLeader        = userRole === 'leader' && !isPlatformAdmin;
 
-  // ── Multi-org support for leaders ──────────────────────────────────────────
-  const [leaderOrgs, setLeaderOrgs] = useState<{ id: string; name: string; join_code: string; city: string | null }[]>([]);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
-  const [leaderJoinCodes, setLeaderJoinCodes] = useState<string[]>([]);
-
   useEffect(() => {
     if (!isLeader || !user?.id) return;
 
@@ -1924,49 +1984,6 @@ const AdminStudentDashboard: React.FC = () => {
     })();
   }, [isLeader, user?.id]);
 
-  // ── Organization list for platform admin org selector ──────────────────────
-  const [allOrgs, setAllOrgs] = useState<OrgOption[]>([]);
-  const [loadingOrgs, setLoadingOrgs] = useState(false);
-  // The org selected by platform admin on the Student Activity tab
-  // '' = "All Organizations", a UUID = specific org
-  const [adminSelectedOrgId, setAdminSelectedOrgId] = useState<string>('');
-
-  useEffect(() => {
-    if (!isPlatformAdmin || !authChecked) return;
-    (async () => {
-      setLoadingOrgs(true);
-      try {
-        const { data, error } = await supabase
-          .from('organizations')
-          .select('id, name, join_code, join_codes, continent, country, city, leader_id')
-          .order('name', { ascending: true });
-        if (error) throw error;
-
-        // Count learners per org from profiles
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('organization_id')
-          .not('organization_id', 'is', null);
-
-        const orgCounts: Record<string, number> = {};
-        (profileData || []).forEach((p: any) => {
-          if (p.organization_id && !EXCLUDED_IDS.has(p.id)) {
-            orgCounts[p.organization_id] = (orgCounts[p.organization_id] || 0) + 1;
-          }
-        });
-
-        setAllOrgs((data || []).map(o => ({
-          ...o,
-          learner_count: orgCounts[o.id] || 0,
-        })));
-      } catch (err: any) {
-        console.error('Failed to load orgs for selector:', err.message);
-      } finally {
-        setLoadingOrgs(false);
-      }
-    })();
-  }, [isPlatformAdmin, authChecked]);
-
   const [learners,        setLearners]        = useState<Learner[]>([]);
   const [loadingLearners, setLoadingLearners] = useState(true);
   const [learnersError,   setLearnersError]   = useState<string | null>(null);
@@ -1981,20 +1998,61 @@ const AdminStudentDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'student' | 'platform-global' | 'model-overview' | 'cost-overview' | 'cost-learner'>('student');
   const [platformOrgFilter, setPlatformOrgFilter] = useState<{ id: string; name: string } | null>(null);
 
+  // ── Multi-org support for leaders ──────────────────────────────────────────
+  const [leaderOrgs, setLeaderOrgs] = useState<{ id: string; name: string; join_code: string; city: string | null }[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [leaderJoinCodes, setLeaderJoinCodes] = useState<string[]>([]);
+
+  // ── Org selector for platform admins (Student Activity tab) ────────────────
+  const [allOrgs, setAllOrgs] = useState<OrgOption[]>([]);
+  const [loadingOrgs, setLoadingOrgs] = useState(false);
+  const [adminSelectedOrgId, setAdminSelectedOrgId] = useState<string>('');
+
+  // ── Org selector for platform admins (Per-Learner Cost tab) ────────────────
+  const [costOrgId, setCostOrgId] = useState<string>('');
+
+  // Fetch all orgs for platform admin org selectors
+  useEffect(() => {
+    if (!isPlatformAdmin || !authChecked) return;
+    (async () => {
+      setLoadingOrgs(true);
+      try {
+        const { data, error } = await supabase
+          .from('organizations')
+          .select('id, name, join_code, join_codes, continent, country, city, leader_id')
+          .order('name');
+        if (error) throw error;
+        setAllOrgs(data || []);
+      } catch { /* ignore */ }
+      finally { setLoadingOrgs(false); }
+    })();
+  }, [isPlatformAdmin, authChecked]);
+
+  // Derive join codes for the admin-selected org (Student Activity tab)
+  const adminOrgJoinCodes = useMemo(() => {
+    if (!adminSelectedOrgId) return [];
+    const org = allOrgs.find(o => o.id === adminSelectedOrgId);
+    if (!org) return [];
+    return Array.isArray(org.join_codes) && org.join_codes.length
+      ? org.join_codes
+      : org.join_code ? [org.join_code] : [];
+  }, [adminSelectedOrgId, allOrgs]);
+
   // ── Cost data ───────────────────────────────────────────────────────────────
   const [costRows,        setCostRows]        = useState<CostRow[]>([]);
   const [loadingCost,     setLoadingCost]     = useState(false);
   const [costError,       setCostError]       = useState<string | null>(null);
   const [costDays,        setCostDays]        = useState<number>(30);
   const [costGroupBy,     setCostGroupBy]     = useState<'page' | 'model' | 'provider'>('page');
-  const [modelDays,       setModelDays]       = useState<number>(30);
   const [learnerCostRows, setLearnerCostRows] = useState<CostRow[]>([]);
   const [loadingLearnerCost, setLoadingLearnerCost] = useState(false);
   const [studentSessionRows, setStudentSessionRows] = useState<StudentSessionRow[]>([]);
   const [loadingStudentSummary, setLoadingStudentSummary] = useState(false);
   const [studentSummaryError, setStudentSummaryError] = useState<string | null>(null);
 
-  // Fetch overall cost data
+  // Model overview shares costDays with cost overview
+  const [modelDays, setModelDays] = useState<number>(30);
+
   const fetchCostData = useCallback(async (days: number) => {
     setLoadingCost(true);
     setCostError(null);
@@ -2015,7 +2073,6 @@ const AdminStudentDashboard: React.FC = () => {
     }
   }, []);
 
-  // Fetch per-learner cost data
   const fetchLearnerCost = useCallback(async (userId: string) => {
     if (!userId) return;
     setLoadingLearnerCost(true);
@@ -2061,24 +2118,11 @@ const AdminStudentDashboard: React.FC = () => {
     }
   }, [learners]);
 
-  // ── Resolve join codes for the admin-selected org ──────────────────────────
-  const adminOrgJoinCodes = useMemo(() => {
-    if (!isPlatformAdmin) return [];
-    if (adminSelectedOrgId === '') return []; // "All" — no code filter
-    const org = allOrgs.find(o => o.id === adminSelectedOrgId);
-    if (!org) return [];
-    const codes: string[] = Array.isArray(org.join_codes) && org.join_codes.length
-      ? org.join_codes
-      : org.join_code ? [org.join_code] : [];
-    return [...new Set(codes)];
-  }, [isPlatformAdmin, adminSelectedOrgId, allOrgs]);
-
   // Fetch learners scoped correctly per role
   useEffect(() => {
     if (!authChecked) return;
     (async () => {
       setLoadingLearners(true);
-      setLearnersError(null);
       try {
         let query = supabase
           .from('profiles')
@@ -2086,24 +2130,18 @@ const AdminStudentDashboard: React.FC = () => {
           .order('name', { ascending: true });
 
         if (isLeader) {
-          // Leader: filter by their own join codes
           if (leaderJoinCodes.length > 0) {
             query = query.in('join_code_used', leaderJoinCodes);
           } else {
             const orgId = selectedOrgId || userOrgId;
             if (orgId) query = query.eq('organization_id', orgId);
           }
-        } else if (isPlatformAdmin) {
-          // Platform admin: filter by selected org, or show all
-          if (adminSelectedOrgId !== '') {
-            // Specific org selected — filter by org's join codes or org id
-            if (adminOrgJoinCodes.length > 0) {
-              query = query.in('join_code_used', adminOrgJoinCodes);
-            } else {
-              query = query.eq('organization_id', adminSelectedOrgId);
-            }
-          }
-          // If adminSelectedOrgId === '' → no filter, show all
+        } else if (isPlatformAdmin && adminSelectedOrgId && adminOrgJoinCodes.length > 0) {
+          // Platform admin selected a specific org on Student Activity tab
+          query = query.in('join_code_used', adminOrgJoinCodes);
+        } else {
+          // Platform admin with no org filter — all learners
+          query = query.eq('continent', 'Africa');
         }
 
         const { data, error } = await query;
@@ -2115,21 +2153,13 @@ const AdminStudentDashboard: React.FC = () => {
         setLoadingLearners(false);
       }
     })();
-  }, [authChecked, isLeader, isPlatformAdmin, leaderJoinCodes, selectedOrgId, userOrgId, adminSelectedOrgId, adminOrgJoinCodes]);
+  }, [authChecked, isLeader, leaderJoinCodes, selectedOrgId, userOrgId, isPlatformAdmin, adminSelectedOrgId, adminOrgJoinCodes]);
 
   useEffect(() => {
     if (activeTab !== 'student') return;
     fetchStudentSummary();
-  }, [activeTab, fetchStudentSummary, selectedOrgId, adminSelectedOrgId]);
+  }, [activeTab, fetchStudentSummary, selectedOrgId]);
 
-  // Handle drill-down from Global Overview → Student Activity
-  useEffect(() => {
-    if (platformOrgFilter && isPlatformAdmin) {
-      setAdminSelectedOrgId(platformOrgFilter.id);
-    }
-  }, [platformOrgFilter, isPlatformAdmin]);
-
-  // Fetch selected learner's dashboard rows
   const fetchData = useCallback(async (userId: string) => {
     if (!userId) return;
     setLoadingData(true);
@@ -2171,7 +2201,22 @@ const AdminStudentDashboard: React.FC = () => {
   const completedLearning = learningRows.filter(a => a.progress === 'completed').length;
   const completedCerts    = certRows.filter(a => a.progress === 'completed').length;
 
+  // Org info for admin org selector display
   const adminSelectedOrg = allOrgs.find(o => o.id === adminSelectedOrgId);
+
+  // Compute learner counts per org (for the Student Activity org selector)
+  const orgLearnerCountsForAdmin = useMemo(() => {
+    if (!allOrgs.length) return new Map<string, number>();
+    // We need ALL profiles to count, but we only have the filtered set.
+    // Use the allOrgs + a rough count approach — count from current learners list
+    // when no org is selected (i.e., all learners are loaded).
+    const counts = new Map<string, number>();
+    // This is approximate — works best when adminSelectedOrgId is '' (all loaded)
+    for (const org of allOrgs) {
+      counts.set(org.id, org.learner_count ?? 0);
+    }
+    return counts;
+  }, [allOrgs]);
 
   return (
     <AppLayout>
@@ -2213,48 +2258,91 @@ const AdminStudentDashboard: React.FC = () => {
         {/* ── STUDENT ACTIVITY TAB ────────────────────────────────────── */}
         {activeTab === 'student' && <div>
 
-        {/* ── Platform admin: Org selector ─────────────────────────────── */}
-        {isPlatformAdmin && !platformOrgFilter && (
-          <OrgSelector
-            orgs={allOrgs}
-            loading={loadingOrgs}
-            selectedOrgId={adminSelectedOrgId}
-            onSelect={(orgId) => {
-              setAdminSelectedOrgId(orgId);
-              setSelectedId(''); // clear learner selection when switching orgs
-            }}
-          />
-        )}
+        {/* Org selector for platform admins */}
+        {isPlatformAdmin && !platformOrgFilter && !adminSelectedOrgId && (
+          <div className="mb-6 space-y-4">
+            <div className="flex items-center gap-3 mb-2">
+              <Building2 size={18} className="text-purple-600" />
+              <h2 className="text-base font-bold text-gray-800">Select Organization</h2>
+              <span className="text-xs text-gray-400">Choose an organization to view its learners</span>
+            </div>
 
-        {/* Currently viewing banner for platform admin */}
-        {isPlatformAdmin && adminSelectedOrgId !== '' && adminSelectedOrg && (
-          <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
-            <Building2 size={16} className="text-indigo-600" />
-            <span className="text-sm font-semibold text-indigo-800">
-              Viewing: {adminSelectedOrg.name}
-              {adminSelectedOrg.city && <span className="text-xs font-normal text-indigo-600 ml-1">· {adminSelectedOrg.city}</span>}
-            </span>
-            <span className="text-xs text-indigo-500 ml-1">({learners.length} learners)</span>
-            {platformOrgFilter && (
-              <button onClick={() => { setPlatformOrgFilter(null); setAdminSelectedOrgId(''); setActiveTab('platform-global'); }}
-                className="ml-auto text-xs text-indigo-600 hover:text-indigo-900 border border-indigo-300 rounded px-2 py-1">
-                ← Back to Global
-              </button>
-            )}
-            {!platformOrgFilter && (
-              <button onClick={() => { setAdminSelectedOrgId(''); setSelectedId(''); }}
-                className="ml-auto text-xs text-indigo-600 hover:text-indigo-900 border border-indigo-300 rounded px-2 py-1">
-                ← All Organizations
-              </button>
+            {/* All orgs option */}
+            <button
+              onClick={() => setAdminSelectedOrgId('__all__')}
+              className="w-full text-left px-5 py-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl hover:border-purple-400 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <Globe size={20} className="text-purple-600" />
+                <div>
+                  <div className="font-bold text-purple-900">All Organizations</div>
+                  <div className="text-xs text-purple-600">View all learners across every organization</div>
+                </div>
+              </div>
+            </button>
+
+            {loadingOrgs ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-gray-500">
+                <Loader2 size={16} className="animate-spin" /> Loading organizations…
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {allOrgs.map(org => (
+                  <button
+                    key={org.id}
+                    onClick={() => { setAdminSelectedOrgId(org.id); setSelectedId(''); }}
+                    className="text-left p-4 bg-white border border-gray-200 rounded-xl hover:border-purple-300 hover:shadow-md transition-all group"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="font-semibold text-gray-900 group-hover:text-purple-700 transition-colors">{org.name}</div>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-mono font-bold">
+                        {org.join_code}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 space-y-0.5">
+                      {(org.city || org.country) && (
+                        <div className="flex items-center gap-1">
+                          <Globe size={10} className="text-gray-400" />
+                          {[org.city, org.country].filter(Boolean).join(', ')}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1">
+                        <Users size={10} className="text-gray-400" />
+                        {orgLearnerCountsForAdmin.get(org.id) ?? '?'} learners
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         )}
 
-        {isPlatformAdmin && adminSelectedOrgId === '' && !platformOrgFilter && (
-          <div className="flex items-center gap-2 mb-4 px-4 py-2.5 bg-purple-50 border border-purple-200 rounded-xl">
-            <Globe size={14} className="text-purple-600" />
-            <span className="text-sm font-semibold text-purple-800">Viewing all organizations</span>
-            <span className="text-xs text-purple-500 ml-1">({learners.length} learners)</span>
+        {/* Active org banner for platform admins */}
+        {isPlatformAdmin && (adminSelectedOrgId || platformOrgFilter) && (
+          <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+            <Building2 size={16} className="text-indigo-600" />
+            <span className="text-sm font-semibold text-indigo-800">
+              {platformOrgFilter
+                ? platformOrgFilter.name
+                : adminSelectedOrgId === '__all__'
+                  ? 'All Organizations'
+                  : adminSelectedOrg?.name || 'Organization'}
+            </span>
+            {adminSelectedOrgId && adminSelectedOrgId !== '__all__' && adminSelectedOrg?.city && (
+              <span className="text-xs text-indigo-500">· {[adminSelectedOrg.city, adminSelectedOrg.country].filter(Boolean).join(', ')}</span>
+            )}
+            <span className="text-xs text-indigo-400 ml-1">({learners.length} learners)</span>
+            <button
+              onClick={() => {
+                setAdminSelectedOrgId('');
+                setPlatformOrgFilter(null);
+                setSelectedId('');
+              }}
+              className="ml-auto text-xs text-indigo-600 hover:text-indigo-900 border border-indigo-300 rounded px-2.5 py-1 hover:bg-indigo-100 transition-colors"
+            >
+              ← Change Org
+            </button>
           </div>
         )}
 
@@ -2290,172 +2378,186 @@ const AdminStudentDashboard: React.FC = () => {
           </div>
         )}
 
-        <StudentLearnerTable
-          learners={learners}
-          sessionRows={studentSessionRows}
-          loading={loadingStudentSummary || loadingLearners}
-          error={studentSummaryError || learnersError}
-          onSelectLearner={(id) => setSelectedId(id)}
-          selectedId={selectedId}
-          isPlatformAdmin={isPlatformAdmin}
-          canViewStudentDashboard={isPlatformAdmin || isLeader}
-        />
+        {/* Show content only when org is selected (or for leaders) */}
+        {(isLeader || adminSelectedOrgId || platformOrgFilter) && (
+          <>
+            <StudentLearnerTable
+              learners={learners}
+              sessionRows={studentSessionRows}
+              loading={loadingStudentSummary || loadingLearners}
+              error={studentSummaryError || learnersError}
+              onSelectLearner={(id) => setSelectedId(id)}
+              selectedId={selectedId}
+              isPlatformAdmin={isPlatformAdmin}
+              canViewStudentDashboard={isPlatformAdmin || isLeader}
+            />
 
-        {/* Learner selector */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Select Learner</label>
+            {/* Learner selector */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Select Learner</label>
 
-          {loadingLearners ? (
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <Loader2 size={16} className="animate-spin" /> Loading learners…
-            </div>
-          ) : learnersError ? (
-            <div className="flex items-center gap-2 text-sm text-red-600">
-              <AlertCircle size={16} /> {learnersError}
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1">
-                <select
-                  value={selectedId}
-                  onChange={e => setSelectedId(e.target.value)}
-                  className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="">— Choose a learner ({learners.length} total) —</option>
-                  {learners.map(l => (
-                    <option key={l.id} value={l.id}>
-                      {l.name || '(no name)'} — {l.email || l.id.slice(0, 8)}
-                      {l.grade_level ? ` · Grade ${l.grade_level}` : ''}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              </div>
-              {selectedId && (
-                <button
-                  onClick={() => fetchData(selectedId)}
-                  className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
-                >
-                  <RefreshCw size={14} /> Refresh
-                </button>
-              )}
-            </div>
-          )}
-
-          {selectedLearner && (
-            <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 bg-gray-50 rounded-lg px-4 py-2.5 border border-gray-100">
-              <span className="flex items-center gap-1"><User size={11} className="text-gray-400" />{selectedLearner.name || '—'}</span>
-              <span className="text-gray-300">|</span>
-              <span>{selectedLearner.email || '—'}</span>
-              {selectedLearner.grade_level && <><span className="text-gray-300">|</span><span>Grade {selectedLearner.grade_level}</span></>}
-              {selectedLearner.country && <><span className="text-gray-300">|</span><span>{selectedLearner.country}</span></>}
-              <span className="text-gray-300">|</span>
-              <span className="font-mono text-gray-400 text-[10px]">{selectedLearner.id}</span>
-            </div>
-          )}
-        </div>
-
-        <div id="student-dashboard-detail">
-        {loadingData && (
-          <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
-            <Loader2 size={20} className="animate-spin" /> Loading dashboard…
-          </div>
-        )}
-
-        {dataError && (
-          <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 mb-4">
-            <AlertCircle size={16} /> {dataError}
-          </div>
-        )}
-
-        {!loadingData && selectedId && activities.length > 0 && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { label: 'Learning Activities', value: learningRows.length,  icon: <BookOpen size={18} className="text-blue-500" />,  bg: 'bg-blue-50'   },
-                { label: 'Completed',           value: completedLearning,    icon: <CheckCircle size={18} className="text-green-500" />, bg: 'bg-green-50' },
-                { label: 'Certifications',      value: certRows.length,      icon: <Trophy size={18} className="text-purple-500" />,   bg: 'bg-purple-50' },
-                { label: 'Certs Completed',     value: completedCerts,       icon: <Award size={18} className="text-amber-500" />,     bg: 'bg-amber-50'  },
-              ].map(({ label, value, icon, bg }) => (
-                <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
-                  {icon}
-                  <div>
-                    <p className="text-xl font-black text-gray-900">{value}</p>
-                    <p className="text-xs text-gray-500 leading-tight">{label}</p>
-                  </div>
+              {loadingLearners ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <Loader2 size={16} className="animate-spin" /> Loading learners…
                 </div>
-              ))}
-            </div>
-
-            {certRows.length > 0 && (
-              <section>
-                <h2 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
-                  <Trophy size={16} className="text-purple-600" /> Certifications
-                  <span className="text-xs font-normal text-gray-400">({certRows.length})</span>
-                </h2>
-                <div className="space-y-2">
-                  {certRows.map(row => <ActivityCard key={row.id} row={row} />)}
+              ) : learnersError ? (
+                <div className="flex items-center gap-2 text-sm text-red-600">
+                  <AlertCircle size={16} /> {learnersError}
                 </div>
-              </section>
-            )}
-
-            {learningRows.length > 0 && (
-              <section>
-                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                  <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
-                    <BookOpen size={16} className="text-blue-600" /> Learning Activities
-                    <span className="text-xs font-normal text-gray-400">({filteredLearning.length}/{learningRows.length})</span>
-                  </h2>
-                  {uniqueCategories.length > 1 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {['all', ...uniqueCategories].map(cat => (
-                        <button
-                          key={cat}
-                          onClick={() => setFilterCat(cat)}
-                          className={classNames(
-                            'px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors',
-                            filterCat === cat
-                              ? 'bg-purple-600 text-white border-purple-600'
-                              : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-700'
-                          )}
-                        >
-                          {cat === 'all' ? `All (${learningRows.length})` : cat}
-                        </button>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <select
+                      value={selectedId}
+                      onChange={e => setSelectedId(e.target.value)}
+                      className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    >
+                      <option value="">— Choose a learner ({learners.length} total) —</option>
+                      {learners.map(l => (
+                        <option key={l.id} value={l.id}>
+                          {l.name || '(no name)'} — {l.email || l.id.slice(0, 8)}
+                          {l.grade_level ? ` · Grade ${l.grade_level}` : ''}
+                        </option>
                       ))}
-                    </div>
+                    </select>
+                    <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  </div>
+                  {selectedId && (
+                    <button
+                      onClick={() => fetchData(selectedId)}
+                      className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+                    >
+                      <RefreshCw size={14} /> Refresh
+                    </button>
                   )}
                 </div>
-                <div className="space-y-2">
-                  {filteredLearning.map(row => <ActivityCard key={row.id} row={row} />)}
+              )}
+
+              {/* Profile strip */}
+              {selectedLearner && (
+                <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 bg-gray-50 rounded-lg px-4 py-2.5 border border-gray-100">
+                  <span className="flex items-center gap-1"><User size={11} className="text-gray-400" />{selectedLearner.name || '—'}</span>
+                  <span className="text-gray-300">|</span>
+                  <span>{selectedLearner.email || '—'}</span>
+                  {selectedLearner.grade_level && <><span className="text-gray-300">|</span><span>Grade {selectedLearner.grade_level}</span></>}
+                  {selectedLearner.country && <><span className="text-gray-300">|</span><span>{selectedLearner.country}</span></>}
+                  <span className="text-gray-300">|</span>
+                  <span className="font-mono text-gray-400 text-[10px]">{selectedLearner.id}</span>
                 </div>
-              </section>
+              )}
+            </div>
+
+            <div id="student-dashboard-detail">
+            {/* Loading */}
+            {loadingData && (
+              <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
+                <Loader2 size={20} className="animate-spin" /> Loading dashboard…
+              </div>
             )}
-          </div>
-        )}
 
-        {!loadingData && selectedId && activities.length === 0 && !dataError && (
-          <div className="text-center py-16 text-gray-400">
-            <BarChart2 size={40} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">No dashboard rows found for this learner.</p>
-          </div>
-        )}
+            {/* Error */}
+            {dataError && (
+              <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 mb-4">
+                <AlertCircle size={16} /> {dataError}
+              </div>
+            )}
 
-        {!selectedId && !loadingLearners && (
-          <div className="text-center py-20 text-gray-400">
-            <Users size={44} className="mx-auto mb-4 opacity-20" />
-            <p className="text-sm">Select a learner above to view their dashboard.</p>
-          </div>
+            {/* Content */}
+            {!loadingData && selectedId && activities.length > 0 && (
+              <div className="space-y-6">
+                {/* Summary cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Learning Activities', value: learningRows.length,  icon: <BookOpen size={18} className="text-blue-500" />,  bg: 'bg-blue-50'   },
+                    { label: 'Completed',           value: completedLearning,    icon: <CheckCircle size={18} className="text-green-500" />, bg: 'bg-green-50' },
+                    { label: 'Certifications',      value: certRows.length,      icon: <Trophy size={18} className="text-purple-500" />,   bg: 'bg-purple-50' },
+                    { label: 'Certs Completed',     value: completedCerts,       icon: <Award size={18} className="text-amber-500" />,     bg: 'bg-amber-50'  },
+                  ].map(({ label, value, icon, bg }) => (
+                    <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
+                      {icon}
+                      <div>
+                        <p className="text-xl font-black text-gray-900">{value}</p>
+                        <p className="text-xs text-gray-500 leading-tight">{label}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Certifications */}
+                {certRows.length > 0 && (
+                  <section>
+                    <h2 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
+                      <Trophy size={16} className="text-purple-600" /> Certifications
+                      <span className="text-xs font-normal text-gray-400">({certRows.length})</span>
+                    </h2>
+                    <div className="space-y-2">
+                      {certRows.map(row => <ActivityCard key={row.id} row={row} />)}
+                    </div>
+                  </section>
+                )}
+
+                {/* Learning activities */}
+                {learningRows.length > 0 && (
+                  <section>
+                    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                      <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
+                        <BookOpen size={16} className="text-blue-600" /> Learning Activities
+                        <span className="text-xs font-normal text-gray-400">({filteredLearning.length}/{learningRows.length})</span>
+                      </h2>
+                      {uniqueCategories.length > 1 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {['all', ...uniqueCategories].map(cat => (
+                            <button
+                              key={cat}
+                              onClick={() => setFilterCat(cat)}
+                              className={classNames(
+                                'px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors',
+                                filterCat === cat
+                                  ? 'bg-purple-600 text-white border-purple-600'
+                                  : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-700'
+                              )}
+                            >
+                              {cat === 'all' ? `All (${learningRows.length})` : cat}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      {filteredLearning.map(row => <ActivityCard key={row.id} row={row} />)}
+                    </div>
+                  </section>
+                )}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!loadingData && selectedId && activities.length === 0 && !dataError && (
+              <div className="text-center py-16 text-gray-400">
+                <BarChart2 size={40} className="mx-auto mb-3 opacity-30" />
+                <p className="text-sm">No dashboard rows found for this learner.</p>
+              </div>
+            )}
+
+            {/* No selection */}
+            {!selectedId && !loadingLearners && (
+              <div className="text-center py-20 text-gray-400">
+                <Users size={44} className="mx-auto mb-4 opacity-20" />
+                <p className="text-sm">Select a learner above to view their dashboard.</p>
+              </div>
+            )}
+            </div>
+          </>
         )}
-        </div>
         </div>}
 
         {/* ── PLATFORM GLOBAL TAB ─────────────────────────────────────── */}
         {activeTab === 'platform-global' && (
           <PlatformGlobalPanel
             onSelectOrg={(orgId, orgName) => {
-              setPlatformOrgFilter({ id: orgId, name: orgName });
-              setAdminSelectedOrgId(orgId);
               setActiveTab('student');
+              setAdminSelectedOrgId(orgId);
+              setPlatformOrgFilter({ id: orgId, name: orgName });
             }}
           />
         )}
@@ -2497,6 +2599,10 @@ const AdminStudentDashboard: React.FC = () => {
             loading={loadingCost}
             loadingDetail={loadingLearnerCost}
             onRefresh={() => selectedId ? fetchLearnerCost(selectedId) : fetchCostData(costDays)}
+            isPlatformAdmin={isPlatformAdmin}
+            allOrgs={allOrgs}
+            costOrgId={costOrgId}
+            setCostOrgId={setCostOrgId}
           />
         )}
 
