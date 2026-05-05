@@ -273,13 +273,17 @@ const TaskStepper: React.FC<{ tasks: TaskDef[]; taskIndex: number; onJump: (idx:
                 const isCurrent = globalIdx === taskIndex;
                 const isFuture = globalIdx > taskIndex;
                 return (
-                  <button key={task.id} onClick={() => isDone && onJump(globalIdx)} disabled={isFuture}
+                  <button key={task.id}
+                    onClick={() => (isDone || isCurrent) && onJump(globalIdx)}
+                    disabled={isFuture}
+                    title={isDone ? 'Click to revisit and edit' : undefined}
                     className={`w-full text-left flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition-colors
                       ${isCurrent ? `${pm.bg} ${pm.border} border font-bold ${pm.color}` : ''}
                       ${isDone ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50 cursor-pointer' : ''}
                       ${isFuture ? 'text-gray-600 cursor-default' : ''}`}>
                     <span className="flex-shrink-0 text-sm">{isDone ? '✅' : isCurrent ? task.icon : '⬜'}</span>
-                    <span className="truncate">{task.label}</span>
+                    <span className="truncate flex-1">{task.label}</span>
+                    {isDone && <span className="text-[9px] text-gray-600 flex-shrink-0">✎</span>}
                   </button>
                 );
               })}
@@ -1081,7 +1085,7 @@ const FullStackDevelopmentPage: React.FC = () => {
 
       entry.aiExplanation = result.explanation;
       setAiExplanation(result.explanation || null);
-      if (result.explanation) setRightTab('teaching'); // auto-switch after generation
+      if (result.explanation) setRightTab('teaching');
 
       // Critique the student's prompt
       if (prompt.trim().length > 10) {
@@ -1158,12 +1162,30 @@ const FullStackDevelopmentPage: React.FC = () => {
     await persistSession(projectFiles, promptHistory, nextIdx, sessionContext);
   }, [taskIndex, projectFiles, promptHistory, sessionContext, persistSession]);
 
-  const handleOnboardingComplete = useCallback(async () => {
+  // Phase 0 completes -> show intro overview card (index 1)
+  const handleOnboardingComplete = useCallback(async (dataAnswer?: string) => {
     await ensureSession();
     setTaskIndex(1); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
-    speakText('Welcome! Let\'s start by setting up your Supabase project.');
-    await fetchTaskInstruction(1, projectFiles, sessionContext);
+    // Inject data plan into README.md so it travels with the project
+    if (dataAnswer) {
+      setProjectFiles(prev => prev.map(f => {
+        if (f.path !== 'README.md') return f;
+        const alreadyHasPlan = f.content.includes('## Data Plan (Phase 0)');
+        if (alreadyHasPlan) return f;
+        return { ...f, content: f.content + '\n\n---\n\n## Data Plan (Phase 0)\n\n' + dataAnswer };
+      }));
+    }
     setTimeout(() => persistSession(projectFiles, promptHistory, 1, sessionContext), 100);
+  }, [ensureSession, projectFiles, promptHistory, sessionContext, persistSession, setProjectFiles]);
+
+  // Intro overview card button -> advance to supabase_setup (index 2)
+  const handleIntroComplete = useCallback(async () => {
+    await ensureSession();
+    setTaskIndex(2); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
+    setRightTab('teaching');
+    speakText('Let\'s start by setting up your Supabase project.');
+    await fetchTaskInstruction(2, projectFiles, sessionContext);
+    setTimeout(() => persistSession(projectFiles, promptHistory, 2, sessionContext), 100);
   }, [ensureSession, projectFiles, promptHistory, sessionContext, persistSession, fetchTaskInstruction, speakText]);
 
   // ── Save + evaluate ──────────────────────────────────────────────────
@@ -1480,11 +1502,11 @@ const FullStackDevelopmentPage: React.FC = () => {
                       }
                       const newCtx = { ...sessionContext, importedSiteName: projName, dataRoleAnswer: dataAnswer };
                       setSessionContext(newCtx);
-                      handleOnboardingComplete();
+                      handleOnboardingComplete(dataAnswer);
                     }}
                   />
                 ) : (
-                  <FullStackOnboarding onComplete={handleOnboardingComplete} />
+                  <FullStackOnboarding onComplete={handleIntroComplete} />
                 )}
               </div>
             ) : (
@@ -1507,7 +1529,17 @@ const FullStackDevelopmentPage: React.FC = () => {
                 </div>
 
                 {/* Task stepper */}
-                <TaskStepper tasks={TASKS} taskIndex={taskIndex} onJump={idx => { setTaskIndex(idx); setSubTaskIndex(0); setSubTaskCritique(null); setPrompt(''); setAiExplanation(null); setErrorMsg(null); }} />
+                <TaskStepper tasks={TASKS} taskIndex={taskIndex} onJump={idx => {
+                  setTaskIndex(idx);
+                  setSubTaskIndex(0);
+                  setSubTaskCritique(null);
+                  setPrompt('');
+                  setAiExplanation(null);
+                  setErrorMsg(null);
+                  setTaskHasGeneration(false);
+                  setRightTab('teaching');
+                  fetchTaskInstruction(idx, projectFiles, sessionContext);
+                }} />
 
                 {/* Scrollable middle */}
                 <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
@@ -1674,10 +1706,9 @@ const FullStackDevelopmentPage: React.FC = () => {
             {/* Tab content */}
             <div className="flex-1 flex overflow-hidden">
 
-              {/* ── Teaching tab content ── */}
+              {/* ── Teaching tab ── */}
               {rightTab === 'teaching' && (
                 <div className="flex-1 overflow-y-auto" style={{ background: '#f9f6ef' }}>
-                  {/* Header */}
                   <div className="px-6 pt-5 pb-3 border-b" style={{ borderColor: '#e8e0d0' }}>
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-base">{currentTask?.icon}</span>
@@ -1689,7 +1720,6 @@ const FullStackDevelopmentPage: React.FC = () => {
                       Step {subTaskIndex + 1} of {taskInstruction?.subTasks?.length ?? 1}
                     </p>
                   </div>
-
                   <div className="px-6 py-5 space-y-5">
 
                     {/* What was built */}
@@ -1702,9 +1732,9 @@ const FullStackDevelopmentPage: React.FC = () => {
                         <p className="text-sm leading-relaxed" style={{ color: '#3d2b00' }}>{aiExplanation}</p>
                       </div>
                     ) : (
-                      <div className="rounded-xl p-4 border border-dashed" style={{ borderColor: '#d4c4a0', background: 'transparent' }}>
+                      <div className="rounded-xl p-4 border border-dashed" style={{ borderColor: '#d4c4a0' }}>
                         <p className="text-xs text-center" style={{ color: '#a08060' }}>
-                          Submit your first response — the AI's explanation of what it built will appear here.
+                          Submit your first response — the AI's explanation will appear here.
                         </p>
                       </div>
                     )}
@@ -1722,22 +1752,18 @@ const FullStackDevelopmentPage: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Critique / feedback */}
+                    {/* Critique feedback */}
                     {subTaskCritique && (
                       <div className="rounded-xl p-4 border" style={{
                         background: subTaskCritique.hasSuggestions ? '#fffbf0' : '#f0fff4',
                         borderColor: subTaskCritique.hasSuggestions ? '#e8c840' : '#68b868',
                       }}>
-                        <div className="flex items-center gap-2 mb-2">
-                          <p className="text-[10px] font-bold uppercase tracking-wide" style={{
-                            color: subTaskCritique.hasSuggestions ? '#9a7800' : '#2d7a2d'
-                          }}>
-                            {subTaskCritique.hasSuggestions ? 'Feedback on your response' : 'Step complete'}
-                          </p>
-                        </div>
-                        <p className="text-sm leading-relaxed" style={{ color: '#2a2a1a' }}>
-                          {subTaskCritique.feedback}
+                        <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{
+                          color: subTaskCritique.hasSuggestions ? '#9a7800' : '#2d7a2d'
+                        }}>
+                          {subTaskCritique.hasSuggestions ? 'Feedback on your response' : 'Step complete'}
                         </p>
+                        <p className="text-sm leading-relaxed" style={{ color: '#2a2a1a' }}>{subTaskCritique.feedback}</p>
                         {subTaskCritique.hasSuggestions && (
                           <p className="mt-2 text-[10px] italic" style={{ color: '#7a6a2a' }}>
                             Refine your response in the left panel, or move on when ready.
@@ -1746,7 +1772,7 @@ const FullStackDevelopmentPage: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Loading critique */}
+                    {/* Critique loading */}
                     {isCritiquingResponse && (
                       <div className="flex items-center gap-2 py-1">
                         <Loader2 size={12} className="animate-spin" style={{ color: '#8a6d3b' }} />
@@ -1764,13 +1790,18 @@ const FullStackDevelopmentPage: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Empty state */}
-                    {!aiExplanation && !taskInstruction?.subTaskTeaching?.[subTaskIndex] && !subTaskCritique && (
-                      <div className="flex flex-col items-center justify-center py-16 text-center">
-                        <Lightbulb size={32} style={{ color: '#d4c4a0' }} className="mb-3" />
-                        <p className="text-sm" style={{ color: '#a08060' }}>Teaching panel</p>
-                        <p className="text-xs mt-1" style={{ color: '#c0a880' }}>Submit a response to see feedback and explanations here.</p>
-                      </div>
+                    {/* Phase 0 data plan — always visible as reference */}
+                    {sessionContext.dataRoleAnswer && (
+                      <details className="rounded-xl border" style={{ borderColor: '#d4c4a0', background: '#fdf8f0' }}>
+                        <summary className="px-4 py-3 text-[10px] font-bold uppercase tracking-wide cursor-pointer" style={{ color: '#8a6d3b' }}>
+                          Your Phase 0 Data Plan
+                        </summary>
+                        <div className="px-4 pb-4">
+                          <p className="text-xs leading-relaxed whitespace-pre-wrap" style={{ color: '#5a4030' }}>
+                            {sessionContext.dataRoleAnswer}
+                          </p>
+                        </div>
+                      </details>
                     )}
 
                   </div>
