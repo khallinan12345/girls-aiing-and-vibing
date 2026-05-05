@@ -88,7 +88,7 @@ const PLANNING_TASKS: PlanningTask[] = [
 
 const WebProjectLoader: React.FC<{
   userId: string | null;
-  onProjectLoaded: (projName: string, planSummary: string) => void;
+  onProjectLoaded: (projName: string, planSummary: string, files: ProjectFile[]) => void;
 }> = ({ userId, onProjectLoaded }) => {
 
   const [projects, setProjects]           = React.useState<WebProject[]>([]);
@@ -338,7 +338,7 @@ const WebProjectLoader: React.FC<{
       for (let i = 0; i < PLANNING_TASKS.length; i++) {
         parts.push(PLANNING_TASKS[i].label + ': ' + answers[i]);
       }
-      onProjectLoaded(selected!.name, parts.join('\n\n'));
+      onProjectLoaded(selected!.name, parts.join('\n\n'), selected!.files);
     }
   };
 

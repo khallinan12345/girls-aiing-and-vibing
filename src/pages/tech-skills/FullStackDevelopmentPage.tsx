@@ -1470,8 +1470,14 @@ const FullStackDevelopmentPage: React.FC = () => {
                 {currentTask.id === 'load_web_project' ? (
                   <WebProjectLoader
                     userId={userId}
-                    onProjectLoaded={(projName, dataAnswer) => {
+                    onProjectLoaded={(projName, dataAnswer, projFiles) => {
                       setSessionName(projName + ' (Full-Stack)');
+                      if (projFiles && projFiles.length > 0) {
+                        setProjectFiles(mergeFiles(STARTER_FILES, projFiles));
+                        setActiveFilePath('src/App.jsx');
+                      }
+                      const newCtx = { ...sessionContext, importedSiteName: projName, dataRoleAnswer: dataAnswer };
+                      setSessionContext(newCtx);
                       handleOnboardingComplete();
                     }}
                   />
