@@ -267,7 +267,7 @@ const VibeCodingCertificationPage: React.FC = () => {
   }, [ensureRecord, user?.id]);
 
   const handleGetInstructionCritique = useCallback(async (instructions: string) => {
-    const result = await chatJSON({
+    const result = await chatJSON({ page: 'VibeCodingCertificationPage',
       messages: [{ role: 'user', content: `Evaluate these vibe coding instructions:\n\n${instructions}\n\nRubric:\n1. Problem Decomposition (0-3): breakdown into steps, inputs, outputs\n2. Prompt Engineering (0-3): specificity, constraints, success criteria\n\nRespond ONLY with JSON: {"problemDecomposition":{"score":0-3,"evidence":"...","improvement":"..."},"promptEngineering":{"score":0-3,"evidence":"...","improvement":"..."},"recommendation":"..."}` }],
       system: 'Evaluate coding instructions. Respond only with valid JSON.',
       max_tokens: 600, temperature: 0.3,
@@ -280,7 +280,7 @@ const VibeCodingCertificationPage: React.FC = () => {
     const prompt = isHTML
       ? `Generate a complete, self-contained HTML file:\n\n${instructions}\n\nSingle file, embedded CSS+JS, mobile-friendly. Respond with ONLY the HTML file.`
       : `Generate ${language} code:\n\n${instructions}\n\nClean, well-commented, executable. Respond with ONLY the code.`;
-    const code = await chatText({
+    const code = await chatText({ page: 'VibeCodingCertificationPage',
       messages: [{ role: 'user', content: prompt }],
       system: isHTML ? 'Generate ONLY a complete HTML file, no markdown.' : `Generate ONLY executable ${language} code, no markdown.`,
       max_tokens: 2500, temperature: 0.5,
@@ -292,7 +292,7 @@ const VibeCodingCertificationPage: React.FC = () => {
   }, []);
 
   const handleGetDebuggingHelp = useCallback(async (code: string, error: string, instructions: string) => {
-    return await chatText({
+    return await chatText({ page: 'VibeCodingCertificationPage',
       messages: [{ role: 'user', content: `Student's code error:\n\nINSTRUCTIONS:\n${instructions}\n\nCODE:\n\`\`\`\n${code}\n\`\`\`\n\nERROR:\n${error}\n\nExplain the error simply, suggest one fix, and advise how to improve the instructions.` }],
       system: "You are a patient coding tutor. Help students learn from errors.",
       max_tokens: 500, temperature: 0.7,
@@ -324,7 +324,7 @@ const VibeCodingCertificationPage: React.FC = () => {
         role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
         content: m.content,
       }));
-      const response = await chatText({
+      const response = await chatText({ page: 'VibeCodingCertificationPage',
         messages,
         system: `You are a vibe coding coach helping a student during their certification. The student is working on code that uses ${certLanguage}. Help them improve their prompts, understand errors, and iterate on their code. Be concise and encouraging.${certCode ? `\n\nTheir current code:\n\`\`\`${certLanguage}\n${certCode.slice(0, 1000)}\n\`\`\`` : ''}`,
         max_tokens: 300, temperature: 0.7,
@@ -374,7 +374,7 @@ Respond ONLY in this JSON format:
   "evidence": "<2-4 sentences referencing specific aspects of the code or prompt work>"
 }`;
 
-        const result = await chatJSON({
+        const result = await chatJSON({ page: 'VibeCodingCertificationPage',
           messages: [{ role: 'user', content: evalPrompt }],
           system: 'You are an expert vibe coding educator evaluating a student submission. Be fair, specific, and constructive. Respond only with valid JSON.',
           max_tokens: 400, temperature: 0.3,

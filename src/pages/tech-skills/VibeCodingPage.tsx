@@ -322,7 +322,7 @@ When they have a clear enough idea, encourage them to click "Create Vibe Coding 
         { role: 'user', content: userInput.trim() },
       ];
 
-      const response = await chatText({
+      const response = await chatText({ page: 'VibeCodingPage',
         model: 'claude-sonnet-4-6',
         messages,
         system: aiFacilitatorInstructions,
@@ -351,7 +351,7 @@ When they have a clear enough idea, encourage them to click "Create Vibe Coding 
     if (!userInput.trim() || isImproving) return;
     setIsImproving(true);
     try {
-      const improved = await chatText({
+      const improved = await chatText({ page: 'VibeCodingPage',
         model: 'claude-sonnet-4-6',
         messages: [{ role: 'user', content: `Improve the English grammar and clarity of this text. Keep the same meaning and voice. Return only the improved text:\n\n"${userInput}"` }],
         system: 'You are an English writing assistant. Return only the improved text, nothing else.',
@@ -416,7 +416,7 @@ When they have a clear enough idea, encourage them to click "Create Vibe Coding 
         .map(m => `${m.role === 'assistant' ? 'Coach' : 'Student'}: ${m.content}`)
         .join('\n\n');
 
-      const prompt = await chatText({
+      const prompt = await chatText({ page: 'VibeCodingPage',
         model: 'claude-sonnet-4-6',
         messages: [{
           role: 'user',
@@ -488,7 +488,7 @@ Respond with ONLY valid JSON:
   "recommendation": "<Should they improve (if scores <2) or proceed (if scores >=2)? One sentence.>"
 }`;
 
-    const result = await chatJSON({
+    const result = await chatJSON({ page: 'VibeCodingPage',
       model: 'claude-sonnet-4-6',
       messages: [{ role: 'user', content: critiquePrompt }],
       system: 'You are an expert at evaluating coding instructions. Respond only with valid JSON.',
@@ -504,7 +504,7 @@ Respond with ONLY valid JSON:
       ? `Generate a complete, self-contained HTML file based on these instructions:\n\n${instructions}\n\nREQUIREMENTS:\n- Single HTML file with embedded CSS and JavaScript\n- Mobile-friendly, works in any browser\n- No external dependencies except CDN libraries if needed\n- Clean, well-commented code\n\nRespond with ONLY the complete HTML file, no explanations or markdown formatting.`
       : `Generate ${language} code based on these instructions:\n\n${instructions}\n\nREQUIREMENTS:\n- Write clean, well-commented code\n- Include error handling where appropriate\n- Make it executable and testable\n- Keep it simple and readable\n\nRespond with ONLY the code, no explanations or markdown formatting.`;
 
-    const code = await chatText({
+    const code = await chatText({ page: 'VibeCodingPage',
       model: 'claude-sonnet-4-6',
       messages: [{ role: 'user', content: prompt }],
       system: isHTML
@@ -520,7 +520,7 @@ Respond with ONLY valid JSON:
   };
 
   const handleGetDebuggingHelp = async (code: string, error: string, instructions: string) => {
-    const advice = await chatText({
+    const advice = await chatText({ page: 'VibeCodingPage',
       model: 'claude-sonnet-4-6',
       messages: [{
         role: 'user',

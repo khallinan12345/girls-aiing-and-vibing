@@ -663,7 +663,7 @@ Respond ONLY in this JSON format:
   "evidence": "<2-4 sentences with specific references to the code>"
 }`;
 
-        const result = await chatJSON({
+        const result = await chatJSON({ page: 'FullStackCertificationPage',
           messages: [{ role: 'user', content: evalPrompt }],
           system: 'You are an expert full-stack web development educator evaluating student code. Be fair, specific, and constructive.',
           max_tokens: 400, temperature: 0.3,

@@ -197,7 +197,7 @@ const AIReadySkillsPage: React.FC = () => {
     if (!userResponse.trim() || isImproving) return;
     setIsImproving(true);
     try {
-      const result = await chatJSON({
+      const result = await chatJSON({ page: 'AIReadySkillsPage',
         messages: [{
           role: 'user',
           content: `You are an English language coach helping a student in rural Nigeria improve their writing.
@@ -536,7 +536,7 @@ Respond with ONLY the tailored prompt text, nothing else.
 `;
 
     try {
-      const tailored = await chatText({
+      const tailored = await chatText({ page: 'AIReadySkillsPage',
         messages: [{ role: 'user', content: userMessage }],
         system: 'You are an expert educational assessment designer creating contextualised certification challenge prompts. Always honour the communication level instruction — it controls vocabulary complexity and sentence structure. Each prompt must be specific to the learner\'s real-world context and structured so the learner knows exactly what to write.',
         max_tokens: 1000,
@@ -633,7 +633,7 @@ Respond ONLY in this JSON format:
 `;
 
     try {
-      const result = await chatJSON({
+      const result = await chatJSON({ page: 'AIReadySkillsPage',
         messages: [{ role: 'user', content: evaluationPrompt }],
         system: 'You are an expert educational assessor evaluating independent learner responses fairly. Ground every score in specific evidence from the response.',
         max_tokens: 800,
@@ -881,7 +881,7 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
 `;
 
     try {
-      const advice = await chatText({
+      const advice = await chatText({ page: 'AIReadySkillsPage',
         messages: [{ role: 'user', content: advicePrompt }],
         system: 'You are an encouraging and supportive learning coach. Always honour the communication level instruction — it controls vocabulary complexity and sentence structure. When a learner profile is provided, also tailor your tone, examples, and delivery style to match their preferences.',
         max_tokens: 800,
@@ -1091,7 +1091,7 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
         
         try {
           // Call OpenAI to generate concise description
-          const conciseDescription = await chatText({
+          const conciseDescription = await chatText({ page: 'AIReadySkillsPage',
             messages: [{
               role: 'user',
               content: `Generate a concise 1-2 sentence competency description for a professional certificate.

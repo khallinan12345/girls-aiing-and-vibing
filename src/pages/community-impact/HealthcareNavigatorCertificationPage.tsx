@@ -523,7 +523,7 @@ const HealthcareNavigatorCertificationPage: React.FC = () => {
     const updated = [...sessionMessages, userMsg];
     setSessionMessages(updated);
     try {
-      const reply = await chatText({
+      const reply = await chatText({ page: 'HealthcareNavigatorCertificationPage',
         messages: updated.map(m => ({ role: m.role, content: m.content })),
         system: activePersona.systemPrompt,
         max_tokens: 200, temperature: 0.8,
@@ -665,7 +665,7 @@ Return valid JSON only (no markdown, no code fences):
   "main_growth_area": "1-2 sentences on the clearest area for improvement with a specific suggestion"
 }`;
 
-      const result = await chatJSON({
+      const result = await chatJSON({ page: 'HealthcareNavigatorCertificationPage',
         messages: [{ role: 'user', content: prompt }],
         system: 'You are an expert evaluator of community health navigator skills for the Oloibiri, Nigeria context. Be specific. Always cite actual evidence. Score against the clinical reference provided. Patient safety is the highest priority in grading.',
         max_tokens: 1000, temperature: 0.2,

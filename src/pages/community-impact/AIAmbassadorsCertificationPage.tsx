@@ -482,7 +482,7 @@ const AIAmbassadorsCertificationPage: React.FC = () => {
     const updated = [...sessionMessages, userMsg];
     setSessionMessages(updated);
     try {
-      const reply = await chatText({
+      const reply = await chatText({ page: 'AIAmbassadorsCertificationPage',
         messages: updated.map(m => ({ role: m.role, content: m.content })),
         system: activePersona.systemPrompt,
         max_tokens: 200,
@@ -626,7 +626,7 @@ Return valid JSON only (no markdown, no code fences):
   "main_growth_area": "1-2 sentences on the clearest area for improvement"
 }`;
 
-      const result = await chatJSON({
+      const result = await chatJSON({ page: 'AIAmbassadorsCertificationPage',
         messages: [{ role: 'user', content: prompt }],
         system: 'You are an expert evaluator of community AI education skills. Be specific. Always cite actual evidence from the portfolio. Scoring must be fair and calibrated.',
         max_tokens: 900,

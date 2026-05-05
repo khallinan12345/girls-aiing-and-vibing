@@ -499,7 +499,7 @@ Respond ONLY in this JSON format:
   "evidence": "<2-4 sentences explaining the score with specific references to the student's prompts and process>"
 }`;
 
-        const result = await chatJSON({
+        const result = await chatJSON({ page: 'AIImageCertificationPage',
           messages: [{ role: 'user', content: evalPrompt }],
           system: 'You are an expert AI image creation educator. Evaluate student work fairly based on their demonstrated prompt engineering skills, creative choices, and iterative process.',
           max_tokens: 400, temperature: 0.3,

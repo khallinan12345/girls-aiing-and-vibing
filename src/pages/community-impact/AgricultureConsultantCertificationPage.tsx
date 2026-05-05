@@ -512,7 +512,7 @@ const AgricultureConsultantCertificationPage: React.FC = () => {
     const updated = [...sessionMessages, userMsg];
     setSessionMessages(updated);
     try {
-      const reply = await chatText({
+      const reply = await chatText({ page: 'AgricultureConsultantCertificationPage',
         messages: updated.map(m => ({ role: m.role, content: m.content })),
         system: activePersona.systemPrompt,
         max_tokens: 200,
@@ -655,7 +655,7 @@ Return valid JSON only (no markdown, no code fences):
   "main_growth_area": "1-2 sentences on the clearest area for improvement with a specific suggestion"
 }`;
 
-      const result = await chatJSON({
+      const result = await chatJSON({ page: 'AgricultureConsultantCertificationPage',
         messages: [{ role: 'user', content: prompt }],
         system: 'You are an expert evaluator of agricultural extension and consulting skills for the Niger Delta context. Be specific. Always cite actual evidence from the portfolio. Scoring must be fair and calibrated to the Oloibiri community context.',
         max_tokens: 900,

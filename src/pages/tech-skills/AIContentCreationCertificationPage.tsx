@@ -437,7 +437,7 @@ If the section is empty, give them a strong starting example they can adapt.
 Keep your response focused on this one section. Max 200 words.`;
 
     try {
-      const result = await chatJSON({
+      const result = await chatJSON({ page: 'AIContentCreationCertificationPage',
         messages: [{ role: 'user', content: userPrompt }],
         system: systemPrompt + '\n\nRespond ONLY in this JSON format: { "suggestion": "...", "tip": "...", "applyDirectly": true/false }',
         max_tokens: 500, temperature: 0.5,
@@ -509,7 +509,7 @@ Respond ONLY in this JSON format:
   "evidence": "<2-4 sentences referencing specific content from the portfolio>"
 }`;
 
-        const result = await chatJSON({
+        const result = await chatJSON({ page: 'AIContentCreationCertificationPage',
           messages: [{ role: 'user', content: evalPrompt }],
           system: 'You are an expert content creation educator evaluating a student\'s content portfolio. Be fair, specific, and constructive. Reward clarity, audience awareness, and purposeful writing.',
           max_tokens: 400, temperature: 0.3,

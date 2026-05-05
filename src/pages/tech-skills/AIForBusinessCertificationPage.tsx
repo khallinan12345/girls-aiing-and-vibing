@@ -442,7 +442,7 @@ Respond ONLY in this JSON format:
   "evidence": "<2-4 sentences referencing specific content from the canvas>"
 }`;
 
-        const result = await chatJSON({
+        const result = await chatJSON({ page: 'AIForBusinessCertificationPage',
           messages: [{ role: 'user', content: evalPrompt }],
           system: 'You are an expert entrepreneurship educator evaluating a student\'s business canvas. Be fair, specific, and constructive. Reward clarity, specificity, and realistic thinking.',
           max_tokens: 400, temperature: 0.3,
