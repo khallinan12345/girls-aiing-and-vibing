@@ -143,9 +143,13 @@ const PRICING: Record<string, { input: number; output: number; label: string }> 
 
 const modelLabel = (m: string) => PRICING[m]?.label || m;
 
+const fmtCost = (n: number) => n < 0.001 ? '<$0.001' : `$${n.toFixed(3)}`;
+
 const fmtTokens = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : `${n}`;
-const numCost = (v: number | string): number => typeof v === "number" ? v : parseFloat(String(v)) || 0;
+
+// Safety coercion: Supabase may return numeric(10,6) as a string in some environments
+const numCost = (v: number | string): number => typeof v === 'number' ? v : parseFloat(String(v)) || 0;
 
 const progressColor = (p: string) => {
   if (p === 'completed') return 'bg-green-100 text-green-800 border-green-200';
@@ -547,7 +551,6 @@ const StudentLearnerTable: React.FC<{
   const _now = new Date();
   const monthStartMs = Date.UTC(_now.getUTCFullYear(), _now.getUTCMonth(), 1);
 
-  // Compute summaries inline (no useMemo)
   const summaries: StudentSummary[] = learners.map((l) => {
     const rows = sessionRows.filter((r) => r.user_id === l.id);
     const engaged = rows.filter((r) => isEngagedSession(r.progress));
@@ -560,9 +563,9 @@ const StudentLearnerTable: React.FC<{
       const key = normalizeCategory(row.category_activity);
       byCategory[key] = (byCategory[key] || 0) + 1;
     }
-    const certRows = rows.filter((r) => (r.category_activity || '') === 'Certification');
-    const certAttempted = certRows.filter((r) => isEngagedSession(r.progress)).length;
-    const certAchieved = certRows.filter((r) => r.progress === 'completed').length;
+    const cRows = rows.filter((r) => (r.category_activity || '') === 'Certification');
+    const certAttempted = cRows.filter((r) => isEngagedSession(r.progress)).length;
+    const certAchieved = cRows.filter((r) => r.progress === 'completed').length;
     const completed = rows.filter((r) => r.progress === 'completed').length;
     const completionRate = rows.length > 0 ? (completed / rows.length) * 100 : 0;
     const lastActiveAt = rows.reduce<string | null>((acc, r) => {
@@ -623,13 +626,8 @@ const StudentLearnerTable: React.FC<{
         <div className="flex items-center gap-3 flex-wrap">
           <h2 className="text-sm font-bold text-gray-800">Student Learner Overview</h2>
           <span className="text-xs text-gray-400">{filtered.length} learners</span>
-          <input
-            type="text"
-            placeholder="Search by name or email..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="ml-auto w-full sm:w-72 border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
-          />
+          <input type="text" placeholder="Search by name or email..." value={search} onChange={(e) => setSearch(e.target.value)}
+            className="ml-auto w-full sm:w-72 border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500" />
         </div>
       </div>
 
@@ -667,9 +665,7 @@ const StudentLearnerTable: React.FC<{
                 <tr key={s.id} className={classNames('hover:bg-purple-50 transition-colors', selectedId === s.id ? 'bg-purple-50/70' : '')}>
                   <td className="px-4 py-3">
                     {canViewStudentDashboard ? (
-                      <button type="button" onClick={() => handleViewDashboard(s.id)} className="font-semibold text-purple-700 hover:underline text-left">
-                        {s.name}
-                      </button>
+                      <button type="button" onClick={() => handleViewDashboard(s.id)} className="font-semibold text-purple-700 hover:underline text-left">{s.name}</button>
                     ) : (
                       <span className="font-semibold text-gray-800">{s.name}</span>
                     )}
@@ -788,7 +784,6 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
   const grouped = groupCostRows(rows, groupBy);
   const maxCost = grouped[0]?.[1].cost || 1;
 
-  // Get all unique providers
   const allProviders = [...new Set(rows.map(r => r.provider))].sort();
 
   if (loading) return (
@@ -801,13 +796,11 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
     <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
       <p className="font-semibold mb-1">Cost data unavailable</p>
       <p>{error}</p>
-      <p className="mt-2 text-xs">Deploy the updated <code className="bg-amber-100 px-1 rounded">chat.js</code> and run <code className="bg-amber-100 px-1 rounded">create_api_cost_log.sql</code> in Supabase to enable cost tracking.</p>
     </div>
   );
 
   return (
     <div className="space-y-6">
-      {/* Controls */}
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
           {([7, 30, 90] as const).map(d => (
@@ -832,7 +825,6 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         </button>
       </div>
 
-      {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Paid API cost', value: `$${paidCost.toFixed(2)}`, sub: `last ${days} days`, icon: <DollarSign size={16} className="text-blue-500" />, bg: 'bg-blue-50' },
@@ -851,7 +843,6 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         ))}
       </div>
 
-      {/* Cost by group */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
         <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
           <DollarSign size={14} className="text-gray-400" />
@@ -885,7 +876,6 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         )}
       </div>
 
-      {/* Daily trend */}
       {dayEntries.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100">
@@ -911,7 +901,6 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         </div>
       )}
 
-      {/* Provider split */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         {allProviders.map(provider => {
           const pRows = rows.filter(r => r.provider === provider);
@@ -958,17 +947,9 @@ const ModelOverviewPanel: React.FC<{
   const [sortKey, setSortKey] = useState<'model' | 'provider' | 'requests' | 'users' | 'inTok' | 'outTok' | 'cost'>('requests');
   const [sortAsc, setSortAsc] = useState(false);
 
-  // Build per-model stats
   type ModelStat = {
-    model: string;
-    label: string;
-    provider: string;
-    requests: number;
-    users: number;
-    inTok: number;
-    outTok: number;
-    cacheHit: number;
-    cost: number;
+    model: string; label: string; provider: string;
+    requests: number; users: number; inTok: number; outTok: number; cacheHit: number; cost: number;
     topPages: string[];
   };
 
@@ -987,14 +968,9 @@ const ModelOverviewPanel: React.FC<{
       const userSet = new Set<string>();
       if (r.user_id) userSet.add(r.user_id);
       modelMap.set(r.model, {
-        provider: r.provider,
-        requests: 1,
-        userSet,
-        inTok: r.input_tokens,
-        outTok: r.output_tokens,
-        cacheHit: r.cache_hit_tokens,
-        cost: numCost(r.estimated_cost_usd),
-        pageCounts: { [r.page]: 1 },
+        provider: r.provider, requests: 1, userSet,
+        inTok: r.input_tokens, outTok: r.output_tokens, cacheHit: r.cache_hit_tokens,
+        cost: numCost(r.estimated_cost_usd), pageCounts: { [r.page]: 1 },
       });
     }
   }
@@ -1002,18 +978,7 @@ const ModelOverviewPanel: React.FC<{
   const modelStats: ModelStat[] = [];
   modelMap.forEach((val, model) => {
     const topPages = Object.entries(val.pageCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([p]) => p);
-    modelStats.push({
-      model,
-      label: modelLabel(model),
-      provider: val.provider,
-      requests: val.requests,
-      users: val.userSet.size,
-      inTok: val.inTok,
-      outTok: val.outTok,
-      cacheHit: val.cacheHit,
-      cost: val.cost,
-      topPages,
-    });
+    modelStats.push({ model, label: modelLabel(model), provider: val.provider, requests: val.requests, users: val.userSet.size, inTok: val.inTok, outTok: val.outTok, cacheHit: val.cacheHit, cost: val.cost, topPages });
   });
 
   const sortedModels = [...modelStats].sort((a, b) => {
@@ -1045,7 +1010,6 @@ const ModelOverviewPanel: React.FC<{
   const freePct = totalRequests > 0 ? (freeRequests / totalRequests * 100) : 0;
   const maxReqs = Math.max(...modelStats.map(m => m.requests), 1);
 
-  // Provider distribution
   const providerMap = new Map<string, { requests: number; cost: number }>();
   rows.forEach(r => {
     const existing = providerMap.get(r.provider) || { requests: 0, cost: 0 };
@@ -1054,7 +1018,6 @@ const ModelOverviewPanel: React.FC<{
   const providerStats = [...providerMap.entries()].sort((a, b) => b[1].requests - a[1].requests);
   const maxProvReqs = providerStats[0]?.[1].requests || 1;
 
-  // Daily model usage (last 14 days)
   const dailyModelMap = new Map<string, Map<string, number>>();
   rows.forEach(r => {
     const day = r.logged_at.slice(0, 10);
@@ -1074,14 +1037,12 @@ const ModelOverviewPanel: React.FC<{
 
   if (error) return (
     <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
-      <p className="font-semibold mb-1">Model data unavailable</p>
-      <p>{error}</p>
+      <p className="font-semibold mb-1">Model data unavailable</p><p>{error}</p>
     </div>
   );
 
   return (
     <div className="space-y-6">
-      {/* Controls */}
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
           {([7, 30, 90] as const).map(d => (
@@ -1097,7 +1058,6 @@ const ModelOverviewPanel: React.FC<{
         </button>
       </div>
 
-      {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Total requests', value: totalRequests.toLocaleString(), sub: `last ${days} days`, icon: <Activity size={16} className="text-purple-500" />, bg: 'bg-purple-50' },
@@ -1116,7 +1076,6 @@ const ModelOverviewPanel: React.FC<{
         ))}
       </div>
 
-      {/* Requests by Model table */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
           <Server size={14} className="text-gray-400" />
@@ -1160,8 +1119,7 @@ const ModelOverviewPanel: React.FC<{
                       <td className="px-4 py-3">
                         <div className="font-semibold text-gray-800 font-mono">{m.requests.toLocaleString()}</div>
                         <div className="mt-1 bg-gray-100 rounded-full h-1.5 w-20">
-                          <div className={classNames('h-1.5 rounded-full', pc.bar)}
-                            style={{ width: `${(m.requests / maxReqs * 100).toFixed(1)}%` }} />
+                          <div className={classNames('h-1.5 rounded-full', pc.bar)} style={{ width: `${(m.requests / maxReqs * 100).toFixed(1)}%` }} />
                         </div>
                       </td>
                       <td className="px-4 py-3 font-mono text-gray-600">{m.users}</td>
@@ -1196,7 +1154,6 @@ const ModelOverviewPanel: React.FC<{
         )}
       </div>
 
-      {/* Provider Distribution */}
       {providerStats.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100">
@@ -1213,8 +1170,7 @@ const ModelOverviewPanel: React.FC<{
                     <div className="text-[10px] text-gray-400 mt-0.5">{fmtCost(val.cost)}</div>
                   </div>
                   <div className="flex-1 bg-gray-100 rounded-full h-3">
-                    <div className={classNames('h-3 rounded-full transition-all', pc.bar)}
-                      style={{ width: `${(val.requests / maxProvReqs * 100).toFixed(1)}%` }} />
+                    <div className={classNames('h-3 rounded-full transition-all', pc.bar)} style={{ width: `${(val.requests / maxProvReqs * 100).toFixed(1)}%` }} />
                   </div>
                   <div className="w-24 text-right flex-shrink-0">
                     <span className="text-xs font-semibold text-gray-700">{val.requests.toLocaleString()}</span>
@@ -1227,7 +1183,6 @@ const ModelOverviewPanel: React.FC<{
         </div>
       )}
 
-      {/* Daily Model Usage */}
       {dailyEntries.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
@@ -1268,7 +1223,6 @@ const ModelOverviewPanel: React.FC<{
         </div>
       )}
 
-      {/* Fallback Chain Reference */}
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
         <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
           <Zap size={14} className="text-amber-500" /> Fallback Chain (for AI Learning / Skills pages)
@@ -1329,12 +1283,10 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
   const [groupBy, setGroupBy] = useState<'page' | 'model' | 'provider'>('page');
   const [search, setSearch] = useState('');
 
-  // Compute join codes for selected org (no useMemo)
   const costOrgJoinCodes: string[] = costOrgId && costOrgId !== '__all__'
     ? getJoinCodesForOrg(allOrgs, costOrgId)
     : [];
 
-  // Filter learners by org
   const filteredLearners = (costOrgId === '__all__' || !costOrgId)
     ? learners
     : learners.filter(l => {
@@ -1356,7 +1308,6 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 
   const selectedOrgName = costOrgId === '__all__' ? 'All Organizations' : (allOrgs.find(o => o.id === costOrgId)?.name || '');
 
-  // Build per-learner summary
   type LearnerSummary = {
     id: string; name: string; email: string; city: string;
     totalCost: number; requests: number; freeReqs: number; paidReqs: number;
@@ -1413,7 +1364,6 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 
   const maxCost = Math.max(...summaries.map(s => s.totalCost), 0.001);
 
-  // Detail view helpers
   const selectedLearner = filteredLearners.find(l => l.id === selectedId);
   const totalCost = learnerRows.reduce((s, r) => s + numCost(r.estimated_cost_usd), 0);
   const totalInTok = learnerRows.reduce((s, r) => s + r.input_tokens, 0);
@@ -1501,8 +1451,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
                         <div className="text-[10px] text-gray-400 mt-0.5">{val.calls} calls</div>
                       </div>
                       <div className="flex-1 bg-gray-100 rounded-full h-2">
-                        <div className={classNames('h-2 rounded-full', pc.bar)}
-                          style={{ width: `${(val.cost / maxGroupCost * 100).toFixed(1)}%` }} />
+                        <div className={classNames('h-2 rounded-full', pc.bar)} style={{ width: `${(val.cost / maxGroupCost * 100).toFixed(1)}%` }} />
                       </div>
                       <div className="w-16 text-right text-xs font-semibold text-gray-700 flex-shrink-0">{fmtCost(val.cost)}</div>
                     </div>
@@ -1720,7 +1669,7 @@ const PlatformGlobalPanel: React.FC<{
 
   if (error) return (
     <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-      {error} — make sure the org_summary view was created by the SQL migration.
+      {error} — make sure the org_summary view was created.
     </div>
   );
 
@@ -1793,9 +1742,7 @@ const PlatformGlobalPanel: React.FC<{
                 </tr>
               ))}
               {sorted.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-400">
-                  No organizations yet.
-                </td></tr>
+                <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-400">No organizations yet.</td></tr>
               )}
             </tbody>
             {sorted.length > 0 && (
@@ -1823,7 +1770,6 @@ const AdminStudentDashboard: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
-  // Auth
   const [userRole, setUserRole] = useState<string | null>(null);
   const [userOrgId, setUserOrgId] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -1847,10 +1793,8 @@ const AdminStudentDashboard: React.FC = () => {
   const isPlatformAdmin = ADMIN_IDS.has(user?.id ?? '') || userRole === 'platform_administrator';
   const isLeader = userRole === 'leader' && !isPlatformAdmin;
 
-  // Tab state
   const [activeTab, setActiveTab] = useState<'student' | 'platform-global' | 'model-overview' | 'cost-overview' | 'cost-learner'>('student');
 
-  // Learner state
   const [learners, setLearners] = useState<Learner[]>([]);
   const [loadingLearners, setLoadingLearners] = useState(true);
   const [learnersError, setLearnersError] = useState<string | null>(null);
@@ -1860,23 +1804,19 @@ const AdminStudentDashboard: React.FC = () => {
   const [dataError, setDataError] = useState<string | null>(null);
   const [filterCat, setFilterCat] = useState<string>('all');
 
-  // Student session summary
   const [studentSessionRows, setStudentSessionRows] = useState<StudentSessionRow[]>([]);
   const [loadingStudentSummary, setLoadingStudentSummary] = useState(false);
   const [studentSummaryError, setStudentSummaryError] = useState<string | null>(null);
 
-  // Leader org state
   const [leaderOrgs, setLeaderOrgs] = useState<{ id: string; name: string; join_code: string; city: string | null }[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [leaderJoinCodes, setLeaderJoinCodes] = useState<string[]>([]);
 
-  // Platform admin org state
   const [allOrgs, setAllOrgs] = useState<OrgOption[]>([]);
   const [loadingOrgs, setLoadingOrgs] = useState(false);
-  const [adminSelectedOrgId, setAdminSelectedOrgId] = useState<string>(''); // '' = show selector, '__all__' = all, uuid = specific
-  const [costOrgId, setCostOrgId] = useState<string>(''); // separate for cost tab
+  const [adminSelectedOrgId, setAdminSelectedOrgId] = useState<string>('');
+  const [costOrgId, setCostOrgId] = useState<string>('');
 
-  // Cost state
   const [costRows, setCostRows] = useState<CostRow[]>([]);
   const [loadingCost, setLoadingCost] = useState(false);
   const [costError, setCostError] = useState<string | null>(null);
@@ -1897,7 +1837,6 @@ const AdminStudentDashboard: React.FC = () => {
           .order('name');
         if (orgErr) throw orgErr;
 
-        // Count learners per org
         const { data: profileData } = await supabase
           .from('profiles')
           .select('organization_id')
@@ -1966,7 +1905,7 @@ const AdminStudentDashboard: React.FC = () => {
     })();
   }, [isLeader, user?.id]);
 
-  // Compute admin org join codes (no useMemo)
+  // Compute admin org join codes inline
   const adminOrgJoinCodes: string[] = adminSelectedOrgId && adminSelectedOrgId !== '__all__'
     ? getJoinCodesForOrg(allOrgs, adminSelectedOrgId)
     : [];
@@ -1974,8 +1913,6 @@ const AdminStudentDashboard: React.FC = () => {
   // Fetch learners
   useEffect(() => {
     if (!authChecked) return;
-
-    // Platform admin: wait until they've selected an org (or "all")
     if (isPlatformAdmin && !adminSelectedOrgId) {
       setLearners([]);
       setLoadingLearners(false);
@@ -1999,7 +1936,7 @@ const AdminStudentDashboard: React.FC = () => {
           }
         } else if (isPlatformAdmin) {
           if (adminSelectedOrgId === '__all__') {
-            // No filter — show all
+            // No filter
           } else if (adminOrgJoinCodes.length > 0) {
             query = query.in('join_code_used', adminOrgJoinCodes);
           } else {
@@ -2018,12 +1955,8 @@ const AdminStudentDashboard: React.FC = () => {
     })();
   }, [authChecked, isLeader, isPlatformAdmin, leaderJoinCodes, selectedOrgId, userOrgId, adminSelectedOrgId, adminOrgJoinCodes.join(',')]);
 
-  // Fetch student session summary
   const fetchStudentSummary = useCallback(async () => {
-    if (!learners.length) {
-      setStudentSessionRows([]);
-      return;
-    }
+    if (!learners.length) { setStudentSessionRows([]); return; }
     setLoadingStudentSummary(true);
     setStudentSummaryError(null);
     try {
@@ -2048,7 +1981,6 @@ const AdminStudentDashboard: React.FC = () => {
     fetchStudentSummary();
   }, [activeTab, fetchStudentSummary]);
 
-  // Fetch cost data
   const fetchCostData = useCallback(async (days: number) => {
     setLoadingCost(true);
     setCostError(null);
@@ -2091,7 +2023,6 @@ const AdminStudentDashboard: React.FC = () => {
     if (!selectedId) setLearnerCostRows([]);
   }, [selectedId, activeTab, fetchLearnerCost]);
 
-  // Fetch selected learner's dashboard rows
   const fetchData = useCallback(async (userId: string) => {
     if (!userId) return;
     setLoadingData(true);
@@ -2115,7 +2046,6 @@ const AdminStudentDashboard: React.FC = () => {
 
   useEffect(() => { if (selectedId) fetchData(selectedId); }, [selectedId, fetchData]);
 
-  // Auth guard
   if (authLoading || !user || !authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -2124,7 +2054,6 @@ const AdminStudentDashboard: React.FC = () => {
     );
   }
 
-  // Derived
   const selectedLearner = learners.find(l => l.id === selectedId) || null;
   const certRows = activities.filter(a => a.category_activity === 'Certification');
   const learningRows = activities.filter(a => a.category_activity !== 'Certification' && a.activity !== 'english_skills');
@@ -2137,11 +2066,146 @@ const AdminStudentDashboard: React.FC = () => {
     ? 'All Organizations'
     : (allOrgs.find(o => o.id === adminSelectedOrgId)?.name || '');
 
+  // Shared learner detail renderer
+  const renderLearnerDetail = () => (
+    <div id="student-dashboard-detail">
+      {loadingData && (
+        <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
+          <Loader2 size={20} className="animate-spin" /> Loading dashboard…
+        </div>
+      )}
+      {dataError && (
+        <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 mb-4">
+          <AlertCircle size={16} /> {dataError}
+        </div>
+      )}
+      {!loadingData && selectedId && activities.length > 0 && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: 'Learning Activities', value: learningRows.length, icon: <BookOpen size={18} className="text-blue-500" />, bg: 'bg-blue-50' },
+              { label: 'Completed', value: completedLearning, icon: <CheckCircle size={18} className="text-green-500" />, bg: 'bg-green-50' },
+              { label: 'Certifications', value: certRows.length, icon: <Trophy size={18} className="text-purple-500" />, bg: 'bg-purple-50' },
+              { label: 'Certs Completed', value: completedCerts, icon: <Award size={18} className="text-amber-500" />, bg: 'bg-amber-50' },
+            ].map(({ label, value, icon, bg }) => (
+              <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
+                {icon}
+                <div>
+                  <p className="text-xl font-black text-gray-900">{value}</p>
+                  <p className="text-xs text-gray-500 leading-tight">{label}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          {certRows.length > 0 && (
+            <section>
+              <h2 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
+                <Trophy size={16} className="text-purple-600" /> Certifications
+                <span className="text-xs font-normal text-gray-400">({certRows.length})</span>
+              </h2>
+              <div className="space-y-2">
+                {certRows.map(row => <ActivityCard key={row.id} row={row} />)}
+              </div>
+            </section>
+          )}
+          {learningRows.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
+                  <BookOpen size={16} className="text-blue-600" /> Learning Activities
+                  <span className="text-xs font-normal text-gray-400">({filteredLearning.length}/{learningRows.length})</span>
+                </h2>
+                {uniqueCategories.length > 1 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {['all', ...uniqueCategories].map(cat => (
+                      <button key={cat} onClick={() => setFilterCat(cat)}
+                        className={classNames(
+                          'px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors',
+                          filterCat === cat
+                            ? 'bg-purple-600 text-white border-purple-600'
+                            : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-700'
+                        )}>
+                        {cat === 'all' ? `All (${learningRows.length})` : cat}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2">
+                {filteredLearning.map(row => <ActivityCard key={row.id} row={row} />)}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+      {!loadingData && selectedId && activities.length === 0 && !dataError && (
+        <div className="text-center py-16 text-gray-400">
+          <BarChart2 size={40} className="mx-auto mb-3 opacity-30" />
+          <p className="text-sm">No dashboard rows found for this learner.</p>
+        </div>
+      )}
+      {!selectedId && !loadingLearners && (
+        <div className="text-center py-20 text-gray-400">
+          <Users size={44} className="mx-auto mb-4 opacity-20" />
+          <p className="text-sm">Select a learner above to view their dashboard.</p>
+        </div>
+      )}
+    </div>
+  );
+
+  // Shared learner selector
+  const renderLearnerSelector = () => (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
+      <label className="block text-sm font-semibold text-gray-700 mb-2">Select Learner</label>
+      {loadingLearners ? (
+        <div className="flex items-center gap-2 text-sm text-gray-500">
+          <Loader2 size={16} className="animate-spin" /> Loading learners…
+        </div>
+      ) : learnersError ? (
+        <div className="flex items-center gap-2 text-sm text-red-600">
+          <AlertCircle size={16} /> {learnersError}
+        </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <select value={selectedId} onChange={e => setSelectedId(e.target.value)}
+              className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500">
+              <option value="">— Choose a learner ({learners.length} total) —</option>
+              {learners.map(l => (
+                <option key={l.id} value={l.id}>
+                  {l.name || '(no name)'} — {l.email || l.id.slice(0, 8)}
+                  {l.grade_level ? ` · Grade ${l.grade_level}` : ''}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
+          {selectedId && (
+            <button onClick={() => fetchData(selectedId)}
+              className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors">
+              <RefreshCw size={14} /> Refresh
+            </button>
+          )}
+        </div>
+      )}
+      {selectedLearner && (
+        <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 bg-gray-50 rounded-lg px-4 py-2.5 border border-gray-100">
+          <span className="flex items-center gap-1"><User size={11} className="text-gray-400" />{selectedLearner.name || '—'}</span>
+          <span className="text-gray-300">|</span>
+          <span>{selectedLearner.email || '—'}</span>
+          {selectedLearner.grade_level && <><span className="text-gray-300">|</span><span>Grade {selectedLearner.grade_level}</span></>}
+          {selectedLearner.country && <><span className="text-gray-300">|</span><span>{selectedLearner.country}</span></>}
+          <span className="text-gray-300">|</span>
+          <span className="font-mono text-gray-400 text-[10px]">{selectedLearner.id}</span>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <AppLayout>
       <div className="max-w-5xl mx-auto px-4 py-8">
 
-        {/* Header */}
         <div className="mb-5">
           <div className="flex items-center gap-3 mb-1">
             <Users size={22} className="text-purple-600" />
@@ -2150,7 +2214,6 @@ const AdminStudentDashboard: React.FC = () => {
           <p className="text-sm text-gray-500 ml-9">Student activity, certification scores, and API cost analytics.</p>
         </div>
 
-        {/* Tab bar */}
         <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit flex-wrap">
           {([
             { id: 'student' as const, label: 'Student Activity', icon: <BookOpen size={14} />, show: true },
@@ -2177,7 +2240,6 @@ const AdminStudentDashboard: React.FC = () => {
         {/* ── STUDENT ACTIVITY TAB ────────────────────────────────────── */}
         {activeTab === 'student' && (
           <div>
-            {/* Platform admin: org selector */}
             {isPlatformAdmin && !adminSelectedOrgId && (
               <OrgSelectorGrid
                 orgs={allOrgs}
@@ -2187,159 +2249,21 @@ const AdminStudentDashboard: React.FC = () => {
               />
             )}
 
-            {/* Platform admin: org selected — show banner + content */}
             {isPlatformAdmin && adminSelectedOrgId && (
               <>
-                <OrgBanner
-                  orgName={adminSelectedOrgName}
-                  onBack={() => { setAdminSelectedOrgId(''); setSelectedId(''); }}
-                />
-
+                <OrgBanner orgName={adminSelectedOrgName} onBack={() => { setAdminSelectedOrgId(''); setSelectedId(''); }} />
                 <StudentLearnerTable
-                  learners={learners}
-                  sessionRows={studentSessionRows}
+                  learners={learners} sessionRows={studentSessionRows}
                   loading={loadingStudentSummary || loadingLearners}
                   error={studentSummaryError || learnersError}
-                  onSelectLearner={(id) => setSelectedId(id)}
-                  selectedId={selectedId}
-                  isPlatformAdmin={isPlatformAdmin}
-                  canViewStudentDashboard={true}
+                  onSelectLearner={(id) => setSelectedId(id)} selectedId={selectedId}
+                  isPlatformAdmin={isPlatformAdmin} canViewStudentDashboard={true}
                 />
-
-                {/* Learner selector */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Select Learner</label>
-                  {loadingLearners ? (
-                    <div className="flex items-center gap-2 text-sm text-gray-500">
-                      <Loader2 size={16} className="animate-spin" /> Loading learners…
-                    </div>
-                  ) : learnersError ? (
-                    <div className="flex items-center gap-2 text-sm text-red-600">
-                      <AlertCircle size={16} /> {learnersError}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-3">
-                      <div className="relative flex-1">
-                        <select value={selectedId} onChange={e => setSelectedId(e.target.value)}
-                          className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500">
-                          <option value="">— Choose a learner ({learners.length} total) —</option>
-                          {learners.map(l => (
-                            <option key={l.id} value={l.id}>
-                              {l.name || '(no name)'} — {l.email || l.id.slice(0, 8)}
-                              {l.grade_level ? ` · Grade ${l.grade_level}` : ''}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                      </div>
-                      {selectedId && (
-                        <button onClick={() => fetchData(selectedId)}
-                          className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors">
-                          <RefreshCw size={14} /> Refresh
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {selectedLearner && (
-                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 bg-gray-50 rounded-lg px-4 py-2.5 border border-gray-100">
-                      <span className="flex items-center gap-1"><User size={11} className="text-gray-400" />{selectedLearner.name || '—'}</span>
-                      <span className="text-gray-300">|</span>
-                      <span>{selectedLearner.email || '—'}</span>
-                      {selectedLearner.grade_level && <><span className="text-gray-300">|</span><span>Grade {selectedLearner.grade_level}</span></>}
-                      {selectedLearner.country && <><span className="text-gray-300">|</span><span>{selectedLearner.country}</span></>}
-                      <span className="text-gray-300">|</span>
-                      <span className="font-mono text-gray-400 text-[10px]">{selectedLearner.id}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div id="student-dashboard-detail">
-                  {loadingData && (
-                    <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
-                      <Loader2 size={20} className="animate-spin" /> Loading dashboard…
-                    </div>
-                  )}
-                  {dataError && (
-                    <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 mb-4">
-                      <AlertCircle size={16} /> {dataError}
-                    </div>
-                  )}
-                  {!loadingData && selectedId && activities.length > 0 && (
-                    <div className="space-y-6">
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        {[
-                          { label: 'Learning Activities', value: learningRows.length, icon: <BookOpen size={18} className="text-blue-500" />, bg: 'bg-blue-50' },
-                          { label: 'Completed', value: completedLearning, icon: <CheckCircle size={18} className="text-green-500" />, bg: 'bg-green-50' },
-                          { label: 'Certifications', value: certRows.length, icon: <Trophy size={18} className="text-purple-500" />, bg: 'bg-purple-50' },
-                          { label: 'Certs Completed', value: completedCerts, icon: <Award size={18} className="text-amber-500" />, bg: 'bg-amber-50' },
-                        ].map(({ label, value, icon, bg }) => (
-                          <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
-                            {icon}
-                            <div>
-                              <p className="text-xl font-black text-gray-900">{value}</p>
-                              <p className="text-xs text-gray-500 leading-tight">{label}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      {certRows.length > 0 && (
-                        <section>
-                          <h2 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
-                            <Trophy size={16} className="text-purple-600" /> Certifications
-                            <span className="text-xs font-normal text-gray-400">({certRows.length})</span>
-                          </h2>
-                          <div className="space-y-2">
-                            {certRows.map(row => <ActivityCard key={row.id} row={row} />)}
-                          </div>
-                        </section>
-                      )}
-                      {learningRows.length > 0 && (
-                        <section>
-                          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
-                              <BookOpen size={16} className="text-blue-600" /> Learning Activities
-                              <span className="text-xs font-normal text-gray-400">({filteredLearning.length}/{learningRows.length})</span>
-                            </h2>
-                            {uniqueCategories.length > 1 && (
-                              <div className="flex flex-wrap gap-1.5">
-                                {['all', ...uniqueCategories].map(cat => (
-                                  <button key={cat} onClick={() => setFilterCat(cat)}
-                                    className={classNames(
-                                      'px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors',
-                                      filterCat === cat
-                                        ? 'bg-purple-600 text-white border-purple-600'
-                                        : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-700'
-                                    )}>
-                                    {cat === 'all' ? `All (${learningRows.length})` : cat}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          <div className="space-y-2">
-                            {filteredLearning.map(row => <ActivityCard key={row.id} row={row} />)}
-                          </div>
-                        </section>
-                      )}
-                    </div>
-                  )}
-                  {!loadingData && selectedId && activities.length === 0 && !dataError && (
-                    <div className="text-center py-16 text-gray-400">
-                      <BarChart2 size={40} className="mx-auto mb-3 opacity-30" />
-                      <p className="text-sm">No dashboard rows found for this learner.</p>
-                    </div>
-                  )}
-                  {!selectedId && !loadingLearners && (
-                    <div className="text-center py-20 text-gray-400">
-                      <Users size={44} className="mx-auto mb-4 opacity-20" />
-                      <p className="text-sm">Select a learner above to view their dashboard.</p>
-                    </div>
-                  )}
-                </div>
+                {renderLearnerSelector()}
+                {renderLearnerDetail()}
               </>
             )}
 
-            {/* Leader view */}
             {isLeader && (
               <>
                 {leaderOrgs.length > 1 && (
@@ -2347,8 +2271,7 @@ const AdminStudentDashboard: React.FC = () => {
                     <span className="text-sm font-semibold text-gray-600">Viewing org:</span>
                     <div className="flex gap-2 flex-wrap">
                       {leaderOrgs.map(org => (
-                        <button key={org.id}
-                          onClick={() => { setSelectedOrgId(org.id); }}
+                        <button key={org.id} onClick={() => setSelectedOrgId(org.id)}
                           className={classNames(
                             'px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors',
                             selectedOrgId === org.id
@@ -2362,7 +2285,6 @@ const AdminStudentDashboard: React.FC = () => {
                     </div>
                   </div>
                 )}
-
                 {leaderJoinCodes.length > 0 && (
                   <div className="mb-4 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-wrap items-center gap-2">
                     <span className="text-xs font-semibold text-indigo-700">Showing learners who joined with your code{leaderJoinCodes.length > 1 ? 's' : ''}:</span>
@@ -2371,152 +2293,20 @@ const AdminStudentDashboard: React.FC = () => {
                     ))}
                   </div>
                 )}
-
                 <StudentLearnerTable
-                  learners={learners}
-                  sessionRows={studentSessionRows}
+                  learners={learners} sessionRows={studentSessionRows}
                   loading={loadingStudentSummary || loadingLearners}
                   error={studentSummaryError || learnersError}
-                  onSelectLearner={(id) => setSelectedId(id)}
-                  selectedId={selectedId}
-                  isPlatformAdmin={false}
-                  canViewStudentDashboard={true}
+                  onSelectLearner={(id) => setSelectedId(id)} selectedId={selectedId}
+                  isPlatformAdmin={false} canViewStudentDashboard={true}
                 />
-
-                {/* Learner selector */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Select Learner</label>
-                  {loadingLearners ? (
-                    <div className="flex items-center gap-2 text-sm text-gray-500">
-                      <Loader2 size={16} className="animate-spin" /> Loading learners…
-                    </div>
-                  ) : learnersError ? (
-                    <div className="flex items-center gap-2 text-sm text-red-600">
-                      <AlertCircle size={16} /> {learnersError}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-3">
-                      <div className="relative flex-1">
-                        <select value={selectedId} onChange={e => setSelectedId(e.target.value)}
-                          className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500">
-                          <option value="">— Choose a learner ({learners.length} total) —</option>
-                          {learners.map(l => (
-                            <option key={l.id} value={l.id}>
-                              {l.name || '(no name)'} — {l.email || l.id.slice(0, 8)}
-                              {l.grade_level ? ` · Grade ${l.grade_level}` : ''}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                      </div>
-                      {selectedId && (
-                        <button onClick={() => fetchData(selectedId)}
-                          className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors">
-                          <RefreshCw size={14} /> Refresh
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {selectedLearner && (
-                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 bg-gray-50 rounded-lg px-4 py-2.5 border border-gray-100">
-                      <span className="flex items-center gap-1"><User size={11} className="text-gray-400" />{selectedLearner.name || '—'}</span>
-                      <span className="text-gray-300">|</span>
-                      <span>{selectedLearner.email || '—'}</span>
-                      {selectedLearner.grade_level && <><span className="text-gray-300">|</span><span>Grade {selectedLearner.grade_level}</span></>}
-                      {selectedLearner.country && <><span className="text-gray-300">|</span><span>{selectedLearner.country}</span></>}
-                    </div>
-                  )}
-                </div>
-
-                <div id="student-dashboard-detail">
-                  {loadingData && (
-                    <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
-                      <Loader2 size={20} className="animate-spin" /> Loading dashboard…
-                    </div>
-                  )}
-                  {dataError && (
-                    <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 mb-4">
-                      <AlertCircle size={16} /> {dataError}
-                    </div>
-                  )}
-                  {!loadingData && selectedId && activities.length > 0 && (
-                    <div className="space-y-6">
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        {[
-                          { label: 'Learning Activities', value: learningRows.length, icon: <BookOpen size={18} className="text-blue-500" />, bg: 'bg-blue-50' },
-                          { label: 'Completed', value: completedLearning, icon: <CheckCircle size={18} className="text-green-500" />, bg: 'bg-green-50' },
-                          { label: 'Certifications', value: certRows.length, icon: <Trophy size={18} className="text-purple-500" />, bg: 'bg-purple-50' },
-                          { label: 'Certs Completed', value: completedCerts, icon: <Award size={18} className="text-amber-500" />, bg: 'bg-amber-50' },
-                        ].map(({ label, value, icon, bg }) => (
-                          <div key={label} className={`${bg} rounded-xl p-4 flex items-center gap-3 border border-white shadow-sm`}>
-                            {icon}
-                            <div>
-                              <p className="text-xl font-black text-gray-900">{value}</p>
-                              <p className="text-xs text-gray-500 leading-tight">{label}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      {certRows.length > 0 && (
-                        <section>
-                          <h2 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
-                            <Trophy size={16} className="text-purple-600" /> Certifications
-                            <span className="text-xs font-normal text-gray-400">({certRows.length})</span>
-                          </h2>
-                          <div className="space-y-2">
-                            {certRows.map(row => <ActivityCard key={row.id} row={row} />)}
-                          </div>
-                        </section>
-                      )}
-                      {learningRows.length > 0 && (
-                        <section>
-                          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
-                              <BookOpen size={16} className="text-blue-600" /> Learning Activities
-                              <span className="text-xs font-normal text-gray-400">({filteredLearning.length}/{learningRows.length})</span>
-                            </h2>
-                            {uniqueCategories.length > 1 && (
-                              <div className="flex flex-wrap gap-1.5">
-                                {['all', ...uniqueCategories].map(cat => (
-                                  <button key={cat} onClick={() => setFilterCat(cat)}
-                                    className={classNames(
-                                      'px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors',
-                                      filterCat === cat
-                                        ? 'bg-purple-600 text-white border-purple-600'
-                                        : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-700'
-                                    )}>
-                                    {cat === 'all' ? `All (${learningRows.length})` : cat}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          <div className="space-y-2">
-                            {filteredLearning.map(row => <ActivityCard key={row.id} row={row} />)}
-                          </div>
-                        </section>
-                      )}
-                    </div>
-                  )}
-                  {!loadingData && selectedId && activities.length === 0 && !dataError && (
-                    <div className="text-center py-16 text-gray-400">
-                      <BarChart2 size={40} className="mx-auto mb-3 opacity-30" />
-                      <p className="text-sm">No dashboard rows found for this learner.</p>
-                    </div>
-                  )}
-                  {!selectedId && !loadingLearners && (
-                    <div className="text-center py-20 text-gray-400">
-                      <Users size={44} className="mx-auto mb-4 opacity-20" />
-                      <p className="text-sm">Select a learner above to view their dashboard.</p>
-                    </div>
-                  )}
-                </div>
+                {renderLearnerSelector()}
+                {renderLearnerDetail()}
               </>
             )}
           </div>
         )}
 
-        {/* ── PLATFORM GLOBAL TAB ─────────────────────────────────────── */}
         {activeTab === 'platform-global' && (
           <PlatformGlobalPanel
             onSelectOrg={(orgId, orgName) => {
@@ -2526,48 +2316,32 @@ const AdminStudentDashboard: React.FC = () => {
           />
         )}
 
-        {/* ── MODEL OVERVIEW TAB ──────────────────────────────────────── */}
         {activeTab === 'model-overview' && (
           <ModelOverviewPanel
-            rows={costRows}
-            loading={loadingCost}
-            error={costError}
-            days={costDays}
-            setDays={setCostDays}
+            rows={costRows} loading={loadingCost} error={costError}
+            days={costDays} setDays={setCostDays}
             onRefresh={() => fetchCostData(costDays)}
           />
         )}
 
-        {/* ── COST OVERVIEW TAB ─────────────────────────────────────────── */}
         {activeTab === 'cost-overview' && (
           <CostOverviewPanel
-            rows={costRows}
-            loading={loadingCost}
-            error={costError}
-            days={costDays}
-            setDays={setCostDays}
-            groupBy={costGroupBy}
-            setGroupBy={setCostGroupBy}
+            rows={costRows} loading={loadingCost} error={costError}
+            days={costDays} setDays={setCostDays}
+            groupBy={costGroupBy} setGroupBy={setCostGroupBy}
             onRefresh={() => fetchCostData(costDays)}
           />
         )}
 
-        {/* ── PER-LEARNER COST TAB ─────────────────────────────────────── */}
         {activeTab === 'cost-learner' && (
           <LearnerCostPanel
-            learners={learners}
-            selectedId={selectedId}
+            learners={learners} selectedId={selectedId}
             setSelectedId={(id) => { setSelectedId(id); if (id) fetchLearnerCost(id); }}
-            allCostRows={costRows}
-            learnerRows={learnerCostRows}
-            loading={loadingCost}
-            loadingDetail={loadingLearnerCost}
+            allCostRows={costRows} learnerRows={learnerCostRows}
+            loading={loadingCost} loadingDetail={loadingLearnerCost}
             onRefresh={() => selectedId ? fetchLearnerCost(selectedId) : fetchCostData(costDays)}
-            isPlatformAdmin={isPlatformAdmin}
-            allOrgs={allOrgs}
-            costOrgId={costOrgId}
-            setCostOrgId={setCostOrgId}
-            loadingOrgs={loadingOrgs}
+            isPlatformAdmin={isPlatformAdmin} allOrgs={allOrgs}
+            costOrgId={costOrgId} setCostOrgId={setCostOrgId} loadingOrgs={loadingOrgs}
           />
         )}
 
