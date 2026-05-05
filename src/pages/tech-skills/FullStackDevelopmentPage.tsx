@@ -1159,10 +1159,18 @@ const FullStackDevelopmentPage: React.FC = () => {
 
   const handleOnboardingComplete = useCallback(async () => {
     await ensureSession();
+    // Advance to intro_fullstack (index 1) to show the overview card
     setTaskIndex(1); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
-    speakText('Welcome! Let\'s start by setting up your Supabase project.');
-    await fetchTaskInstruction(1, projectFiles, sessionContext);
     setTimeout(() => persistSession(projectFiles, promptHistory, 1, sessionContext), 100);
+  }, [ensureSession, projectFiles, promptHistory, sessionContext, persistSession]);
+
+  // Called from the Full-Stack Overview card to move to actual tasks
+  const handleIntroComplete = useCallback(async () => {
+    await ensureSession();
+    setTaskIndex(2); setTaskHasGeneration(false); setSubTaskIndex(0); setSubTaskCritique(null);
+    speakText('Let\'s start by setting up your Supabase project.');
+    await fetchTaskInstruction(2, projectFiles, sessionContext);
+    setTimeout(() => persistSession(projectFiles, promptHistory, 2, sessionContext), 100);
   }, [ensureSession, projectFiles, promptHistory, sessionContext, persistSession, fetchTaskInstruction, speakText]);
 
   // ── Save + evaluate ──────────────────────────────────────────────────
@@ -1482,7 +1490,7 @@ const FullStackDevelopmentPage: React.FC = () => {
                     }}
                   />
                 ) : (
-                  <FullStackOnboarding onComplete={handleOnboardingComplete} />
+                  <FullStackOnboarding onComplete={handleIntroComplete} />
                 )}
               </div>
             ) : (
