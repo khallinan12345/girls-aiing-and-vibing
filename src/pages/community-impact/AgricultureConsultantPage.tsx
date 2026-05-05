@@ -604,7 +604,7 @@ const AgricultureConsultantPage: React.FC = () => {
           const reply = await chatText({ page: 'AgricultureConsultantPage', system: LEARN_SYSTEM_PROMPTS[selectedTopic.id], max_tokens: 800, messages: [{
             role: 'user',
             content: 'Start with a warm, engaging 2-3 sentence introduction to this topic. Tell me the 2 or 3 most important things I will learn. Then ask one question to begin exploring what I already know.',
-          }]);
+          }] });
           const msg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
           setLearnMessages([msg]);
           speak(reply);

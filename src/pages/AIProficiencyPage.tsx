@@ -195,7 +195,7 @@ const AIProficiencyPage: React.FC = () => {
     if (!userResponse.trim() || isImproving) return;
     setIsImproving(true);
     try {
-      const result = await chatJSON({
+      const result = await chatJSON({ page: 'AIProficiencyPage', page: 'AIProficiencyPage',
         messages: [{
           role: 'user',
           content: `You are an English language coach helping a student in rural Nigeria improve their writing.
@@ -494,7 +494,7 @@ Respond with ONLY the tailored prompt text, nothing else.
 `;
 
     try {
-      const tailoredPrompt = await chatText({
+      const tailoredPrompt = await chatText({ page: 'AIProficiencyPage',
         messages: [{ role: 'user', content: userMessage }],
         system: 'You are an expert educational assessment designer who creates personalized, contextually-relevant prompts. Always honour the communication level instruction — it controls vocabulary complexity and sentence structure. When a learner profile is provided, also reflect their preferred communication style in the framing.',
         max_tokens: 800,
@@ -594,7 +594,7 @@ Respond ONLY in this JSON format:
 `;
 
     try {
-      const result = await chatJSON({
+      const result = await chatJSON({ page: 'AIProficiencyPage', page: 'AIProficiencyPage',
         messages: [{ role: 'user', content: evaluationPrompt }],
         system: 'You are an expert educational assessor. Evaluate learner responses fairly and provide constructive feedback.',
         max_tokens: 800,
@@ -803,7 +803,7 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
 `;
 
     try {
-      const advice = await chatText({
+      const advice = await chatText({ page: 'AIProficiencyPage',
         messages: [{ role: 'user', content: advicePrompt }],
         system: 'You are an encouraging and supportive AI learning coach. Always honour the communication level instruction — it controls vocabulary complexity and sentence structure. When a learner profile is provided, also tailor your tone, examples, and delivery style to match their preferences.',
         max_tokens: 800,
