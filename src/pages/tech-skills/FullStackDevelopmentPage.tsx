@@ -948,7 +948,7 @@ const FullStackDevelopmentPage: React.FC = () => {
 
   // ── Fetch task instruction ────────────────────────────────────────────
   const fetchTaskInstruction = useCallback(async (idx: number, files: ProjectFile[], ctx: Record<string, any>) => {
-    const task = TASKS[idx]; if (!task || task.isOnboarding) return;
+    const task = TASKS[idx]; if (!task || task.id === 'load_web_project') return;
     setLoadingInstruction(true); setTaskInstruction(null);
     try {
       const fileSummary = files.filter(f => f.content.length > 10).map(f => ({ path: f.path, preview: f.content.substring(0, 400) }));
