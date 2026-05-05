@@ -195,7 +195,7 @@ const AIProficiencyPage: React.FC = () => {
     if (!userResponse.trim() || isImproving) return;
     setIsImproving(true);
     try {
-      const result = await chatJSON({ page: 'AIProficiencyPage', page: 'AIProficiencyPage',
+      const result = await chatJSON({ page: 'AIProficiencyPage',
         messages: [{
           role: 'user',
           content: `You are an English language coach helping a student in rural Nigeria improve their writing.
@@ -594,7 +594,7 @@ Respond ONLY in this JSON format:
 `;
 
     try {
-      const result = await chatJSON({ page: 'AIProficiencyPage', page: 'AIProficiencyPage',
+      const result = await chatJSON({ page: 'AIProficiencyPage',
         messages: [{ role: 'user', content: evaluationPrompt }],
         system: 'You are an expert educational assessor. Evaluate learner responses fairly and provide constructive feedback.',
         max_tokens: 800,
