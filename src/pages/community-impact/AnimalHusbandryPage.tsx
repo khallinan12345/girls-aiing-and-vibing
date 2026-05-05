@@ -407,7 +407,7 @@ const AnimalHusbandryPage: React.FC = () => {
       const systemPrompt = buildSystemPrompt(consultationSpecies, selectedFarmer);
       const apiMessages = history.map(m => ({ role: m.role, content: m.content }));
 
-      const reply = await chatText(systemPrompt, apiMessages);
+      const reply = await chatText({ page: 'AnimalHusbandryPage', messages: apiMessages, system: systemPrompt, max_tokens: 800 });
 
       const assistantMsg: ChatMessage = {
         id: crypto.randomUUID(),

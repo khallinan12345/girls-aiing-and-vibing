@@ -1029,7 +1029,7 @@ Step-by-Step Instructions:
       // Extract system message if present
       const systemMessage = messages.find(msg => msg.role === 'system');
 
-      const reply = await chatText({
+      const reply = await chatText({ page: 'ProjectsListPage',
         messages: formattedMessages,
         system: systemMessage?.content,
         max_tokens: 500,
