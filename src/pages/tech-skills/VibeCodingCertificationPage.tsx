@@ -17,6 +17,7 @@
 // Activity stored as: 'Vibe Coding Certification'
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import Navbar from '../../components/layout/Navbar';
 import { supabase } from '../../lib/supabaseClient';
 import { chatJSON, chatText, ChatMessage as ClientChatMessage } from '../../lib/chatClient';
@@ -32,6 +33,54 @@ import {
   ArrowRight, Play, CheckCircle, Bot, User, Send,
   ExternalLink,
 } from 'lucide-react';
+
+// ─── Markdown components (dark theme) ────────────────────────────────────────
+
+const markdownComponents = {
+  h1: ({ children }: any) => (
+    <h1 className="text-sm font-bold text-white mb-2 mt-3">{children}</h1>
+  ),
+  h2: ({ children }: any) => (
+    <h2 className="text-xs font-bold text-gray-100 mb-1.5 mt-3">{children}</h2>
+  ),
+  h3: ({ children }: any) => (
+    <h3 className="text-xs font-semibold text-gray-200 mb-1 mt-2">{children}</h3>
+  ),
+  p: ({ children }: any) => (
+    <p className="text-xs text-gray-300 mb-2 leading-relaxed">{children}</p>
+  ),
+  strong: ({ children }: any) => (
+    <strong className="font-semibold text-white">{children}</strong>
+  ),
+  em: ({ children }: any) => (
+    <em className="italic text-gray-400">{children}</em>
+  ),
+  ul: ({ children }: any) => (
+    <ul className="list-disc list-inside space-y-1 mb-2 text-gray-300 ml-2 text-xs">{children}</ul>
+  ),
+  ol: ({ children }: any) => (
+    <ol className="list-decimal list-inside space-y-1 mb-2 text-gray-300 ml-2 text-xs">{children}</ol>
+  ),
+  li: ({ children }: any) => (
+    <li className="leading-relaxed">{children}</li>
+  ),
+  hr: () => <hr className="my-3 border-gray-600" />,
+  blockquote: ({ children }: any) => (
+    <blockquote className="border-l-4 border-pink-500 pl-3 italic text-gray-400 my-2 text-xs">{children}</blockquote>
+  ),
+  a: ({ href, children }: any) => (
+    <a href={href || '#'} target="_blank" rel="noopener noreferrer"
+      className="text-pink-400 hover:text-pink-300 underline font-medium">
+      {children}
+    </a>
+  ),
+  code: ({ children }: any) => (
+    <code className="bg-gray-800 text-pink-300 px-1 py-0.5 rounded text-[10px] font-mono">{children}</code>
+  ),
+  pre: ({ children }: any) => (
+    <pre className="bg-gray-900 text-green-400 p-2 rounded text-[10px] font-mono overflow-x-auto mb-2">{children}</pre>
+  ),
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -95,7 +144,7 @@ const ScoreRing: React.FC<{ score: number | null }> = ({ score }) => {
   );
 };
 
-// ─── Code execution service (mirrors VibeCodingPage) ─────────────────────────
+// ─── Code execution service ───────────────────────────────────────────────────
 
 class CodeExecutionService {
   private static apiUrl = '/api/execute-code';
@@ -154,7 +203,7 @@ const VibeCodingCertificationPage: React.FC = () => {
     fallbackText, clearFallback, selectedVoice,
   } = useVoice(voiceMode === 'pidgin');
 
-  const speak       = (text: string) => hookSpeak(text.slice(0, 400));
+  const speak        = (text: string) => hookSpeak(text.slice(0, 400));
   const stopSpeaking = () => cancelSpeech();
 
   // ── Session ───────────────────────────────────────────────────────────────
@@ -162,18 +211,18 @@ const VibeCodingCertificationPage: React.FC = () => {
   const sessionIdRef = useRef<string | null>(null);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
 
-  // ── Generated code (lifted from VibeCodingWorkflow via callbacks) ─────────
+  // ── Generated code ────────────────────────────────────────────────────────
   const [certCode,     setCertCode]     = useState('');
   const [certLanguage, setCertLanguage] = useState<'python' | 'javascript' | 'html'>('python');
   const [execResult,   setExecResult]   = useState<{ output?: string; error?: string } | null>(null);
   const [isExecuting,  setIsExecuting]  = useState(false);
   const [injectedInstructions, setInjectedInstructions] = useState<string | null>(null);
 
-  // ── AI Coach chat (right column bottom) ──────────────────────────────────
-  const [coachHistory,   setCoachHistory]   = useState<CoachMessage[]>([
+  // ── AI Coach chat ─────────────────────────────────────────────────────────
+  const [coachHistory,    setCoachHistory]    = useState<CoachMessage[]>([
     { role: 'assistant', content: 'Hi! I\'m your coding coach. Ask me anything to help improve your prompt or fix your code.' },
   ]);
-  const [coachInput,     setCoachInput]     = useState('');
+  const [coachInput,      setCoachInput]      = useState('');
   const [coachSubmitting, setCoachSubmitting] = useState(false);
   const coachRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (coachRef.current) coachRef.current.scrollTop = coachRef.current.scrollHeight; }, [coachHistory]);
@@ -221,8 +270,8 @@ const VibeCodingCertificationPage: React.FC = () => {
       }));
       setAssessmentScores(scores);
 
-      if (dash?.vibe_cert_code)     setCertCode(dash.vibe_cert_code);
-      if (dash?.vibe_cert_language) setCertLanguage(dash.vibe_cert_language);
+      if (dash?.vibe_cert_code)       setCertCode(dash.vibe_cert_code);
+      if (dash?.vibe_cert_language)   setCertLanguage(dash.vibe_cert_language);
       if (dash?.vibe_cert_session_id) { setSessionId(dash.vibe_cert_session_id); sessionIdRef.current = dash.vibe_cert_session_id; }
 
     } catch (err: any) { setDataError(err.message || 'Failed to load certification data'); }
@@ -255,7 +304,6 @@ const VibeCodingCertificationPage: React.FC = () => {
     const result = await CodeExecutionService.executeCode(code, language);
     setExecResult(result);
     setIsExecuting(false);
-    // Persist code to dashboard
     await ensureRecord();
     if (sessionIdRef.current && user?.id) {
       await supabase.from('dashboard').update({
@@ -389,8 +437,8 @@ Respond ONLY in this JSON format:
       setEvalProgress('');
       setAssessmentScores(newScores);
 
-      const avgCalc   = newScores.reduce((s, a) => s + (a.score ?? 0), 0) / newScores.length;
-      const allPass   = newScores.every(s => (s.score ?? 0) >= 2);
+      const avgCalc = newScores.reduce((s, a) => s + (a.score ?? 0), 0) / newScores.length;
+      const allPass = newScores.every(s => (s.score ?? 0) >= 2);
 
       await supabase.from('dashboard').update({
         vibe_cert_evaluation: { scores, evaluatedAt: new Date().toISOString(), overallAvg: avgCalc },
@@ -426,7 +474,6 @@ Respond ONLY in this JSON format:
       const certLevel = minScore === 3 ? 'Advanced' : minScore >= 2 ? 'Proficient' : 'Emerging';
       const avg       = assessmentScores.reduce((s, a) => s + (a.score ?? 0), 0) / assessmentScores.length;
 
-      // Pink/purple theme
       doc.setLineWidth(3); doc.setDrawColor(219, 39, 119);  doc.rect(10, 10, W - 20, H - 20);
       doc.setLineWidth(1); doc.setDrawColor(236, 72, 153);  doc.rect(15, 15, W - 30, H - 30);
 
@@ -436,7 +483,6 @@ Respond ONLY in this JSON format:
       doc.setFontSize(20); doc.setTextColor(168, 85, 247);
       doc.text(`Vibe Coding Certification — ${certLevel}`, W / 2, 43, { align: 'center' });
 
-      // Institution branding — logo + name
       await addBrandingToPDF({ doc, pageWidth: W, pageHeight: H, footerY: 53, branding, fontSize: 13, textColor: [80, 80, 80] });
       doc.setFontSize(13); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
       doc.text('This certificate is proudly presented to', W / 2, 64, { align: 'center' });
@@ -460,7 +506,7 @@ Respond ONLY in this JSON format:
       let yPos = 128; let col = 0;
 
       assessmentScores.forEach(sc => {
-        const xPos     = 20 + col * colW;
+        const xPos      = 20 + col * colW;
         const levelText = sc.score === 3 ? 'Advanced' : sc.score === 2 ? 'Proficient' : sc.score === 1 ? 'Emerging' : 'No Evidence';
         doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(40, 40, 40);
         doc.text(`${sc.assessment_name}: ${sc.score ?? 0}/3 — ${levelText}`, xPos, yPos);
@@ -538,7 +584,6 @@ Respond ONLY in this JSON format:
               <Wand2 size={18} className="text-pink-400" />
               <span className="text-sm font-bold text-white">Vibe Coding Certification</span>
             </div>
-            {/* Nav pills */}
             <div className="flex items-center gap-1 ml-2">
               {(['overview', 'build', 'results', 'certificate'] as ViewMode[]).map(v => (
                 <button key={v} onClick={() => setView(v)}
@@ -686,7 +731,7 @@ Respond ONLY in this JSON format:
         )}
 
         {/* ═══════════════════════════════════════════════════════════════
-            BUILD — two-column: Workflow (left) + Output + Coach (right)
+            BUILD
         ═══════════════════════════════════════════════════════════════ */}
         {view === 'build' && (
           <div className="flex-1 flex overflow-hidden">
@@ -779,7 +824,11 @@ Respond ONLY in this JSON format:
                         </div>
                       )}
                       <div className={`max-w-xs rounded-lg px-3 py-2 text-xs leading-relaxed ${msg.role === 'assistant' ? 'bg-gray-800 text-gray-200' : 'bg-pink-600 text-white'}`}>
-                        {msg.content}
+                        {msg.role === 'assistant' ? (
+                          <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                        ) : (
+                          msg.content
+                        )}
                       </div>
                       {msg.role === 'user' && (
                         <div className="flex-shrink-0 h-6 w-6 rounded-full bg-pink-600 flex items-center justify-center">
@@ -883,11 +932,17 @@ Respond ONLY in this JSON format:
                         </button>
                         {isOpen && (
                           <div className="px-4 pb-4 border-t border-white/10 pt-3 space-y-2">
-                            {sc.evidence && <p className="text-xs text-gray-300 leading-relaxed">{sc.evidence}</p>}
+                            {sc.evidence && (
+                              <div className="prose-invert">
+                                <ReactMarkdown components={markdownComponents}>{sc.evidence}</ReactMarkdown>
+                              </div>
+                            )}
                             {assessment && sc.score !== null && sc.score < 2 && (
                               <div className="p-2 bg-blue-500/10 rounded-lg">
                                 <p className="text-[10px] font-bold text-blue-400 uppercase mb-1">To reach Proficient:</p>
-                                <p className="text-xs text-gray-400">{assessment.certification_level2_metric}</p>
+                                <div className="prose-invert">
+                                  <ReactMarkdown components={markdownComponents}>{assessment.certification_level2_metric}</ReactMarkdown>
+                                </div>
                               </div>
                             )}
                           </div>
