@@ -1,4 +1,4 @@
-// Updated DashboardPage.tsx with reorganized layout
+// Updated DashboardPage.tsx with reorganized layout + Monthly Summary
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
@@ -22,6 +22,14 @@ import {
   Download,
   Globe2,
   TrendingUp,
+  BarChart3,
+  Brain,
+  Lightbulb,
+  MessageSquare,
+  Zap,
+  Activity,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import AppLayout from '../components/layout/AppLayout';
 import Button from '../components/ui/Button';
@@ -42,13 +50,9 @@ interface DashboardActivity {
   evaluation_evidence?: string;
   created_at: string;
   updated_at: string;
-  certificate_pdf_url?: string | null;  // URL to certificate PDF in Supabase Storage
-  
-  // Certification final assessment scores (certification_* columns)
+  certificate_pdf_url?: string | null;
   certification_evaluation_score?: number | null;
   certification_evaluation_evidence?: string | null;
-  
-  // AI Proficiency - UNESCO Competencies (for learning: certification_evaluation_UNESCO_*)
   certification_evaluation_UNESCO_1_score?: number | null;
   certification_evaluation_UNESCO_1_evidence?: string | null;
   certification_evaluation_UNESCO_2_score?: number | null;
@@ -57,8 +61,6 @@ interface DashboardActivity {
   certification_evaluation_UNESCO_3_evidence?: string | null;
   certification_evaluation_UNESCO_4_score?: number | null;
   certification_evaluation_UNESCO_4_evidence?: string | null;
-  
-  // AI Proficiency Certification columns
   certification_ai_proficiency_understanding_ai_score?: number | null;
   certification_ai_proficiency_understanding_ai_evidence?: string | null;
   certification_ai_proficiency_application_of_ai_score?: number | null;
@@ -67,8 +69,6 @@ interface DashboardActivity {
   certification_ai_proficiency_ethics_responsibility_evidence?: string | null;
   certification_ai_proficiency_verification_bias_score?: number | null;
   certification_ai_proficiency_verification_bias_evidence?: string | null;
-  
-  // Skills - Vibe Coding (certification_vibe_coding_* for certification, certification_evaluation_vibe_coding_* for learning)
   certification_vibe_coding_problem_decomposition_score?: number | null;
   certification_vibe_coding_problem_decomposition_evidence?: string | null;
   certification_vibe_coding_prompt_engineering_score?: number | null;
@@ -83,8 +83,6 @@ interface DashboardActivity {
   certification_evaluation_vibe_coding_ai_output_evaluation_evide?: string | null;
   certification_evaluation_vibe_coding_metacognitive_control_scor?: number | null;
   certification_evaluation_vibe_coding_metacognitive_control_evid?: string | null;
-  
-  // Skills - Critical Thinking
   certification_critical_thinking_claim_evaluation_score?: number | null;
   certification_critical_thinking_claim_evaluation_evidence?: string | null;
   certification_critical_thinking_reasoning_trace_score?: number | null;
@@ -97,8 +95,6 @@ interface DashboardActivity {
   certification_evaluation_critical_thinking_logical_reasoning_ev?: string | null;
   certification_evaluation_critical_thinking_reflection_score?: number | null;
   certification_evaluation_critical_thinking_reflection_evidence?: string | null;
-  
-  // Skills - Problem Solving
   certification_problem_solving_problem_definition_score?: number | null;
   certification_problem_solving_problem_definition_evidence?: string | null;
   certification_problem_solving_iteration_score?: number | null;
@@ -109,8 +105,6 @@ interface DashboardActivity {
   certification_evaluation_problem_solving_problem_definition_evi?: string | null;
   certification_evaluation_problem_solving_iteration_score?: number | null;
   certification_evaluation_problem_solving_iteration_evidence?: string | null;
-  
-  // Skills - Creativity
   certification_creativity_creative_iteration_score?: number | null;
   certification_creativity_creative_iteration_evidence?: string | null;
   certification_creativity_originality_score?: number | null;
@@ -121,8 +115,6 @@ interface DashboardActivity {
   certification_evaluation_creativity_originality_evidence?: string | null;
   certification_evaluation_creativity_risk_and_exploration_score?: number | null;
   certification_evaluation_creativity_risk_and_exploration_eviden?: string | null;
-  
-  // Skills - Communication
   certification_communication_clarity_score?: number | null;
   certification_communication_clarity_evidence?: string | null;
   certification_communication_listening_response_score?: number | null;
@@ -133,8 +125,6 @@ interface DashboardActivity {
   certification_evaluation_communication_clarity_evidence?: string | null;
   certification_evaluation_communication_listening_and_response_s?: number | null;
   certification_evaluation_communication_listening_and_response_e?: string | null;
-  
-  // Skills - Digital Fluency (7 dimensions)
   certification_digital_fluency_device_file_control_score?: number | null;
   certification_digital_fluency_device_file_control_evidence?: string | null;
   certification_digital_fluency_internet_navigation_score?: number | null;
@@ -155,8 +145,7 @@ interface DashboardActivity {
   certification_evaluation_digital_safety_and_responsibility_evid?: string | null;
   certification_evaluation_basic_troubleshooting_and_resilience_s?: number | null;
   certification_evaluation_basic_troubleshooting_and_resilience_e?: string | null;
-  
-  [key: string]: any; // Allow dynamic access
+  [key: string]: any;
 }
 
 // Interface for certification progress
@@ -166,8 +155,83 @@ interface CertificationProgress {
   totalAssessments: number;
   completedAssessments: number;
   progress: 'not started' | 'started' | 'completed';
-  route: string; // Route to certification page
+  route: string;
   updated_at?: string;
+}
+
+// ── Monthly Assessment interface ─────────────────────────────────────────
+interface MonthlyAssessment {
+  id: string;
+  user_id: string;
+  measured_at: string;
+  cognitive_score: number | null;
+  cognitive_evidence: any;
+  critical_thinking_score: number | null;
+  critical_thinking_evidence: any;
+  problem_solving_score: number | null;
+  problem_solving_evidence: any;
+  creativity_score: number | null;
+  creativity_evidence: any;
+  pue_score: number | null;
+  pue_evidence: any;
+  session_count: number | null;
+  engaged_session_count: number | null;
+  avg_words_per_session: number | null;
+  pue_energy_constraint_pct: number | null;
+  pue_market_pricing_pct: number | null;
+  pue_battery_load_pct: number | null;
+  pue_enterprise_planning_pct: number | null;
+  pue_learner_initiated_pct: number | null;
+  pue_ai_introduced_pct: number | null;
+  pue_multi_domain_pct: number | null;
+  pue_local_context_pct: number | null;
+  pue_summary: string | null;
+  scaffold_clarification_per_session: number | null;
+  scaffold_decomposition_per_session: number | null;
+  scaffold_correction_total_per_session: number | null;
+  scaffold_convergence_trend: string | null;
+  scaffold_convergence_narrative: string | null;
+  scaffold_narrative: string | null;
+  reasoning_definitional_pct: number | null;
+  reasoning_responsive_pct: number | null;
+  reasoning_elaborative_pct: number | null;
+  reasoning_structured_pct: number | null;
+  reasoning_chain_count: number | null;
+  metacog_verification_rate: number | null;
+  metacog_reactive_rate: number | null;
+  metacog_strategic_rate: number | null;
+  metacog_narrative: string | null;
+  role_teaching_intent_count: number | null;
+  role_community_application_count: number | null;
+  role_enterprise_orientation_count: number | null;
+  role_intergenerational_count: number | null;
+  role_readiness_narrative: string | null;
+  role_readiness_signals: string[] | null;
+  enterprise_artifact_score: number | null;
+  ai_playground_session_count: number | null;
+  ai_playground_word_count: number | null;
+  ai_playground_summary: string | null;
+  ai_prof_application_score: number | null;
+  ai_prof_ethics_score: number | null;
+  ai_prof_understanding_score: number | null;
+  ai_prof_verification_score: number | null;
+  ai_prof_min_score: number | null;
+  ai_prof_cert_level: string | null;
+  ai_prof_gpt_narrative: string | null;
+  cert_attempted_count: number | null;
+  cert_passed_count: number | null;
+  cert_names_attempted: string[] | null;
+  cert_names_passed: string[] | null;
+  cert_avg_score: number | null;
+  cert_summary: string | null;
+  ci_training_sessions_total: number | null;
+  ci_certs_passed_count: number | null;
+  ci_summary: string | null;
+  assessment_model: string | null;
+  assessment_version: string | null;
+  created_at: string;
+  updated_at: string;
+  [key: string]: any;
 }
 
 interface DashboardData {
@@ -210,6 +274,68 @@ const LEADERBOARD_OPTIONS: { value: LeaderboardMetric; label: string }[] = [
 
 const MEDAL: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
+// ── Helper: Score bar component ────────────────────────────────────────────
+const ScoreBar: React.FC<{
+  label: string;
+  score: number | null;
+  maxScore?: number;
+  icon?: React.ReactNode;
+  colorClass?: string;
+}> = ({ label, score, maxScore = 100, icon, colorClass = 'bg-blue-500' }) => {
+  const pct = score != null ? Math.min((Number(score) / maxScore) * 100, 100) : 0;
+  const displayScore = score != null ? Number(score).toFixed(1) : '—';
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-medium text-gray-700 flex items-center gap-1.5">
+          {icon}
+          {label}
+        </span>
+        <span className="font-semibold text-gray-900">{displayScore}{score != null ? `/${maxScore}` : ''}</span>
+      </div>
+      <div className="w-full bg-gray-200 rounded-full h-2.5">
+        <div
+          className={classNames('h-2.5 rounded-full transition-all duration-500', colorClass)}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+};
+
+// ── Helper: Stat pill ──────────────────────────────────────────────────────
+const StatPill: React.FC<{
+  label: string;
+  value: string | number;
+  sub?: string;
+  icon?: React.ReactNode;
+  bgClass?: string;
+}> = ({ label, value, sub, icon, bgClass = 'bg-gray-50' }) => (
+  <div className={classNames('rounded-lg p-3 border border-gray-200 text-center', bgClass)}>
+    {icon && <div className="flex justify-center mb-1">{icon}</div>}
+    <div className="text-xl font-bold text-gray-900">{value}</div>
+    <div className="text-xs font-medium text-gray-600">{label}</div>
+    {sub && <div className="text-[10px] text-gray-400 mt-0.5">{sub}</div>}
+  </div>
+);
+
+// ── Helper: convergence trend badge ────────────────────────────────────────
+const trendBadge = (trend: string | null) => {
+  if (!trend) return null;
+  const t = trend.toLowerCase();
+  const color =
+    t === 'improving' || t === 'converging' ? 'bg-green-100 text-green-800 border-green-300' :
+    t === 'stable' || t === 'steady' ? 'bg-blue-100 text-blue-800 border-blue-300' :
+    t === 'declining' || t === 'diverging' ? 'bg-red-100 text-red-800 border-red-300' :
+    'bg-gray-100 text-gray-700 border-gray-300';
+  return (
+    <span className={classNames('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border', color)}>
+      {trend}
+    </span>
+  );
+};
+
 // ───────────────────────────────────────────────────────────────────────────
 
 const DashboardPage: React.FC = () => {
@@ -228,21 +354,22 @@ const DashboardPage: React.FC = () => {
   const [selectedActivityForDetails, setSelectedActivityForDetails] = useState<DashboardActivity | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
+  // Monthly assessment state
+  const [monthlyAssessment, setMonthlyAssessment] = useState<MonthlyAssessment | null>(null);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
+  const [monthlySectionExpanded, setMonthlySectionExpanded] = useState(true);
+
   // Leaderboard
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('sessions_thismonth');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
-  // For platform_administrator: list of all orgs to pick from
   const [orgOptions, setOrgOptions] = useState<{ id: string; name: string; join_code: string }[]>([]);
   const [selectedOrgJoinCode, setSelectedOrgJoinCode] = useState<string>('');
-  // For leader: their org's join_code (derived from their students)
   const [leaderJoinCode, setLeaderJoinCode] = useState<string>('');
   
-  // Use refs to prevent multiple simultaneous fetches
   const fetchingRef = useRef(false);
   const lastUserIdRef = useRef<string | null>(null);
 
-  // Map certification names to routes
   const getCertificationRoute = (certName: string): string => {
     const routeMap: Record<string, string> = {
       'ai_proficiency': '/certifications/ai-proficiency',
@@ -256,27 +383,22 @@ const DashboardPage: React.FC = () => {
     return routeMap[certName] || '/certifications/ai-ready-skills';
   };
 
-  // Helper: Get score label based on scale
   const getScoreLabel = (score: number | null, isCertification: boolean): string => {
     if (score == null) return 'Not Assessed';
     if (isCertification) {
-      // Certification uses 0-3 scale
       const labels = ['No Evidence', 'Emerging', 'Proficient ✓', 'Advanced ✓'];
       return labels[score] || 'Unknown';
     } else {
-      // Learning uses 1-4 scale for UNESCO
       const labels = ['', 'Emerging', 'Developing', 'Competent', 'Advanced'];
       return labels[score] || 'Unknown';
     }
   };
 
-  // Helper: Extract scores for an activity based on category/subcategory and progress
   const getActivityScores = (activity: DashboardActivity): { dimension: string; score: number | null; evidence: string | null; maxScore: number }[] => {
     const isCertification = activity.category_activity === 'Certification';
     let subCat = activity.sub_category;
     const cat = activity.category_activity;
     
-    // For certifications, if sub_category is null, infer from activity name
     if (isCertification && !subCat && activity.activity) {
       const activityName = activity.activity.toLowerCase();
       if (activityName.includes('critical thinking')) subCat = 'Critical Thinking';
@@ -288,10 +410,6 @@ const DashboardPage: React.FC = () => {
       else if (activityName.includes('ai proficiency')) subCat = 'AI Proficiency';
     }
     
-    console.log('[getActivityScores] Called for:', activity.activity);
-    console.log('[getActivityScores] Category:', cat, 'SubCat:', subCat, 'IsCert:', isCertification);
-    
-    // AI Learning - UNESCO Competencies (1-4 scale)
     if (cat === 'AI Learning') {
       return [
         { dimension: 'Understanding of AI', score: activity.certification_evaluation_UNESCO_1_score ?? null, evidence: activity.certification_evaluation_UNESCO_1_evidence ?? null, maxScore: 4 },
@@ -301,8 +419,6 @@ const DashboardPage: React.FC = () => {
       ];
     }
     
-    // Skills - check BOTH category_activity and sub_category (handles both canned and user-created activities)
-    // Vibe Coding
     if (subCat === 'Vibe Coding' || cat === 'Vibe Coding') {
       if (isCertification) {
         return [
@@ -319,16 +435,13 @@ const DashboardPage: React.FC = () => {
         ];
       }
     } 
-    // Critical Thinking
     else if (subCat === 'Critical Thinking' || cat === 'Critical Thinking') {
       if (isCertification) {
-        const scores = [
+        return [
           { dimension: 'Claim Evaluation', score: activity.certification_critical_thinking_claim_evaluation_score ?? null, evidence: activity.certification_critical_thinking_claim_evaluation_evidence ?? null, maxScore: 3 },
           { dimension: 'Reasoning Trace', score: activity.certification_critical_thinking_reasoning_trace_score ?? null, evidence: activity.certification_critical_thinking_reasoning_trace_evidence ?? null, maxScore: 3 },
           { dimension: 'Reflection', score: activity.certification_critical_thinking_reflection_score ?? null, evidence: activity.certification_critical_thinking_reflection_evidence ?? null, maxScore: 3 },
         ];
-        console.log('[getActivityScores] Returning Critical Thinking cert scores:', scores.map(s => `${s.dimension}=${s.score}`));
-        return scores;
       } else {
         return [
           { dimension: 'Logical Reasoning', score: activity.certification_evaluation_critical_thinking_logical_reasoning_sc ?? null, evidence: activity.certification_evaluation_critical_thinking_logical_reasoning_ev ?? null, maxScore: 3 },
@@ -336,7 +449,6 @@ const DashboardPage: React.FC = () => {
         ];
       }
     } 
-    // Problem Solving
     else if (subCat === 'Problem-Solving' || cat === 'Problem-Solving' || cat === 'Problem Solving') {
       if (isCertification) {
         return [
@@ -351,7 +463,6 @@ const DashboardPage: React.FC = () => {
         ];
       }
     } 
-    // Creativity
     else if (subCat === 'Creativity' || cat === 'Creativity') {
       if (isCertification) {
         return [
@@ -366,7 +477,6 @@ const DashboardPage: React.FC = () => {
         ];
       }
     } 
-    // Communication
     else if (subCat === 'Communication' || cat === 'Communication') {
       if (isCertification) {
         return [
@@ -381,7 +491,6 @@ const DashboardPage: React.FC = () => {
         ];
       }
     } 
-    // Digital Fluency
     else if (subCat === 'Digital Fluency' || cat === 'Digital Fluency') {
       if (isCertification) {
         return [
@@ -401,7 +510,6 @@ const DashboardPage: React.FC = () => {
         ];
       }
     }
-    // AI Proficiency
     else if (subCat === 'AI Proficiency' || cat === 'AI Proficiency') {
       if (isCertification) {
         return [
@@ -411,7 +519,6 @@ const DashboardPage: React.FC = () => {
           { dimension: 'Verification & Bias', score: activity.certification_ai_proficiency_verification_bias_score ?? null, evidence: activity.certification_ai_proficiency_verification_bias_evidence ?? null, maxScore: 3 },
         ];
       } else {
-        // AI Learning uses UNESCO scores
         return [
           { dimension: 'Understanding of AI', score: activity.certification_evaluation_UNESCO_1_score ?? null, evidence: activity.certification_evaluation_UNESCO_1_evidence ?? null, maxScore: 4 },
           { dimension: 'Human-Centred Mindset', score: activity.certification_evaluation_UNESCO_2_score ?? null, evidence: activity.certification_evaluation_UNESCO_2_evidence ?? null, maxScore: 4 },
@@ -421,110 +528,53 @@ const DashboardPage: React.FC = () => {
       }
     }
     
-    console.log('[getActivityScores] No matching category found, returning empty array');
     return [];
   };
 
-  // Helper: Check if activity has any scores
   const hasScores = (activity: DashboardActivity): boolean => {
     if (activity.progress === 'not started') return false;
     const scores = getActivityScores(activity);
     return scores.some(s => s.score != null);
   };
 
-  // Extract certification progress from dashboard row
   const extractCertificationProgress = (dashboardRows: any[]): CertificationProgress[] => {
     const certMap = new Map<string, { scores: (number | null)[], updated: string }>();
     
-    // Known certification patterns with expected assessment counts
     const knownCerts = [
-      'ai_proficiency',
-      'vibe_coding',
-      'critical_thinking',
-      'creativity',
-      'communication',
-      'problem_solving',
-      'digital_fluency'
+      'ai_proficiency', 'vibe_coding', 'critical_thinking',
+      'creativity', 'communication', 'problem_solving', 'digital_fluency'
     ];
 
-    // Expected total assessments per certification (based on certification_assessments table)
     const expectedAssessments: Record<string, number> = {
-      'ai_proficiency': 4,      // 4 UNESCO competencies
-      'vibe_coding': 3,          // 3 assessments
-      'critical_thinking': 3,    // Claim Evaluation, Reasoning Trace, Reflection
-      'creativity': 3,           // Creative Iteration, Exploration, Originality
-      'communication': 3,        // 3 assessments
-      'problem_solving': 3,      // 3 assessments
-      'digital_fluency': 3       // 3 assessments
+      'ai_proficiency': 4, 'vibe_coding': 3, 'critical_thinking': 3,
+      'creativity': 3, 'communication': 3, 'problem_solving': 3, 'digital_fluency': 3
     };
 
-    // ONLY scan certification rows (category_activity === 'Certification')
-    // Each certification has its own dedicated row
     const certificationRows = dashboardRows.filter(row => row.category_activity === 'Certification');
-    
-    console.log('[Dashboard] Found', certificationRows.length, 'certification rows out of', dashboardRows.length, 'total rows');
 
-    // Scan certification rows for certification score columns
-    // EXCLUDE learning module columns (pattern: certification_evaluation_*)
-    // INCLUDE certification columns even if "evaluation" appears in the assessment name
     certificationRows.forEach(row => {
-      console.log('[Dashboard] Scanning row:', row.activity);
-      
-      const foundColumns: string[] = [];
-      
       for (const [key, value] of Object.entries(row)) {
-        if (!key.startsWith('certification_') || !key.endsWith('_score')) {
-          continue;
-        }
-        
-        // EXPLICIT CHECK: Is this a learning module column?
-        // Learning modules have pattern: certification_evaluation_{something}
-        // Certifications have pattern: certification_{category}_{assessment}_score
+        if (!key.startsWith('certification_') || !key.endsWith('_score')) continue;
         const parts = key.split('_');
+        if (parts.length >= 2 && parts[1] === 'evaluation') continue;
         
-        // If the second part is "evaluation", it's a learning module
-        // e.g., certification_evaluation_critical_thinking_* 
-        if (parts.length >= 2 && parts[1] === 'evaluation') {
-          console.log(`[Dashboard] ✗ Excluded (learning module):`, key);
-          continue;
-        }
-        
-        // Extract certification name - check if it matches a known cert
         for (const certName of knownCerts) {
           if (key.startsWith(`certification_${certName}_`)) {
-            foundColumns.push(`${key} = ${value}`);
-            console.log(`[Dashboard] ✓ Found ${certName} column:`, key, '=', value);
-            
             if (!certMap.has(certName)) {
               certMap.set(certName, { scores: [], updated: row.updated_at || '' });
             }
-            // Include all scores, even null ones (not yet taken)
             certMap.get(certName)!.scores.push(value as number | null);
             break;
           }
         }
       }
-      
-      console.log(`[Dashboard] Row ${row.activity} - Found ${foundColumns.length} certification columns:`, foundColumns);
     });
 
-    // Log what was found for each certification
-    console.log('[Dashboard] Certification scores found:');
-    certMap.forEach((data, certName) => {
-      console.log(`  ${certName}: ${data.scores.length} scores =`, data.scores);
-    });
-
-    // Convert to CertificationProgress array
     const certifications: CertificationProgress[] = [];
     
     certMap.forEach((data, certName) => {
-      // Use expected total, or fallback to scores length
       const totalAssessments = expectedAssessments[certName] || data.scores.length;
-      
-      // Count only scores >= 2 (Proficient or Advanced) as completed
       const completedAssessments = data.scores.filter(s => s !== null && s >= 2).length;
-      
-      // Count assessments that have been attempted (not null)
       const attemptedAssessments = data.scores.filter(s => s !== null).length;
       
       let progress: 'not started' | 'started' | 'completed' = 'not started';
@@ -534,24 +584,17 @@ const DashboardPage: React.FC = () => {
         progress = 'started';
       }
 
-      // Format display name
       const formatName = (str: string) => {
-        return str
-          .split('_')
-          .map(word => {
-            // Special case for AI acronym
-            if (word.toLowerCase() === 'ai') return 'AI';
-            return word.charAt(0).toUpperCase() + word.slice(1);
-          })
-          .join(' ');
+        return str.split('_').map(word => {
+          if (word.toLowerCase() === 'ai') return 'AI';
+          return word.charAt(0).toUpperCase() + word.slice(1);
+        }).join(' ');
       };
 
       certifications.push({
         certificationName: certName,
         displayName: formatName(certName) + ' Certification',
-        totalAssessments,
-        completedAssessments,
-        progress,
+        totalAssessments, completedAssessments, progress,
         route: getCertificationRoute(certName),
         updated_at: data.updated
       });
@@ -562,39 +605,25 @@ const DashboardPage: React.FC = () => {
 
   const getProgressColor = (progress: string) => {
     switch (progress) {
-      case 'completed':
-        return 'bg-green-100 text-green-800';
-      case 'started':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'not started':
-        return 'bg-gray-100 text-gray-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
+      case 'completed': return 'bg-green-100 text-green-800';
+      case 'started': return 'bg-yellow-100 text-yellow-800';
+      case 'not started': return 'bg-gray-100 text-gray-800';
+      default: return 'bg-gray-100 text-gray-800';
     }
   };
 
   const getCategoryIcon = (category: string) => {
-    const iconProps = {
-      size: 16,
-      className: "text-blue-600"
-    };
-  
+    const iconProps = { size: 16, className: "text-blue-600" };
     switch (category?.toLowerCase()) {
-      case 'coding':
-      case 'programming':
-      case 'digital-fluency':
+      case 'coding': case 'programming': case 'digital-fluency':
         return <CodeIcon {...iconProps} className="text-blue-600" />;
-      case 'vibe coding':
-      case 'tech workshop':
+      case 'vibe coding': case 'tech workshop':
         return <CodeIcon {...iconProps} className="text-pink-600" />;
       case 'entrepreneurship':
         return <Briefcase {...iconProps} className="text-green-600" />;
-      case 'teamwork':
-      case 'communication':
+      case 'teamwork': case 'communication':
         return <Users {...iconProps} className="text-purple-600" />;
-      case 'learning':
-      case 'education':
-      case 'critical-thinking':
+      case 'learning': case 'education': case 'critical-thinking':
         return <Book {...iconProps} className="text-orange-600" />;
       case 'creative-expression':
         return <Award {...iconProps} className="text-pink-600" />;
@@ -609,68 +638,41 @@ const DashboardPage: React.FC = () => {
     }
   };
 
-  // Get unique categories from dashboard activities (exclude Certification)
   const getUniqueCategories = (): string[] => {
     const categories = new Set<string>();
     data.dashboardActivities.forEach(activity => {
-      if (
-        activity.category_activity &&
-        activity.category_activity !== 'Certification' &&
-        activity.activity !== 'english_skills'
-      ) {
+      if (activity.category_activity && activity.category_activity !== 'Certification' && activity.activity !== 'english_skills') {
         categories.add(activity.category_activity);
       }
     });
     return Array.from(categories).sort();
   };
 
-  // Filter activities by selected category (exclude Certification category)
   const getFilteredActivities = (): DashboardActivity[] => {
     const nonCertActivities = data.dashboardActivities.filter(
-      activity =>
-        activity.category_activity !== 'Certification' &&
-        activity.activity !== 'english_skills'
+      activity => activity.category_activity !== 'Certification' && activity.activity !== 'english_skills'
     );
-    
-    if (selectedCategory === 'all') {
-      return nonCertActivities;
-    }
-    return nonCertActivities.filter(activity => 
-      activity.category_activity === selectedCategory
-    );
+    if (selectedCategory === 'all') return nonCertActivities;
+    return nonCertActivities.filter(activity => activity.category_activity === selectedCategory);
   };
 
   // ── Leaderboard fetch ────────────────────────────────────────────────────
-  //
-  // Scoping rules:
-  //   platform_administrator → picks any org from orgOptions dropdown;
-  //                            leaderboard scoped to that org's join_code
-  //   leader                 → scoped to their org's join_code (auto-derived)
-  //   student                → scoped to their own join_code_used
-  //
   const resolvedJoinCode =
     userProfile?.role === 'platform_administrator' ? selectedOrgJoinCode :
-    userProfile?.role === 'leader'                 ? leaderJoinCode :
+    userProfile?.role === 'leader' ? leaderJoinCode :
     (userProfile?.join_code_used ?? '');
 
   const fetchLeaderboardForCode = useCallback(async (
-    metric: LeaderboardMetric,
-    joinCode: string
+    metric: LeaderboardMetric, joinCode: string
   ) => {
     if (!joinCode) return;
     setLeaderboardLoading(true);
     try {
-      // Step 1 – get all students with this join_code
       const { data: cohortProfiles, error: cpErr } = await supabase
-        .from('profiles')
-        .select('id, name')
-        .eq('join_code_used', joinCode)
-        .eq('role', 'student');
+        .from('profiles').select('id, name')
+        .eq('join_code_used', joinCode).eq('role', 'student');
 
-      if (cpErr || !cohortProfiles || cohortProfiles.length === 0) {
-        setLeaderboard([]);
-        return;
-      }
+      if (cpErr || !cohortProfiles || cohortProfiles.length === 0) { setLeaderboard([]); return; }
 
       const cohortIds = cohortProfiles.map(p => p.id);
       const nameMap: Record<string, string> = {};
@@ -679,41 +681,22 @@ const DashboardPage: React.FC = () => {
       let counts: Record<string, number> = {};
 
       if (metric === 'sessions_alltime' || metric === 'sessions_thismonth') {
-        // Count dashboard rows where progress = 'started' | 'completed'
-        // (mirrors AdminStudentDashboard isEngagedSession logic exactly)
         const { data: rows, error: rowErr } = await supabase
-          .from('dashboard')
-          .select('user_id, progress, created_at')
-          .in('user_id', cohortIds)
-          .in('progress', ['started', 'completed']);
-
+          .from('dashboard').select('user_id, progress, created_at')
+          .in('user_id', cohortIds).in('progress', ['started', 'completed']);
         if (rowErr || !rows) { setLeaderboard([]); return; }
 
-        // For monthly: filter on created_at — NOT updated_at, which is bumped
-        // on every chat message and would inflate current-month counts.
         const now = new Date();
         const monthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
         const filtered = metric === 'sessions_thismonth'
-          ? rows.filter(r => {
-              const ts = Date.parse(r.created_at || '');
-              return !isNaN(ts) && ts >= monthStartMs;
-            })
+          ? rows.filter(r => { const ts = Date.parse(r.created_at || ''); return !isNaN(ts) && ts >= monthStartMs; })
           : rows;
-
-        filtered.forEach(r => {
-          counts[r.user_id] = (counts[r.user_id] || 0) + 1;
-        });
-
+        filtered.forEach(r => { counts[r.user_id] = (counts[r.user_id] || 0) + 1; });
       } else {
-        // Certification rows only
         const { data: certRows, error: certErr } = await supabase
-          .from('dashboard')
-          .select('user_id, progress')
-          .in('user_id', cohortIds)
-          .eq('category_activity', 'Certification');
-
+          .from('dashboard').select('user_id, progress')
+          .in('user_id', cohortIds).eq('category_activity', 'Certification');
         if (certErr || !certRows) { setLeaderboard([]); return; }
-
         certRows.forEach(r => {
           if (metric === 'certs_achieved' && r.progress !== 'completed') return;
           if (metric === 'certs_attempted' && r.progress === 'not started') return;
@@ -722,339 +705,191 @@ const DashboardPage: React.FC = () => {
       }
 
       const entries: LeaderboardEntry[] = Object.entries(counts)
-        .map(([uid, count]) => ({
-          user_id: uid,
-          name: nameMap[uid] || 'Unknown',
-          value: count,
-          rank: 0,
-        }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 10)
+        .map(([uid, count]) => ({ user_id: uid, name: nameMap[uid] || 'Unknown', value: count, rank: 0 }))
+        .sort((a, b) => b.value - a.value).slice(0, 10)
         .map((e, i) => ({ ...e, rank: i + 1 }));
-
       setLeaderboard(entries);
     } catch (e) {
       console.error('[Leaderboard] fetch error:', e);
       setLeaderboard([]);
-    } finally {
-      setLeaderboardLoading(false);
-    }
+    } finally { setLeaderboardLoading(false); }
   }, []);
 
-  // Load all orgs for platform_administrator once profile is known
   useEffect(() => {
     if (userProfile?.role !== 'platform_administrator') return;
-    supabase
-      .from('organizations')
-      .select('id, name, join_code')
-      .order('name', { ascending: true })
+    supabase.from('organizations').select('id, name, join_code').order('name', { ascending: true })
       .then(({ data }) => {
-        if (data && data.length > 0) {
-          setOrgOptions(data);
-          setSelectedOrgJoinCode(data[0].join_code); // auto-select first
-        }
+        if (data && data.length > 0) { setOrgOptions(data); setSelectedOrgJoinCode(data[0].join_code); }
       });
   }, [userProfile?.role]);
 
-  // For leader: derive join_code directly from their profile → organizations FK
   useEffect(() => {
     if (userProfile?.role !== 'leader' || !user?.id) return;
-
-    supabase
-      .from('profiles')
-      .select('organizations(join_code, join_codes)')
-      .eq('id', user.id)
-      .single()
+    supabase.from('profiles').select('organizations(join_code, join_codes)').eq('id', user.id).single()
       .then(({ data: profileData }) => {
         const org = (profileData as any)?.organizations;
-        // Prefer the first entry of join_codes[], fall back to legacy join_code
-        const code: string =
-          (Array.isArray(org?.join_codes) && org.join_codes.length > 0
-            ? org.join_codes[0]
-            : org?.join_code) ?? '';
-
-        if (code) {
-          setLeaderJoinCode(code);
-        } else {
-          // Fallback: find any student in this org and use their join_code_used
-          if (userProfile?.organization_id) {
-            supabase
-              .from('profiles')
-              .select('join_code_used')
-              .eq('organization_id', userProfile.organization_id)
-              .eq('role', 'student')
-              .not('join_code_used', 'is', null)
-              .limit(1)
-              .then(({ data: pd }) => {
-                setLeaderJoinCode(pd?.[0]?.join_code_used ?? '');
-              });
-          }
+        const code: string = (Array.isArray(org?.join_codes) && org.join_codes.length > 0 ? org.join_codes[0] : org?.join_code) ?? '';
+        if (code) { setLeaderJoinCode(code); }
+        else if (userProfile?.organization_id) {
+          supabase.from('profiles').select('join_code_used')
+            .eq('organization_id', userProfile.organization_id).eq('role', 'student')
+            .not('join_code_used', 'is', null).limit(1)
+            .then(({ data: pd }) => { setLeaderJoinCode(pd?.[0]?.join_code_used ?? ''); });
         }
       });
   }, [userProfile?.role, userProfile?.organization_id, user?.id]);
 
-  // Refetch whenever metric or resolved join code changes
   useEffect(() => {
-    if (resolvedJoinCode) {
-      fetchLeaderboardForCode(leaderboardMetric, resolvedJoinCode);
-    }
+    if (resolvedJoinCode) fetchLeaderboardForCode(leaderboardMetric, resolvedJoinCode);
   }, [leaderboardMetric, resolvedJoinCode, fetchLeaderboardForCode]);
+
+  // ── Fetch monthly assessment ─────────────────────────────────────────────
+  const fetchMonthlyAssessment = useCallback(async () => {
+    if (!user?.id) return;
+    setMonthlyLoading(true);
+    try {
+      const { data: rows, error: err } = await supabase
+        .from('user_monthly_assessments')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('measured_at', { ascending: false })
+        .limit(1);
+
+      if (err) {
+        console.warn('[Monthly Assessment] fetch error:', err);
+        setMonthlyAssessment(null);
+      } else if (rows && rows.length > 0) {
+        setMonthlyAssessment(rows[0] as MonthlyAssessment);
+      } else {
+        setMonthlyAssessment(null);
+      }
+    } catch (e) {
+      console.error('[Monthly Assessment] unexpected error:', e);
+      setMonthlyAssessment(null);
+    } finally {
+      setMonthlyLoading(false);
+    }
+  }, [user?.id]);
 
   // ─────────────────────────────────────────────────────────────────────────
 
   const fetchDashboardData = useCallback(async (force = false) => {
-    if (!user) {
-      console.log('[Dashboard] No user, skipping fetch');
-      return;
-    }
-
-    if (fetchingRef.current && !force) {
-      console.log('[Dashboard] Already fetching, skipping');
-      return;
-    }
-
-    if (!force && lastUserIdRef.current === user.id) {
-      console.log('[Dashboard] Same user as last fetch, skipping');
-      return;
-    }
+    if (!user) return;
+    if (fetchingRef.current && !force) return;
+    if (!force && lastUserIdRef.current === user.id) return;
 
     try {
       fetchingRef.current = true;
       lastUserIdRef.current = user.id;
       setLoading(true);
       setError(null);
-
-      console.log('Fetching dashboard data for user:', user.id, 'Role:', user.role, 'Grade:', user.grade_level);
       
       if (user.role === 'facilitator') {
-        setData({
-          projects: [],
-          dashboardActivities: [],
-          certifications: []
-        });
+        setData({ projects: [], dashboardActivities: [], certifications: [] });
       } else {
-        // Student dashboard
-        
-        // Fetch student's projects
         let projects = [];
         try {
-          const projectQuery = supabase
-            .from('projects')
-            .select('*')
-            .eq('user_id', user.id);
-          
-          if (user.team_id) {
-            projectQuery.or(`user_id.eq.${user.id},team_id.eq.${user.team_id}`);
-          }
-          
-          const { data: projectsData, error: projectsError } = await projectQuery
-            .order('updated_at', { ascending: false });
+          const projectQuery = supabase.from('projects').select('*').eq('user_id', user.id);
+          if (user.team_id) projectQuery.or(`user_id.eq.${user.id},team_id.eq.${user.team_id}`);
+          const { data: projectsData, error: projectsError } = await projectQuery.order('updated_at', { ascending: false });
+          if (!projectsError) projects = projectsData || [];
+        } catch (error) { console.warn('Projects table may not exist:', error); }
 
-          if (projectsError) {
-            console.warn('Projects fetch error:', projectsError.message, projectsError);
-          } else {
-            projects = projectsData || [];
-          }
-        } catch (error) {
-          console.warn('Projects table may not exist:', error);
-        }
-
-        // Fetch team info
         let team = null;
         if (user.team_id) {
           const { data: teamData, error: teamError } = await supabase
-            .from('teams')
-            .select(`
-              *,
-              profiles!profiles_team_id_fkey(
-                id,
-                name,
-                email,
-                avatar_url,
-                role
-              )
-            `)
-            .eq('id', user.team_id)
-            .single();
-
-          if (teamError) {
-            console.warn('Team fetch error:', teamError.message, teamError);
-          } else {
-            team = teamData;
-          }
+            .from('teams').select(`*, profiles!profiles_team_id_fkey(id, name, email, avatar_url, role)`)
+            .eq('id', user.team_id).single();
+          if (!teamError) team = teamData;
         }
 
-        // Fetch dashboard activities
         let dashboardActivities: DashboardActivity[] = [];
         let certifications: CertificationProgress[] = [];
         
-        console.log('Attempting to fetch dashboard data for user:', user.id);
         const { data: dashboardData, error: dashboardError } = await supabase
-          .from<'dashboard'>( 'dashboard' )
-          .select('*')
-          .eq('user_id', user.id)
+          .from<'dashboard'>('dashboard').select('*').eq('user_id', user.id)
           .order('updated_at', { ascending: false });
-      
-        console.log('Dashboard query result:', { dashboardData, dashboardError });
 
         if (dashboardError || !dashboardData || dashboardData.length === 0) {
-          console.log('No existing dashboard rows; running RPC seed…');
-        
-          const { data: rpcCount, error: rpcError } = await supabase.rpc(
+          const { error: rpcError } = await supabase.rpc(
             'create_grade_appropriate_dashboard_activities_by_continent',
-            {
-              user_id_param: user.id,
-              continent_param: userProfile!.continent
-            }
+            { user_id_param: user.id, continent_param: userProfile!.continent }
           );
-          if (rpcError) {
-            console.warn('RPC failed:', rpcError);
-            throw rpcError;
-          }
-          console.log('RPC inserted rows:', rpcCount);
-        
+          if (rpcError) throw rpcError;
           const { data: retry, error: retryError } = await supabase
-            .from<'dashboard'>('dashboard')
-            .select('*')
-            .eq('user_id', user.id)
+            .from<'dashboard'>('dashboard').select('*').eq('user_id', user.id)
             .order('updated_at', { ascending: false });
-        
-          if (retryError) {
-            console.error('Refetch after RPC failed:', retryError);
-            throw retryError;
-          }
+          if (retryError) throw retryError;
           dashboardActivities = retry || [];
           certifications = extractCertificationProgress(retry || []);
-        }
-        else {
+        } else {
           dashboardActivities = dashboardData;
           certifications = extractCertificationProgress(dashboardData);
         }
 
-        // Create dashboard summary for learning activities (exclude Certification category)
+        const learningActivities = dashboardActivities.filter(a => a.category_activity !== 'Certification');
         let dashboardSummary = null;
-        const learningActivities = dashboardActivities.filter(
-          a => a.category_activity !== 'Certification'
-        );
-        
-        if (learningActivities && learningActivities.length > 0) {
-          const completed = learningActivities.filter(a => a.progress === 'completed').length;
-          const started = learningActivities.filter(a => a.progress === 'started').length;
-
+        if (learningActivities.length > 0) {
           dashboardSummary = {
             total_activities: learningActivities.length,
-            completed,
-            started
+            completed: learningActivities.filter(a => a.progress === 'completed').length,
+            started: learningActivities.filter(a => a.progress === 'started').length
           };
         }
 
-        // Create certification summary
         let certificationSummary = null;
         if (certifications.length > 0) {
-          const completedCerts = certifications.filter(c => c.progress === 'completed').length;
-          const startedCerts = certifications.filter(c => c.progress === 'started').length;
-
           certificationSummary = {
             total_certifications: certifications.length,
-            completed_certifications: completedCerts,
-            started_certifications: startedCerts
+            completed_certifications: certifications.filter(c => c.progress === 'completed').length,
+            started_certifications: certifications.filter(c => c.progress === 'started').length
           };
         }
 
         setData({
-          projects: projects || [],
-          team: team as DashboardData['team'],
-          dashboardActivities: dashboardActivities,
-          certifications: certifications,
+          projects: projects || [], team: team as DashboardData['team'],
+          dashboardActivities, certifications,
           dashboardSummary: dashboardSummary || undefined,
           certificationSummary: certificationSummary || undefined
         });
-
       }
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
       setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
-    } finally {
-      setLoading(false);
-      fetchingRef.current = false;
-    }
+    } finally { setLoading(false); fetchingRef.current = false; }
   }, [user, userProfile?.continent]);
   
-  // Refresh dashboard data
   const refreshDashboard = useCallback(async () => {
     if (!user || user.role !== 'student') return;
-    if (!userProfile?.continent) {
-      console.warn('[Dashboard] Cannot refresh: no continent yet');
-      return;
-    }
-
+    if (!userProfile?.continent) return;
     try {
-      setRefreshing(true);
-      setError(null);
-
+      setRefreshing(true); setError(null);
       const { error: rpcError } = await supabase.rpc('create_grade_appropriate_dashboard_activities_by_continent',
-        {
-          user_id_param: user.id,
-          continent_param: userProfile.continent
-        }
-      );
+        { user_id_param: user.id, continent_param: userProfile.continent });
       if (rpcError) throw rpcError;
-
       await fetchDashboardData(true);
     } catch (err) {
-      console.error('Error refreshing dashboard:', err);
       setError('Failed to refresh dashboard: ' + (err as Error).message);
-    } finally {
-      setRefreshing(false);
-    }
+    } finally { setRefreshing(false); }
   }, [user, userProfile, fetchDashboardData]);
 
-  // Function to download certificate
   const downloadCertificate = async (certificationName: string, displayName: string) => {
     try {
       setDownloadingCert(certificationName);
-      
-      // Find the certification activity
       const certActivity = data.dashboardActivities.find(
-        a => a.activity.toLowerCase() === displayName.toLowerCase() && 
-             a.category_activity === 'Certification'
+        a => a.activity.toLowerCase() === displayName.toLowerCase() && a.category_activity === 'Certification'
       );
-      
-      if (!certActivity) {
-        alert('Certification activity not found.');
-        setDownloadingCert(null);
-        return;
-      }
-      
-      // Check if certificate PDF exists
-      if (!certActivity.certificate_pdf_url) {
-        alert('Certificate not yet generated. Please complete the certification first from the certification page.');
-        setDownloadingCert(null);
-        return;
-      }
-      
-      // Download the certificate from storage
-      console.log('[Dashboard] Downloading certificate from:', certActivity.certificate_pdf_url);
+      if (!certActivity) { alert('Certification activity not found.'); setDownloadingCert(null); return; }
+      if (!certActivity.certificate_pdf_url) { alert('Certificate not yet generated.'); setDownloadingCert(null); return; }
       window.open(certActivity.certificate_pdf_url, '_blank');
-      
       setDownloadingCert(null);
-    } catch (error) {
-      console.error('Error downloading certificate:', error);
-      alert('Could not download certificate. Please try again.');
-      setDownloadingCert(null);
-    }
+    } catch (error) { alert('Could not download certificate.'); setDownloadingCert(null); }
   };
 
   useEffect(() => {
     if (user?.id) {
-      supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single()
-        .then(({ data, error }) => {
-          if (!error && data) setUserProfile(data);
-        });
+      supabase.from('profiles').select('*').eq('id', user.id).single()
+        .then(({ data, error }) => { if (!error && data) setUserProfile(data); });
     }
   }, [user?.id]);
 
@@ -1063,8 +898,9 @@ const DashboardPage: React.FC = () => {
       fetchingRef.current = false;
       lastUserIdRef.current = null;
       fetchDashboardData();
+      fetchMonthlyAssessment();
     }
-  }, [user?.id, userProfile?.continent, fetchDashboardData]);
+  }, [user?.id, userProfile?.continent, fetchDashboardData, fetchMonthlyAssessment]);
 
   if (loading) {
     return (
@@ -1088,13 +924,8 @@ const DashboardPage: React.FC = () => {
                 <p className="mt-2 text-sm text-red-700">{error}</p>
                 {user?.role === 'student' && (
                   <div className="mt-4">
-                    <Button 
-                      onClick={refreshDashboard}
-                      variant="outline"
-                      size="sm"
-                      icon={<RefreshCw size={16} />}
-                      isLoading={refreshing}
-                    >
+                    <Button onClick={refreshDashboard} variant="outline" size="sm"
+                      icon={<RefreshCw size={16} />} isLoading={refreshing}>
                       Try to Fix Dashboard
                     </Button>
                   </div>
@@ -1110,6 +941,387 @@ const DashboardPage: React.FC = () => {
   const filteredActivities = getFilteredActivities();
   const uniqueCategories = getUniqueCategories();
 
+  // ── Monthly Summary render helper ────────────────────────────────────────
+  const renderMonthlySummary = () => {
+    if (user?.role !== 'student') return null;
+
+    if (monthlyLoading) {
+      return (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="px-6 py-4 border-b bg-gradient-to-r from-indigo-50 to-cyan-50">
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <BarChart3 className="h-6 w-6 text-indigo-500" />
+              Monthly Summary
+            </h2>
+          </div>
+          <div className="flex items-center justify-center py-10">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-400" />
+          </div>
+        </div>
+      );
+    }
+
+    if (!monthlyAssessment) {
+      return (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="px-6 py-4 border-b bg-gradient-to-r from-indigo-50 to-cyan-50">
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <BarChart3 className="h-6 w-6 text-indigo-500" />
+              Monthly Summary
+            </h2>
+          </div>
+          <div className="py-8 text-center text-gray-400 text-sm">
+            <Activity className="h-10 w-10 mx-auto mb-2 text-gray-300" />
+            <p>No monthly assessment data available yet.</p>
+            <p className="text-xs mt-1">Keep learning — your first summary will appear after your sessions are assessed.</p>
+          </div>
+        </div>
+      );
+    }
+
+    const ma = monthlyAssessment;
+    const measuredDate = new Date(ma.measured_at);
+    const monthLabel = measuredDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    // Engagement rate
+    const engagementRate = ma.session_count && ma.session_count > 0
+      ? Math.round(((ma.engaged_session_count ?? 0) / ma.session_count) * 100)
+      : null;
+
+    // Reasoning distribution for mini chart
+    const reasoningLevels = [
+      { label: 'Definitional', pct: ma.reasoning_definitional_pct, color: 'bg-gray-400' },
+      { label: 'Responsive', pct: ma.reasoning_responsive_pct, color: 'bg-blue-400' },
+      { label: 'Elaborative', pct: ma.reasoning_elaborative_pct, color: 'bg-indigo-500' },
+      { label: 'Structured', pct: ma.reasoning_structured_pct, color: 'bg-purple-600' },
+    ].filter(r => r.pct != null && Number(r.pct) > 0);
+
+    // AI Proficiency cert level badge
+    const aiCertColor = (() => {
+      const lvl = (ma.ai_prof_cert_level ?? '').toLowerCase();
+      if (lvl === 'advanced') return 'bg-green-100 text-green-800 border-green-300';
+      if (lvl === 'proficient') return 'bg-blue-100 text-blue-800 border-blue-300';
+      if (lvl === 'emerging') return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+      return 'bg-gray-100 text-gray-700 border-gray-300';
+    })();
+
+    return (
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        {/* Header */}
+        <button
+          onClick={() => setMonthlySectionExpanded(prev => !prev)}
+          className="w-full px-6 py-4 border-b bg-gradient-to-r from-indigo-50 to-cyan-50 flex items-center justify-between cursor-pointer hover:from-indigo-100 hover:to-cyan-100 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <BarChart3 className="h-6 w-6 text-indigo-500" />
+            <div className="text-left">
+              <h2 className="text-xl font-bold text-gray-900">Monthly Summary</h2>
+              <p className="text-sm text-gray-500">{monthLabel} · assessed by {ma.assessment_model ?? 'AI'}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-400">
+              Updated {new Date(ma.updated_at).toLocaleDateString()}
+            </span>
+            {monthlySectionExpanded
+              ? <ChevronUp className="h-5 w-5 text-gray-400" />
+              : <ChevronDown className="h-5 w-5 text-gray-400" />}
+          </div>
+        </button>
+
+        {monthlySectionExpanded && (
+          <div className="p-6 space-y-6">
+
+            {/* ── Row 1: Core Skill Scores ─────────────────────────────── */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <Brain className="h-4 w-4" />
+                Core Skill Scores
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+                <ScoreBar label="Cognitive" score={ma.cognitive_score} icon={<Brain className="h-4 w-4 text-indigo-500" />} colorClass="bg-indigo-500" />
+                <ScoreBar label="Critical Thinking" score={ma.critical_thinking_score} icon={<Lightbulb className="h-4 w-4 text-amber-500" />} colorClass="bg-amber-500" />
+                <ScoreBar label="Problem Solving" score={ma.problem_solving_score} icon={<Target className="h-4 w-4 text-red-500" />} colorClass="bg-red-500" />
+                <ScoreBar label="Creativity" score={ma.creativity_score} icon={<Star className="h-4 w-4 text-pink-500" />} colorClass="bg-pink-500" />
+                <ScoreBar label="Productive Use of Energy (PUE)" score={ma.pue_score} icon={<Zap className="h-4 w-4 text-emerald-500" />} colorClass="bg-emerald-500" />
+              </div>
+            </div>
+
+            {/* ── Row 2: Session Engagement + AI Proficiency ────────────── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Session engagement */}
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <MessageSquare className="h-4 w-4" />
+                  Session Engagement
+                </h3>
+                <div className="grid grid-cols-3 gap-3">
+                  <StatPill label="Total Sessions" value={ma.session_count ?? 0} icon={<MessageSquare className="h-4 w-4 text-blue-500" />} />
+                  <StatPill label="Engaged" value={ma.engaged_session_count ?? 0}
+                    sub={engagementRate != null ? `${engagementRate}% rate` : undefined}
+                    icon={<Zap className="h-4 w-4 text-green-500" />} />
+                  <StatPill label="Avg Words" value={ma.avg_words_per_session != null ? Math.round(Number(ma.avg_words_per_session)) : '—'}
+                    icon={<Book className="h-4 w-4 text-purple-500" />} />
+                </div>
+              </div>
+
+              {/* AI Proficiency */}
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <GraduationCap className="h-4 w-4" />
+                  AI Proficiency
+                </h3>
+                {ma.ai_prof_cert_level ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Certification Level</span>
+                      <span className={classNames('inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold border', aiCertColor)}>
+                        {ma.ai_prof_cert_level}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      {ma.ai_prof_understanding_score != null && (
+                        <div className="flex justify-between"><span className="text-gray-500">Understanding</span><span className="font-medium">{ma.ai_prof_understanding_score}/3</span></div>
+                      )}
+                      {ma.ai_prof_application_score != null && (
+                        <div className="flex justify-between"><span className="text-gray-500">Application</span><span className="font-medium">{ma.ai_prof_application_score}/3</span></div>
+                      )}
+                      {ma.ai_prof_ethics_score != null && (
+                        <div className="flex justify-between"><span className="text-gray-500">Ethics</span><span className="font-medium">{ma.ai_prof_ethics_score}/3</span></div>
+                      )}
+                      {ma.ai_prof_verification_score != null && (
+                        <div className="flex justify-between"><span className="text-gray-500">Verification</span><span className="font-medium">{ma.ai_prof_verification_score}/3</span></div>
+                      )}
+                    </div>
+                    {ma.ai_prof_gpt_narrative && (
+                      <p className="text-xs text-gray-500 italic border-t border-gray-200 pt-2 mt-1">{ma.ai_prof_gpt_narrative}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 text-center py-4">No AI proficiency data yet</p>
+                )}
+              </div>
+            </div>
+
+            {/* ── Row 3: Reasoning Distribution + Scaffolding ───────────── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Reasoning distribution */}
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <Activity className="h-4 w-4" />
+                  Reasoning Distribution
+                </h3>
+                {reasoningLevels.length > 0 ? (
+                  <div className="space-y-2">
+                    {/* Stacked bar */}
+                    <div className="flex h-6 rounded-full overflow-hidden bg-gray-200">
+                      {reasoningLevels.map(r => (
+                        <div
+                          key={r.label}
+                          className={classNames('h-full transition-all', r.color)}
+                          style={{ width: `${Number(r.pct)}%` }}
+                          title={`${r.label}: ${Number(r.pct).toFixed(1)}%`}
+                        />
+                      ))}
+                    </div>
+                    {/* Legend */}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                      {reasoningLevels.map(r => (
+                        <span key={r.label} className="flex items-center gap-1">
+                          <span className={classNames('inline-block w-2.5 h-2.5 rounded-full', r.color)} />
+                          {r.label} {Number(r.pct).toFixed(0)}%
+                        </span>
+                      ))}
+                    </div>
+                    {ma.reasoning_chain_count != null && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Reasoning chains detected: <span className="font-semibold">{ma.reasoning_chain_count}</span>
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 text-center py-4">No reasoning data yet</p>
+                )}
+              </div>
+
+              {/* Scaffolding */}
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <TrendingUp className="h-4 w-4" />
+                  Scaffolding & Convergence
+                </h3>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Convergence Trend</span>
+                    {trendBadge(ma.scaffold_convergence_trend)}
+                  </div>
+                  {(ma.scaffold_clarification_per_session != null || ma.scaffold_decomposition_per_session != null || ma.scaffold_correction_total_per_session != null) && (
+                    <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                      <div>
+                        <div className="font-semibold text-gray-900">{ma.scaffold_clarification_per_session != null ? Number(ma.scaffold_clarification_per_session).toFixed(1) : '—'}</div>
+                        <div className="text-[10px] text-gray-500">Clarifications / session</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold text-gray-900">{ma.scaffold_decomposition_per_session != null ? Number(ma.scaffold_decomposition_per_session).toFixed(1) : '—'}</div>
+                        <div className="text-[10px] text-gray-500">Decompositions / session</div>
+                      </div>
+                      <div>
+                        <div className="font-semibold text-gray-900">{ma.scaffold_correction_total_per_session != null ? Number(ma.scaffold_correction_total_per_session).toFixed(1) : '—'}</div>
+                        <div className="text-[10px] text-gray-500">Corrections / session</div>
+                      </div>
+                    </div>
+                  )}
+                  {(ma.scaffold_convergence_narrative || ma.scaffold_narrative) && (
+                    <p className="text-xs text-gray-500 italic border-t border-gray-200 pt-2">
+                      {ma.scaffold_convergence_narrative || ma.scaffold_narrative}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* ── Row 4: Metacognition + Role Readiness ─────────────────── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Metacognition */}
+              {(ma.metacog_verification_rate != null || ma.metacog_reactive_rate != null || ma.metacog_strategic_rate != null) && (
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                  <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <Brain className="h-4 w-4" />
+                    Metacognition
+                  </h3>
+                  <div className="space-y-2">
+                    {ma.metacog_verification_rate != null && (
+                      <ScoreBar label="Verification Rate" score={Number(ma.metacog_verification_rate)} maxScore={1} colorClass="bg-teal-500" />
+                    )}
+                    {ma.metacog_reactive_rate != null && (
+                      <ScoreBar label="Reactive Rate" score={Number(ma.metacog_reactive_rate)} maxScore={1} colorClass="bg-orange-400" />
+                    )}
+                    {ma.metacog_strategic_rate != null && (
+                      <ScoreBar label="Strategic Rate" score={Number(ma.metacog_strategic_rate)} maxScore={1} colorClass="bg-indigo-500" />
+                    )}
+                  </div>
+                  {ma.metacog_narrative && (
+                    <p className="text-xs text-gray-500 italic border-t border-gray-200 pt-2 mt-3">{ma.metacog_narrative}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Role Readiness */}
+              {(ma.role_teaching_intent_count != null || ma.role_community_application_count != null || ma.role_enterprise_orientation_count != null) && (
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                  <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <Users className="h-4 w-4" />
+                    Role Readiness Signals
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <StatPill label="Teaching Intent" value={ma.role_teaching_intent_count ?? 0} bgClass="bg-blue-50" />
+                    <StatPill label="Community Application" value={ma.role_community_application_count ?? 0} bgClass="bg-green-50" />
+                    <StatPill label="Enterprise Orientation" value={ma.role_enterprise_orientation_count ?? 0} bgClass="bg-purple-50" />
+                    <StatPill label="Intergenerational" value={ma.role_intergenerational_count ?? 0} bgClass="bg-amber-50" />
+                  </div>
+                  {ma.role_readiness_signals && ma.role_readiness_signals.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-3 pt-2 border-t border-gray-200">
+                      {ma.role_readiness_signals.map((sig, i) => (
+                        <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">
+                          {sig}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {ma.role_readiness_narrative && (
+                    <p className="text-xs text-gray-500 italic border-t border-gray-200 pt-2 mt-3">{ma.role_readiness_narrative}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ── Row 5: Certifications Progress + PUE Breakdown ────────── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Certification progress from monthly */}
+              {(ma.cert_attempted_count != null || ma.cert_passed_count != null) && (
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                  <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <Trophy className="h-4 w-4" />
+                    Certification Progress (Monthly)
+                  </h3>
+                  <div className="grid grid-cols-3 gap-3">
+                    <StatPill label="Attempted" value={ma.cert_attempted_count ?? 0} icon={<Target className="h-4 w-4 text-blue-500" />} />
+                    <StatPill label="Passed" value={ma.cert_passed_count ?? 0} icon={<CheckCircle className="h-4 w-4 text-green-500" />} />
+                    <StatPill label="Avg Score" value={ma.cert_avg_score != null ? Number(ma.cert_avg_score).toFixed(1) : '—'} icon={<Star className="h-4 w-4 text-amber-500" />} />
+                  </div>
+                  {ma.cert_names_passed && ma.cert_names_passed.length > 0 && (
+                    <div className="mt-3 pt-2 border-t border-gray-200">
+                      <span className="text-xs text-gray-500 font-medium">Passed: </span>
+                      <span className="text-xs text-green-700 font-medium">{ma.cert_names_passed.join(', ')}</span>
+                    </div>
+                  )}
+                  {ma.cert_summary && (
+                    <p className="text-xs text-gray-500 italic border-t border-gray-200 pt-2 mt-2">{ma.cert_summary}</p>
+                  )}
+                </div>
+              )}
+
+              {/* PUE Breakdown */}
+              {ma.pue_score != null && (
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                  <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <Zap className="h-4 w-4" />
+                    PUE Breakdown
+                  </h3>
+                  <div className="space-y-1.5 text-sm">
+                    {[
+                      { label: 'Energy Constraint', val: ma.pue_energy_constraint_pct },
+                      { label: 'Market Pricing', val: ma.pue_market_pricing_pct },
+                      { label: 'Battery Load', val: ma.pue_battery_load_pct },
+                      { label: 'Enterprise Planning', val: ma.pue_enterprise_planning_pct },
+                      { label: 'Learner Initiated', val: ma.pue_learner_initiated_pct },
+                      { label: 'AI Introduced', val: ma.pue_ai_introduced_pct },
+                      { label: 'Multi-Domain', val: ma.pue_multi_domain_pct },
+                      { label: 'Local Context', val: ma.pue_local_context_pct },
+                    ].filter(r => r.val != null).map(r => (
+                      <div key={r.label} className="flex items-center justify-between">
+                        <span className="text-gray-600 text-xs">{r.label}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 bg-gray-200 rounded-full h-1.5">
+                            <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: `${Math.min(Number(r.val), 100)}%` }} />
+                          </div>
+                          <span className="text-xs font-medium text-gray-700 w-10 text-right">{Number(r.val).toFixed(0)}%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {ma.pue_summary && (
+                    <p className="text-xs text-gray-500 italic border-t border-gray-200 pt-2 mt-3">{ma.pue_summary}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ── Row 6: CI Training + Enterprise Artifacts ─────────────── */}
+            {(ma.ci_training_sessions_total != null && ma.ci_training_sessions_total > 0) && (
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <Award className="h-4 w-4" />
+                  CI Training & Enterprise
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <StatPill label="CI Sessions" value={ma.ci_training_sessions_total ?? 0} />
+                  <StatPill label="CI Certs Passed" value={ma.ci_certs_passed_count ?? 0} />
+                  <StatPill label="Enterprise Artifact" value={ma.enterprise_artifact_score != null ? Number(ma.enterprise_artifact_score).toFixed(1) : '—'} />
+                  <StatPill label="AI Playground Sessions" value={ma.ai_playground_session_count ?? 0} />
+                </div>
+                {ma.ci_summary && (
+                  <p className="text-xs text-gray-500 italic border-t border-gray-200 pt-2 mt-3">{ma.ci_summary}</p>
+                )}
+              </div>
+            )}
+
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <AppLayout>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -1120,21 +1332,16 @@ const DashboardPage: React.FC = () => {
               Welcome, {user?.name || 'User'}!
             </h1>
             <p className="text-gray-600">
-            {user?.role === 'facilitator'
-              ? 'Manage your teams and monitor student progress'
-              : 'Track your certifications, projects and learning progress'}
+              {user?.role === 'facilitator'
+                ? 'Manage your teams and monitor student progress'
+                : 'Track your certifications, projects and learning progress'}
             </p>
           </div>
           
           {user?.role === 'student' && (
             <div className="flex items-center space-x-2">
-              <Button
-                onClick={refreshDashboard}
-                variant="outline"
-                size="sm"
-                icon={<RefreshCw size={16} />}
-                isLoading={refreshing}
-              >
+              <Button onClick={refreshDashboard} variant="outline" size="sm"
+                icon={<RefreshCw size={16} />} isLoading={refreshing}>
                 Refresh Activities
               </Button>
             </div>
@@ -1142,17 +1349,14 @@ const DashboardPage: React.FC = () => {
         </div>
 
         {user?.role === 'facilitator' ? (
-          // Facilitator Dashboard
           <div className="text-center py-12">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Facilitator Dashboard</h2>
             <p className="text-gray-600">Facilitator features coming soon!</p>
           </div>
         ) : (
-          // Student Dashboard
           <div className="space-y-8">
 
             {/* ── Cohort Leaderboard ──────────────────────────────────────── */}
-            {/* Visible to: platform_administrator (any org), leader (their org), student (own cohort) */}
             {(userProfile?.role === 'platform_administrator'
               || userProfile?.role === 'leader'
               || userProfile?.join_code_used) && (
@@ -1161,46 +1365,30 @@ const DashboardPage: React.FC = () => {
                   <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                     <Trophy className="h-6 w-6 text-amber-500" />
                     Cohort Leaderboard
-                    {/* Sub-label: show org name for admin/leader, join code for student */}
                     {userProfile?.role === 'platform_administrator' && selectedOrgJoinCode && (
                       <span className="text-sm font-normal text-gray-500 ml-1">
                         ({orgOptions.find(o => o.join_code === selectedOrgJoinCode)?.name ?? selectedOrgJoinCode})
                       </span>
                     )}
                     {userProfile?.role === 'leader' && leaderJoinCode && (
-                      <span className="text-sm font-normal text-gray-500 ml-1">
-                        ({leaderJoinCode})
-                      </span>
+                      <span className="text-sm font-normal text-gray-500 ml-1">({leaderJoinCode})</span>
                     )}
                     {userProfile?.role === 'student' && userProfile?.join_code_used && (
-                      <span className="text-sm font-normal text-gray-500 ml-1">
-                        ({userProfile.join_code_used})
-                      </span>
+                      <span className="text-sm font-normal text-gray-500 ml-1">({userProfile.join_code_used})</span>
                     )}
                   </h2>
 
                   <div className="flex items-center gap-2 flex-wrap">
-                    {/* Org picker — platform_administrator only */}
                     {userProfile?.role === 'platform_administrator' && orgOptions.length > 0 && (
-                      <select
-                        value={selectedOrgJoinCode}
-                        onChange={e => setSelectedOrgJoinCode(e.target.value)}
-                        className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                      >
+                      <select value={selectedOrgJoinCode} onChange={e => setSelectedOrgJoinCode(e.target.value)}
+                        className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
                         {orgOptions.map(org => (
-                          <option key={org.id} value={org.join_code}>
-                            {org.name}
-                          </option>
+                          <option key={org.id} value={org.join_code}>{org.name}</option>
                         ))}
                       </select>
                     )}
-
-                    {/* Metric picker — all roles */}
-                    <select
-                      value={leaderboardMetric}
-                      onChange={e => setLeaderboardMetric(e.target.value as LeaderboardMetric)}
-                      className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                    >
+                    <select value={leaderboardMetric} onChange={e => setLeaderboardMetric(e.target.value as LeaderboardMetric)}
+                      className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
                       {LEADERBOARD_OPTIONS.map(opt => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
@@ -1213,9 +1401,7 @@ const DashboardPage: React.FC = () => {
                     <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-amber-400" />
                   </div>
                 ) : leaderboard.length === 0 ? (
-                  <div className="py-8 text-center text-gray-400 text-sm">
-                    No data yet for this metric.
-                  </div>
+                  <div className="py-8 text-center text-gray-400 text-sm">No data yet for this metric.</div>
                 ) : (
                   <div className="divide-y divide-gray-100">
                     {leaderboard.map(entry => {
@@ -1227,64 +1413,36 @@ const DashboardPage: React.FC = () => {
                           : entry.value === 1 ? 'certification' : 'certifications';
 
                       return (
-                        <div
-                          key={entry.user_id}
-                          className={classNames(
-                            'flex items-center px-6 py-3 gap-4 transition-colors',
-                            isMe ? 'bg-amber-50 border-l-4 border-amber-400' : 'hover:bg-gray-50'
-                          )}
-                        >
-                          {/* Rank */}
+                        <div key={entry.user_id}
+                          className={classNames('flex items-center px-6 py-3 gap-4 transition-colors',
+                            isMe ? 'bg-amber-50 border-l-4 border-amber-400' : 'hover:bg-gray-50')}>
                           <div className="w-10 text-center flex-shrink-0">
-                            {medal ? (
-                              <span className="text-2xl leading-none">{medal}</span>
-                            ) : (
-                              <span className="text-base font-bold text-gray-400">#{entry.rank}</span>
-                            )}
+                            {medal ? <span className="text-2xl leading-none">{medal}</span>
+                              : <span className="text-base font-bold text-gray-400">#{entry.rank}</span>}
                           </div>
-
-                          {/* Name */}
                           <div className="flex-1 min-w-0">
-                            <span className={classNames(
-                              'text-sm font-semibold truncate block',
-                              isMe ? 'text-amber-800' : 'text-gray-800'
-                            )}>
+                            <span className={classNames('text-sm font-semibold truncate block',
+                              isMe ? 'text-amber-800' : 'text-gray-800')}>
                               {entry.name}
-                              {isMe && (
-                                <span className="ml-2 text-xs font-normal text-amber-600">(you)</span>
-                              )}
+                              {isMe && <span className="ml-2 text-xs font-normal text-amber-600">(you)</span>}
                             </span>
                           </div>
-
-                          {/* Value */}
                           <div className="flex-shrink-0 text-right">
-                            <span className={classNames(
-                              'text-base font-bold',
+                            <span className={classNames('text-base font-bold',
                               entry.rank === 1 ? 'text-amber-600' :
                               entry.rank === 2 ? 'text-gray-500' :
-                              entry.rank === 3 ? 'text-orange-700' :
-                              'text-gray-700'
-                            )}>
+                              entry.rank === 3 ? 'text-orange-700' : 'text-gray-700')}>
                               {entry.value}
                             </span>
                             <span className="ml-1 text-xs text-gray-400">{metricLabel}</span>
                           </div>
-
-                          {/* Bar */}
                           <div className="hidden sm:block w-28 flex-shrink-0">
                             <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                              <div
-                                className={classNames(
-                                  'h-2 rounded-full',
-                                  entry.rank === 1 ? 'bg-amber-400' :
-                                  entry.rank === 2 ? 'bg-gray-400' :
-                                  entry.rank === 3 ? 'bg-orange-500' :
-                                  'bg-blue-300'
-                                )}
-                                style={{
-                                  width: `${Math.round((entry.value / leaderboard[0].value) * 100)}%`
-                                }}
-                              />
+                              <div className={classNames('h-2 rounded-full',
+                                entry.rank === 1 ? 'bg-amber-400' :
+                                entry.rank === 2 ? 'bg-gray-400' :
+                                entry.rank === 3 ? 'bg-orange-500' : 'bg-blue-300')}
+                                style={{ width: `${Math.round((entry.value / leaderboard[0].value) * 100)}%` }} />
                             </div>
                           </div>
                         </div>
@@ -1294,16 +1452,15 @@ const DashboardPage: React.FC = () => {
                 )}
               </div>
             )}
-            {/* ─────────────────────────────────────────────────────────── */}
+
+            {/* ── Monthly Summary (beneath leaderboard) ──────────────────── */}
+            {renderMonthlySummary()}
 
             {/* Combined Summary Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Certifications */}
               <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg shadow p-6 border-2 border-purple-200">
                 <div className="flex items-center">
-                  <div className="p-3 rounded-full bg-purple-600 text-white mr-4">
-                    <Trophy size={24} />
-                  </div>
+                  <div className="p-3 rounded-full bg-purple-600 text-white mr-4"><Trophy size={24} /></div>
                   <div>
                     <p className="text-sm font-medium text-purple-900">Certifications</p>
                     <p className="text-2xl font-semibold text-purple-900">
@@ -1313,29 +1470,19 @@ const DashboardPage: React.FC = () => {
                   </div>
                 </div>
               </div>
-
-              {/* Learning Activities */}
               <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg shadow p-6 border-2 border-blue-200">
                 <div className="flex items-center">
-                  <div className="p-3 rounded-full bg-blue-600 text-white mr-4">
-                    <Book size={24} />
-                  </div>
+                  <div className="p-3 rounded-full bg-blue-600 text-white mr-4"><Book size={24} /></div>
                   <div>
                     <p className="text-sm font-medium text-blue-900">Learning Activities</p>
-                    <p className="text-2xl font-semibold text-blue-900">
-                      {data.dashboardSummary?.total_activities || 0}
-                    </p>
+                    <p className="text-2xl font-semibold text-blue-900">{data.dashboardSummary?.total_activities || 0}</p>
                     <p className="text-xs text-blue-700">Total Activities</p>
                   </div>
                 </div>
               </div>
-
-              {/* In Progress */}
               <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg shadow p-6 border-2 border-yellow-200">
                 <div className="flex items-center">
-                  <div className="p-3 rounded-full bg-yellow-600 text-white mr-4">
-                    <Clock size={24} />
-                  </div>
+                  <div className="p-3 rounded-full bg-yellow-600 text-white mr-4"><Clock size={24} /></div>
                   <div>
                     <p className="text-sm font-medium text-yellow-900">In Progress</p>
                     <p className="text-2xl font-semibold text-yellow-900">
@@ -1361,22 +1508,14 @@ const DashboardPage: React.FC = () => {
 
                 <div className="divide-y divide-gray-200">
                   {data.certifications.map((cert) => (
-                    <div
-                      key={cert.certificationName}
-                      className="block p-6 hover:bg-gray-50 transition-colors"
-                    >
+                    <div key={cert.certificationName} className="block p-6 hover:bg-gray-50 transition-colors">
                       <div className="flex items-center justify-between">
-                        <Link
-                          to={cert.route}
-                          className="flex items-center space-x-4 flex-1"
-                        >
+                        <Link to={cert.route} className="flex items-center space-x-4 flex-1">
                           <div className="p-3 bg-purple-100 rounded-lg">
                             <GraduationCap className="h-6 w-6 text-purple-600" />
                           </div>
                           <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-gray-900">
-                              {cert.displayName}
-                            </h3>
+                            <h3 className="text-lg font-semibold text-gray-900">{cert.displayName}</h3>
                             <p className="text-sm text-gray-600 mt-1">
                               {cert.completedAssessments} / {cert.totalAssessments} assessments completed
                             </p>
@@ -1389,91 +1528,40 @@ const DashboardPage: React.FC = () => {
                           </div>
                         </Link>
                         <div className="flex items-center space-x-4">
-                          <span
-                            className={classNames(
-                              'inline-flex items-center px-3 py-1 rounded-full text-sm font-medium',
-                              getProgressColor(cert.progress)
-                            )}
-                          >
+                          <span className={classNames('inline-flex items-center px-3 py-1 rounded-full text-sm font-medium', getProgressColor(cert.progress))}>
                             {cert.progress}
                           </span>
                           {cert.progress === 'completed' && (
                             <>
                               <CheckCircle className="h-6 w-6 text-green-600" />
                               <button
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  downloadCertificate(cert.certificationName, cert.displayName);
-                                }}
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); downloadCertificate(cert.certificationName, cert.displayName); }}
                                 disabled={downloadingCert === cert.certificationName}
                                 className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-pink-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Download Certificate"
-                              >
-                                {downloadingCert === cert.certificationName ? (
-                                  <RefreshCw className="h-5 w-5 animate-spin" />
-                                ) : (
-                                  <Download className="h-5 w-5" />
-                                )}
+                                title="Download Certificate">
+                                {downloadingCert === cert.certificationName
+                                  ? <RefreshCw className="h-5 w-5 animate-spin" />
+                                  : <Download className="h-5 w-5" />}
                                 <span className="hidden sm:inline">Download Certificate</span>
                               </button>
                             </>
                           )}
                           {cert.progress !== 'completed' && (
-                            <Link to={cert.route}>
-                              <ArrowRight className="h-5 w-5 text-gray-400" />
-                            </Link>
+                            <Link to={cert.route}><ArrowRight className="h-5 w-5 text-gray-400" /></Link>
                           )}
                         </div>
                       </div>
                       
                       {/* Certification Assessment Scores Summary */}
                       {cert.progress !== 'not started' && (() => {
-                        // Find the certification activity in dashboard to get scores
-                        console.log('[Dashboard] Looking for certification activity:', cert.displayName);
-                        console.log('[Dashboard] Available activities:', data.dashboardActivities.map(a => ({ 
-                          activity: a.activity, 
-                          category: a.category_activity 
-                        })));
-                        
-                        // Case-insensitive search for certification activity
                         const certActivity = data.dashboardActivities.find(
-                          a => a.activity.toLowerCase() === cert.displayName.toLowerCase() && 
-                               a.category_activity === 'Certification'
+                          a => a.activity.toLowerCase() === cert.displayName.toLowerCase() && a.category_activity === 'Certification'
                         );
-                        
-                        console.log('[Dashboard] Found certActivity:', certActivity ? certActivity.activity : 'NOT FOUND');
-                        
-                        if (!certActivity) {
-                          console.log('[Dashboard] No certification activity found for:', cert.displayName);
-                          return null;
-                        }
-                        
-                        // Debug: Log what columns this activity has
-                        console.log('[Dashboard] Activity category:', certActivity.category_activity);
-                        console.log('[Dashboard] Activity sub_category:', certActivity.sub_category);
-                        
-                        // Debug: Check if certification columns exist
-                        const certColumns = Object.keys(certActivity).filter(k => 
-                          k.startsWith(`certification_${cert.certificationName}_`) && k.endsWith('_score')
-                        );
-                        console.log('[Dashboard] Found certification columns in activity:', certColumns);
-                        console.log('[Dashboard] Sample values:', certColumns.map(k => `${k}=${certActivity[k]}`));
-                        
-                        const hasScoresResult = hasScores(certActivity);
-                        console.log('[Dashboard] hasScores result:', hasScoresResult);
-                        
-                        if (!hasScoresResult) {
-                          console.log('[Dashboard] No scores detected, but expected columns:', certColumns.length);
-                          return null;
-                        }
+                        if (!certActivity) return null;
+                        if (!hasScores(certActivity)) return null;
                         
                         const allScores = getActivityScores(certActivity);
-                        console.log('[Dashboard] All scores for', cert.certificationName, ':', allScores);
-                        
                         const scores = allScores.filter(s => s.score != null);
-                        console.log('[Dashboard] Filtered scores (non-null):', scores.length, scores);
-                        
                         if (scores.length === 0) return null;
                         
                         return (
@@ -1490,40 +1578,27 @@ const DashboardPage: React.FC = () => {
                             
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                               {scores.map(({ dimension, score, maxScore }) => {
-                                const scoreLabel = getScoreLabel(score, true); // true = isCertification
-                                
-                                // Certification scoring: 0 = No Evidence, 1 = Emerging, 2 = Proficient, 3 = Advanced
+                                const scoreLabel = getScoreLabel(score, true);
                                 const colorClass = 
                                   score === 3 ? 'bg-green-50 border-green-400 text-green-900' :
                                   score === 2 ? 'bg-blue-50 border-blue-400 text-blue-900' :
                                   score === 1 ? 'bg-yellow-50 border-yellow-400 text-yellow-900' :
                                   'bg-gray-50 border-gray-400 text-gray-900';
-                                
                                 const badgeColor =
                                   score === 3 ? 'bg-green-600 text-white' :
                                   score === 2 ? 'bg-blue-600 text-white' :
                                   score === 1 ? 'bg-yellow-600 text-white' :
                                   'bg-gray-600 text-white';
-                                
                                 const icon = 
                                   score === 3 ? <Star className="h-3 w-3 fill-current" /> :
-                                  score === 2 ? <CheckCircle className="h-3 w-3" /> :
-                                  null;
+                                  score === 2 ? <CheckCircle className="h-3 w-3" /> : null;
                                 
                                 return (
-                                  <div
-                                    key={dimension}
-                                    className={classNames('px-3 py-2.5 rounded-md border-2', colorClass)}
-                                  >
+                                  <div key={dimension} className={classNames('px-3 py-2.5 rounded-md border-2', colorClass)}>
                                     <div className="flex items-start justify-between gap-2">
                                       <div className="flex-1 min-w-0">
-                                        <div className="text-sm font-semibold truncate" title={dimension}>
-                                          {dimension}
-                                        </div>
-                                        <div className="text-xs mt-1 font-medium flex items-center gap-1">
-                                          {icon}
-                                          {scoreLabel}
-                                        </div>
+                                        <div className="text-sm font-semibold truncate" title={dimension}>{dimension}</div>
+                                        <div className="text-xs mt-1 font-medium flex items-center gap-1">{icon}{scoreLabel}</div>
                                       </div>
                                       <div className="flex-shrink-0">
                                         <span className={classNames('inline-flex items-center px-2 py-1 rounded text-xs font-bold', badgeColor)}>
@@ -1536,19 +1611,12 @@ const DashboardPage: React.FC = () => {
                               })}
                             </div>
                             
-                            {/* Overall Achievement Level */}
                             {cert.progress === 'completed' && scores.length > 0 && (
                               <div className="mt-4 pt-3 border-t-2 border-purple-300">
                                 <div className="flex items-center justify-between">
-                                  <span className="text-sm font-semibold text-purple-900">
-                                    Achievement Level:
-                                  </span>
-                                  <span className={classNames(
-                                    'text-base font-bold px-3 py-1 rounded-full',
-                                    scores.every(s => s.score === 3) 
-                                      ? 'bg-green-600 text-white' 
-                                      : 'bg-blue-600 text-white'
-                                  )}>
+                                  <span className="text-sm font-semibold text-purple-900">Achievement Level:</span>
+                                  <span className={classNames('text-base font-bold px-3 py-1 rounded-full',
+                                    scores.every(s => s.score === 3) ? 'bg-green-600 text-white' : 'bg-blue-600 text-white')}>
                                     {scores.every(s => s.score === 3) ? 'Advanced ⭐' : 'Proficient ✓'}
                                   </span>
                                 </div>
@@ -1563,14 +1631,11 @@ const DashboardPage: React.FC = () => {
               </div>
             )}
 
-            {/* ── English Skills Section (only if user has started) ─────── */}
+            {/* ── English Skills Section ─────────────────────────────────── */}
             {(() => {
-              const englishRows = data.dashboardActivities.filter(
-                a => a.activity === 'english_skills'
-              );
+              const englishRows = data.dashboardActivities.filter(a => a.activity === 'english_skills');
               if (englishRows.length === 0) return null;
 
-              // Group by stage (category_activity)
               const stageMap = new Map<string, DashboardActivity[]>();
               englishRows.forEach(row => {
                 const stage = row.category_activity || 'English Skills';
@@ -1580,10 +1645,10 @@ const DashboardPage: React.FC = () => {
 
               const levelColor = (level: string) => {
                 switch (level) {
-                  case 'Advanced':   return 'bg-green-100 text-green-800 border-green-300';
+                  case 'Advanced': return 'bg-green-100 text-green-800 border-green-300';
                   case 'Proficient': return 'bg-blue-100 text-blue-800 border-blue-300';
                   case 'Developing': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-                  default:           return 'bg-gray-100 text-gray-700 border-gray-300';
+                  default: return 'bg-gray-100 text-gray-700 border-gray-300';
                 }
               };
 
@@ -1609,11 +1674,7 @@ const DashboardPage: React.FC = () => {
                       const completedCount = rows.filter(r => r.progress === 'completed').length;
 
                       return (
-                        <Link
-                          key={stageName}
-                          to="/english-skills"
-                          className="block p-5 hover:bg-gray-50 transition-colors"
-                        >
+                        <Link key={stageName} to="/english-skills" className="block p-5 hover:bg-gray-50 transition-colors">
                           <div className="flex items-start justify-between gap-4">
                             <div className="flex items-start gap-3 flex-1 min-w-0">
                               <div className="p-2 bg-cyan-100 rounded-lg flex-shrink-0 mt-0.5">
@@ -1629,18 +1690,11 @@ const DashboardPage: React.FC = () => {
                                     Latest topic: <span className="italic">{bestRow.title}</span>
                                   </p>
                                 )}
-
-                                {/* Sub-category scores */}
                                 {subCats.length > 0 && (
                                   <div className="mt-3 flex flex-wrap gap-2">
                                     {subCats.map((sc: any) => (
-                                      <span
-                                        key={sc.name}
-                                        className={classNames(
-                                          'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border',
-                                          levelColor(sc.level)
-                                        )}
-                                      >
+                                      <span key={sc.name}
+                                        className={classNames('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border', levelColor(sc.level))}>
                                         {sc.name}: {sc.level}
                                       </span>
                                     ))}
@@ -1648,27 +1702,18 @@ const DashboardPage: React.FC = () => {
                                 )}
                               </div>
                             </div>
-
                             <div className="flex flex-col items-end gap-2 flex-shrink-0">
                               {overallLevel && (
-                                <span className={classNames(
-                                  'inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold border',
-                                  levelColor(overallLevel)
-                                )}>
-                                  <TrendingUp className="h-3.5 w-3.5 mr-1" />
-                                  {overallLevel}
+                                <span className={classNames('inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold border', levelColor(overallLevel))}>
+                                  <TrendingUp className="h-3.5 w-3.5 mr-1" />{overallLevel}
                                 </span>
                               )}
-                              <span className={classNames(
-                                'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
-                                getProgressColor(bestRow?.progress ?? 'not started')
-                              )}>
+                              <span className={classNames('inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium', getProgressColor(bestRow?.progress ?? 'not started'))}>
                                 {bestRow?.progress ?? 'not started'}
                               </span>
                               <ArrowRight className="h-4 w-4 text-gray-400 mt-1" />
                             </div>
                           </div>
-
                           <div className="mt-2 flex items-center text-xs text-gray-400">
                             <Clock size={13} className="mr-1" />
                             Updated {new Date(bestRow.updated_at).toLocaleDateString()}
@@ -1687,15 +1732,9 @@ const DashboardPage: React.FC = () => {
                 <div className="flex items-center space-x-4">
                   <span className="text-sm font-medium text-gray-700">Filter by category:</span>
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => setSelectedCategory('all')}
-                      className={classNames(
-                        'px-3 py-1 rounded-full text-sm font-medium transition-colors',
-                        selectedCategory === 'all'
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      )}
-                    >
+                    <button onClick={() => setSelectedCategory('all')}
+                      className={classNames('px-3 py-1 rounded-full text-sm font-medium transition-colors',
+                        selectedCategory === 'all' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
                       All ({filteredActivities.length})
                     </button>
                     {uniqueCategories.map((category) => {
@@ -1703,16 +1742,9 @@ const DashboardPage: React.FC = () => {
                         a => a.category_activity === category && a.category_activity !== 'Certification'
                       ).length;
                       return (
-                        <button
-                          key={category}
-                          onClick={() => setSelectedCategory(category)}
-                          className={classNames(
-                            'px-3 py-1 rounded-full text-sm font-medium transition-colors',
-                            selectedCategory === category
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          )}
-                        >
+                        <button key={category} onClick={() => setSelectedCategory(category)}
+                          className={classNames('px-3 py-1 rounded-full text-sm font-medium transition-colors',
+                            selectedCategory === category ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
                           {category} ({count})
                         </button>
                       );
@@ -1738,66 +1770,36 @@ const DashboardPage: React.FC = () => {
               <div className="divide-y divide-gray-200">
                 {filteredActivities.length > 0 ? (
                   filteredActivities.map((activity) => {
-                    // Determine if we should show a link and where it should go
                     const isLinkable = activity.progress === 'started' && activity.learning_module_id;
-                    
-                    // Route based on activity type
                     let activityLink: string | null = null;
                     if (isLinkable) {
                       const cat = activity.category_activity;
                       const subCat = activity.sub_category;
-                      
-                      // AI Learning activities
-                      if (cat === 'AI Learning') {
-                        activityLink = `/learning/ai/${activity.learning_module_id}`;
-                      }
-                      // Vibe Coding → Tech Workshop route
-                      else if (subCat === 'Vibe Coding' || cat === 'Vibe Coding' || cat === 'Tech Workshop') {
-                        activityLink = '/tech-skills/vibe-coding';
-                      }
-                      // Skills activities
-                      else if (
-                        cat === 'Skills' ||
-                        cat === 'Critical Thinking' || subCat === 'Critical Thinking' ||
+                      if (cat === 'AI Learning') activityLink = `/learning/ai/${activity.learning_module_id}`;
+                      else if (subCat === 'Vibe Coding' || cat === 'Vibe Coding' || cat === 'Tech Workshop') activityLink = '/tech-skills/vibe-coding';
+                      else if (cat === 'Skills' || cat === 'Critical Thinking' || subCat === 'Critical Thinking' ||
                         cat === 'Problem-Solving' || cat === 'Problem Solving' || subCat === 'Problem-Solving' ||
-                        cat === 'Creativity' || subCat === 'Creativity' ||
-                        cat === 'Communication' || subCat === 'Communication' ||
-                        cat === 'Digital Fluency' || subCat === 'Digital Fluency'
-                      ) {
+                        cat === 'Creativity' || subCat === 'Creativity' || cat === 'Communication' || subCat === 'Communication' ||
+                        cat === 'Digital Fluency' || subCat === 'Digital Fluency')
                         activityLink = '/learning/skills';
-                      }
-                      // Default fallback
-                      else {
-                        activityLink = `/learning/ai/${activity.learning_module_id}`;
-                      }
+                      else activityLink = `/learning/ai/${activity.learning_module_id}`;
                     }
                     
                     const content = (
                       <div className="p-6">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-4 flex-1">
-                            <div className="p-2 bg-gray-100 rounded-lg">
-                              {getCategoryIcon(activity.category_activity)}
-                            </div>
+                            <div className="p-2 bg-gray-100 rounded-lg">{getCategoryIcon(activity.category_activity)}</div>
                             <div className="flex-1">
-                              <h3 className="text-base font-medium text-gray-900">
-                                {activity.activity}
-                              </h3>
+                              <h3 className="text-base font-medium text-gray-900">{activity.activity}</h3>
                               <p className="text-sm text-gray-500">
                                 {activity.category_activity}
-                                {activity.sub_category && (
-                                  <span className="text-gray-400"> • {activity.sub_category}</span>
-                                )}
+                                {activity.sub_category && <span className="text-gray-400"> • {activity.sub_category}</span>}
                               </p>
                             </div>
                           </div>
                           <div className="flex items-center space-x-4">
-                            <span
-                              className={classNames(
-                                'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
-                                getProgressColor(activity.progress)
-                              )}
-                            >
+                            <span className={classNames('inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium', getProgressColor(activity.progress))}>
                               {activity.progress}
                             </span>
                             {(activity.evaluation_score != null || activity.certification_evaluation_score != null) && (
@@ -1805,85 +1807,59 @@ const DashboardPage: React.FC = () => {
                                 {activity.certification_evaluation_score ?? activity.evaluation_score}%
                               </div>
                             )}
-                            {isLinkable && (
-                              <ArrowRight className="h-5 w-5 text-blue-600" />
-                            )}
+                            {isLinkable && <ArrowRight className="h-5 w-5 text-blue-600" />}
                           </div>
                         </div>
                         
-                        {/* Comprehensive Score Summary */}
                         {hasScores(activity) && (
                           <div className="mt-4 bg-gray-50 rounded-lg p-4 border border-gray-200">
                             <div className="flex items-center justify-between mb-3">
-                              <h4 className="text-sm font-semibold text-gray-700">
-                                Evaluation Scores
-                              </h4>
+                              <h4 className="text-sm font-semibold text-gray-700">Evaluation Scores</h4>
                               <button
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setSelectedActivityForDetails(activity);
-                                  setShowDetailsModal(true);
-                                }}
-                                className="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
-                              >
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedActivityForDetails(activity); setShowDetailsModal(true); }}
+                                className="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline">
                                 View Full Details →
                               </button>
                             </div>
                             
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {getActivityScores(activity)
-                                .filter(s => s.score != null)
-                                .map(({ dimension, score, maxScore, evidence }) => {
-                                  const isCert = activity.category_activity === 'Certification';
-                                  const scoreLabel = getScoreLabel(score, isCert);
-                                  
-                                  // Color based on score level
-                                  const colorClass = 
-                                    score === maxScore ? 'bg-green-50 border-green-300 text-green-900' :
-                                    score === maxScore - 1 ? 'bg-blue-50 border-blue-300 text-blue-900' :
-                                    score === maxScore - 2 ? 'bg-yellow-50 border-yellow-300 text-yellow-900' :
-                                    'bg-red-50 border-red-300 text-red-900';
-                                  
-                                  const badgeColor =
-                                    score === maxScore ? 'bg-green-600 text-white' :
-                                    score === maxScore - 1 ? 'bg-blue-600 text-white' :
-                                    score === maxScore - 2 ? 'bg-yellow-600 text-white' :
-                                    'bg-red-600 text-white';
-                                  
-                                  return (
-                                    <div
-                                      key={dimension}
-                                      className={classNames('px-3 py-2 rounded-md border-2', colorClass)}
-                                      title={evidence || 'No evidence recorded'}
-                                    >
-                                      <div className="flex items-start justify-between gap-2">
-                                        <div className="flex-1 min-w-0">
-                                          <div className="text-sm font-medium truncate" title={dimension}>
-                                            {dimension}
-                                          </div>
-                                          <div className="text-xs mt-0.5 opacity-75">
-                                            {scoreLabel}
-                                          </div>
-                                        </div>
-                                        <div className="flex-shrink-0">
-                                          <span className={classNames('inline-flex items-center px-2 py-0.5 rounded text-xs font-bold', badgeColor)}>
-                                            {score}/{maxScore}
-                                          </span>
-                                        </div>
+                              {getActivityScores(activity).filter(s => s.score != null).map(({ dimension, score, maxScore, evidence }) => {
+                                const isCert = activity.category_activity === 'Certification';
+                                const scoreLabel = getScoreLabel(score, isCert);
+                                const colorClass = 
+                                  score === maxScore ? 'bg-green-50 border-green-300 text-green-900' :
+                                  score === maxScore - 1 ? 'bg-blue-50 border-blue-300 text-blue-900' :
+                                  score === maxScore - 2 ? 'bg-yellow-50 border-yellow-300 text-yellow-900' :
+                                  'bg-red-50 border-red-300 text-red-900';
+                                const badgeColor =
+                                  score === maxScore ? 'bg-green-600 text-white' :
+                                  score === maxScore - 1 ? 'bg-blue-600 text-white' :
+                                  score === maxScore - 2 ? 'bg-yellow-600 text-white' :
+                                  'bg-red-600 text-white';
+                                
+                                return (
+                                  <div key={dimension} className={classNames('px-3 py-2 rounded-md border-2', colorClass)}
+                                    title={evidence || 'No evidence recorded'}>
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="text-sm font-medium truncate" title={dimension}>{dimension}</div>
+                                        <div className="text-xs mt-0.5 opacity-75">{scoreLabel}</div>
+                                      </div>
+                                      <div className="flex-shrink-0">
+                                        <span className={classNames('inline-flex items-center px-2 py-0.5 rounded text-xs font-bold', badgeColor)}>
+                                          {score}/{maxScore}
+                                        </span>
                                       </div>
                                     </div>
-                                  );
-                                })}
+                                  </div>
+                                );
+                              })}
                             </div>
                             
-                            {/* Overall Score if available */}
                             {(activity.certification_evaluation_score != null || activity.evaluation_score != null) && (
                               <div className="mt-3 pt-3 border-t border-gray-300">
                                 <div className="flex items-center justify-between">
-                                  <span className="text-sm font-semibold text-gray-700">
-                                    Overall Score:
-                                  </span>
+                                  <span className="text-sm font-semibold text-gray-700">Overall Score:</span>
                                   <span className="text-lg font-bold text-green-600">
                                     {activity.certification_evaluation_score ?? activity.evaluation_score}%
                                   </span>
@@ -1895,44 +1871,29 @@ const DashboardPage: React.FC = () => {
                         
                         <div className="mt-2 flex items-center text-sm text-gray-500">
                           <Clock size={16} className="mr-1.5" />
-                          <span>
-                            Updated {new Date(activity.updated_at).toLocaleDateString()}
-                          </span>
+                          <span>Updated {new Date(activity.updated_at).toLocaleDateString()}</span>
                         </div>
                       </div>
                     );
 
                     return activityLink ? (
-                      <Link
-                        key={activity.id}
-                        to={activityLink}
+                      <Link key={activity.id} to={activityLink}
                         state={{ activityId: activity.id, learningModuleId: activity.learning_module_id }}
-                        className="block hover:bg-gray-50 transition-colors"
-                      >
+                        className="block hover:bg-gray-50 transition-colors">
                         {content}
                       </Link>
                     ) : (
-                      <div key={activity.id}>
-                        {content}
-                      </div>
+                      <div key={activity.id}>{content}</div>
                     );
                   })
                 ) : (
                   <div className="p-6 text-center">
                     <p className="text-gray-500">
-                      {selectedCategory === 'all' 
-                        ? 'No learning activities found.' 
-                        : `No activities found for ${selectedCategory}.`}
+                      {selectedCategory === 'all' ? 'No learning activities found.' : `No activities found for ${selectedCategory}.`}
                     </p>
-                    <p className="text-sm text-gray-400 mt-2">
-                      Activities should be automatically created based on your grade level.
-                    </p>
+                    <p className="text-sm text-gray-400 mt-2">Activities should be automatically created based on your grade level.</p>
                     <div className="mt-4">
-                      <Button
-                        onClick={refreshDashboard}
-                        icon={<RefreshCw size={16} />}
-                        isLoading={refreshing}
-                      >
+                      <Button onClick={refreshDashboard} icon={<RefreshCw size={16} />} isLoading={refreshing}>
                         Load My Activities
                       </Button>
                     </div>
@@ -1946,9 +1907,7 @@ const DashboardPage: React.FC = () => {
               <div className="flex items-center justify-between px-6 py-4 border-b">
                 <h2 className="text-lg font-medium text-gray-900">My Projects</h2>
                 <Link to="/projects/new">
-                  <Button icon={<Plus size={16} />} size="sm">
-                    New Project
-                  </Button>
+                  <Button icon={<Plus size={16} />} size="sm">New Project</Button>
                 </Link>
               </div>
 
@@ -1959,34 +1918,22 @@ const DashboardPage: React.FC = () => {
                       <div className="flex items-center justify-between">
                         <div>
                           <h3 className="text-base font-medium text-gray-900">
-                            <Link 
-                              to={`/project/${project.id}`}
-                              className="hover:text-blue-600 transition-colors"
-                            >
+                            <Link to={`/project/${project.id}`} className="hover:text-blue-600 transition-colors">
                               {project.title}
                             </Link>
                           </h3>
-                          <p className="text-sm text-gray-500 mt-1">
-                            {project.description}
-                          </p>
+                          <p className="text-sm text-gray-500 mt-1">{project.description}</p>
                         </div>
                         <div className="text-right">
-                          <span
-                            className={classNames(
-                              'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
-                              {
-                                'bg-gray-100 text-gray-800': project.status === 'draft',
-                                'bg-blue-100 text-blue-800': project.status === 'in_progress',
-                                'bg-green-100 text-green-800': project.status === 'completed',
-                                'bg-red-100 text-red-800': project.status === 'archived',
-                              }
-                            )}
-                          >
+                          <span className={classNames('inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium', {
+                            'bg-gray-100 text-gray-800': project.status === 'draft',
+                            'bg-blue-100 text-blue-800': project.status === 'in_progress',
+                            'bg-green-100 text-green-800': project.status === 'completed',
+                            'bg-red-100 text-red-800': project.status === 'archived',
+                          })}>
                             {project.status.replace('_', ' ')}
                           </span>
-                          <p className="text-xs text-gray-500 mt-1">
-                            Updated {new Date(project.updated_at).toLocaleDateString()}
-                          </p>
+                          <p className="text-xs text-gray-500 mt-1">Updated {new Date(project.updated_at).toLocaleDateString()}</p>
                         </div>
                       </div>
                     </div>
@@ -1994,9 +1941,7 @@ const DashboardPage: React.FC = () => {
                 ) : (
                   <div className="p-6 text-center">
                     <p className="text-gray-500">No projects yet.</p>
-                    <p className="text-sm text-gray-400 mt-2">
-                      Create your first project to get started!
-                    </p>
+                    <p className="text-sm text-gray-400 mt-2">Create your first project to get started!</p>
                   </div>
                 )}
               </div>
@@ -2011,60 +1956,42 @@ const DashboardPage: React.FC = () => {
           <div className="flex min-h-screen items-center justify-center p-4">
             <div className="fixed inset-0 bg-black/50 transition-opacity" />
             
-            <div 
-              className="relative bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
+            <div className="relative bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}>
               <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between z-10">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">{selectedActivityForDetails.activity}</h2>
                   <p className="text-sm text-gray-500 mt-1">
                     {selectedActivityForDetails.category_activity}
-                    {selectedActivityForDetails.sub_category && (
-                      <span className="text-gray-400"> • {selectedActivityForDetails.sub_category}</span>
-                    )}
+                    {selectedActivityForDetails.sub_category && <span className="text-gray-400"> • {selectedActivityForDetails.sub_category}</span>}
                   </p>
                 </div>
-                <button
-                  onClick={() => setShowDetailsModal(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
+                <button onClick={() => setShowDetailsModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
               </div>
 
-              {/* Overall Score */}
               <div className="px-6 py-4 bg-gradient-to-r from-indigo-50 to-purple-50 border-b">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-700">Overall Score</span>
-                  <span className={classNames(
-                    'text-3xl font-bold',
+                  <span className={classNames('text-3xl font-bold',
                     (selectedActivityForDetails.certification_evaluation_score ?? selectedActivityForDetails.evaluation_score) === 100 
-                      ? 'text-green-600' 
-                      : 'text-indigo-600'
-                  )}>
+                      ? 'text-green-600' : 'text-indigo-600')}>
                     {selectedActivityForDetails.certification_evaluation_score ?? selectedActivityForDetails.evaluation_score ?? 0}%
                   </span>
                 </div>
                 <div className="mt-3">
                   <div className="w-full bg-white rounded-full h-3 shadow-inner">
-                    <div 
-                      className={classNames(
-                        'h-3 rounded-full transition-all',
-                        (selectedActivityForDetails.certification_evaluation_score ?? selectedActivityForDetails.evaluation_score) === 100 
-                          ? 'bg-gradient-to-r from-green-500 to-green-600' 
-                          : 'bg-gradient-to-r from-indigo-500 to-purple-600'
-                      )}
-                      style={{ width: `${selectedActivityForDetails.certification_evaluation_score ?? selectedActivityForDetails.evaluation_score ?? 0}%` }}
-                    />
+                    <div className={classNames('h-3 rounded-full transition-all',
+                      (selectedActivityForDetails.certification_evaluation_score ?? selectedActivityForDetails.evaluation_score) === 100 
+                        ? 'bg-gradient-to-r from-green-500 to-green-600' : 'bg-gradient-to-r from-indigo-500 to-purple-600')}
+                      style={{ width: `${selectedActivityForDetails.certification_evaluation_score ?? selectedActivityForDetails.evaluation_score ?? 0}%` }} />
                   </div>
                 </div>
               </div>
 
-              {/* Score Breakdown */}
               <div className="px-6 py-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                   <Trophy className="w-5 h-5 text-yellow-500 mr-2" />
@@ -2083,12 +2010,10 @@ const DashboardPage: React.FC = () => {
                           score === maxScore - 1 ? 'bg-blue-100 text-blue-800 border-blue-300' :
                           score === maxScore - 2 ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
                           'bg-red-100 text-red-800 border-red-300';
-                        
                         const barColor =
                           score === maxScore ? 'bg-green-500' :
                           score === maxScore - 1 ? 'bg-blue-500' :
-                          score === maxScore - 2 ? 'bg-yellow-500' :
-                          'bg-red-500';
+                          score === maxScore - 2 ? 'bg-yellow-500' : 'bg-red-500';
                         
                         return (
                           <div key={dimension} className="border-l-4 border-indigo-500 pl-4 py-2 bg-gray-50 rounded-r-lg">
@@ -2098,15 +2023,10 @@ const DashboardPage: React.FC = () => {
                                 {score ?? 0}/{maxScore} — {getScoreLabel(score, isCertification)}
                               </span>
                             </div>
-                            
-                            {/* Progress bar */}
                             <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-                              <div 
-                                className={classNames('h-2 rounded-full transition-all', barColor)}
-                                style={{ width: `${((score ?? 0) / maxScore) * 100}%` }}
-                              />
+                              <div className={classNames('h-2 rounded-full transition-all', barColor)}
+                                style={{ width: `${((score ?? 0) / maxScore) * 100}%` }} />
                             </div>
-                            
                             {evidence && evidence.trim() && (
                               <div className="text-sm text-gray-700 bg-white rounded-lg p-3 mt-2 border border-gray-200">
                                 <strong className="text-indigo-700">Evidence:</strong> {evidence}
@@ -2130,16 +2050,13 @@ const DashboardPage: React.FC = () => {
                 })()}
               </div>
 
-              {/* Footer */}
               <div className="sticky bottom-0 bg-gray-50 px-6 py-4 border-t flex justify-between items-center">
                 <span className="text-sm text-gray-500 flex items-center">
                   <Clock className="w-4 h-4 mr-1.5" />
                   Updated: {new Date(selectedActivityForDetails.updated_at).toLocaleDateString()}
                 </span>
-                <button
-                  onClick={() => setShowDetailsModal(false)}
-                  className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm"
-                >
+                <button onClick={() => setShowDetailsModal(false)}
+                  className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm">
                   Close
                 </button>
               </div>
