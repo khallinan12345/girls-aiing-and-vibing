@@ -6,18 +6,28 @@
 //     → Groq (primary) → Gemini → Cerebras → OpenRouter → Mistral → Anthropic Haiku (final)
 //
 //   page = 'VibeCodingPage' | 'WebDevelopmentPage' |
-//          'FullStackDevelopmentPage' | 'AIWorkflowDevPage' |
-//          'SkillsDevelopmentPage-code'
-//     → Anthropic  claude-sonnet-4-6  (best for code generation/debugging)
+//          'FullStackDevelopmentPage' | 'AIWorkflowDevPage'
+//     → taskType === 'coding'
+//         → Anthropic claude-sonnet-4-6 (best for code generation/debugging)
+//     → taskType !== 'coding' (explanations, planning, general Q&A)
+//         → Groq (primary) → Gemini → Cerebras → OpenRouter → Mistral → Anthropic Haiku (final)
 //
 //   page = 'AIPlaygroundPage'
-//     → Anthropic  claude-haiku-4-5-20251001  (default)
+//     → Anthropic claude-haiku-4-5-20251001 (default)
 //        OR claude-sonnet-4-6 if playgroundModel === 'claude-sonnet-4-6'
 //
 //   all other pages / no page supplied
-//     → Anthropic  claude-haiku-4-5-20251001  (default)
+//     → Anthropic claude-haiku-4-5-20251001 (default)
 //
-// FALLBACK CHAIN (for Groq-routed pages):
+// TASK TYPE (for coding pages):
+//   The frontend should send taskType = 'coding' | 'non-coding' in the request body.
+//   'coding' tasks include: code generation, debugging, refactoring, code review,
+//     writing tests, implementing features, fixing errors.
+//   'non-coding' tasks include: concept explanations, project planning, tool comparisons,
+//     career advice, general Q&A, resource recommendations.
+//   If taskType is omitted on a coding page, it defaults to 'coding' (preserves current behavior).
+//
+// FALLBACK CHAIN (for free-tier-routed pages):
 //   Groq → Gemini 2.0 Flash → Cerebras → OpenRouter (free) → Mistral → Anthropic Haiku
 //
 // PROMPT CACHING: applied automatically on all Anthropic calls.
@@ -28,7 +38,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const GROQ_PAGES = new Set([
+// Pages that always use the free-tier fallback chain (no task-type distinction)
+const FREE_TIER_PAGES = new Set([
   'AILearningPage',
   'EnglishSkillsPage',
   'SkillsDevelopmentPage',
@@ -39,12 +50,12 @@ const GROQ_PAGES = new Set([
   'AIAmbassadorsPage',
 ]);
 
-const SONNET_PAGES = new Set([
+// Pages that use Sonnet for coding tasks, free-tier for non-coding tasks
+const HYBRID_CODING_PAGES = new Set([
   'VibeCodingPage',
   'WebDevelopmentPage',
   'FullStackDevelopmentPage',
   'AIWorkflowDevPage',
-  'SkillsDevelopmentPage-code',
 ]);
 
 const ANTHROPIC_HAIKU  = 'claude-haiku-4-5-20251001';
@@ -83,12 +94,10 @@ function estimateCost(model, inputTokens, outputTokens, cacheHitTokens = 0, cach
 }
 
 // ── Cooldown tracker ──────────────────────────────────────────────────────────
-// Remembers providers that returned 429/quota errors so we skip them
-// instead of wasting time on every request.
 
 const providerCooldowns = new Map();
-const COOLDOWN_DURATION        = 60 * 1000;      // 1 minute for rate limits
-const MISSING_KEY_COOLDOWN     = 10 * 60 * 1000;  // 10 minutes for missing/bad keys
+const COOLDOWN_DURATION        = 60 * 1000;
+const MISSING_KEY_COOLDOWN     = 10 * 60 * 1000;
 
 function isOnCooldown(providerName) {
   const until = providerCooldowns.get(providerName);
@@ -133,7 +142,7 @@ function isMissingKeyError(error) {
 // ── Cost logger ───────────────────────────────────────────────────────────────
 
 async function logCost({ page, provider, model, inputTokens, outputTokens,
-                          cacheHitTokens, cacheWriteTokens, userId, city }) {
+                          cacheHitTokens, cacheWriteTokens, userId, city, taskType }) {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !supabaseKey) return;
@@ -160,6 +169,7 @@ async function logCost({ page, provider, model, inputTokens, outputTokens,
         estimated_cost_usd: estimatedCost,
         user_id:            userId || null,
         city:               city   || null,
+        task_type:          taskType || null,
       }),
     });
   } catch { /* never block the response for logging */ }
@@ -167,17 +177,33 @@ async function logCost({ page, provider, model, inputTokens, outputTokens,
 
 // ── Route resolver ─────────────────────────────────────────────────────────────
 
-function resolveRoute(page, playgroundModel) {
-  if (GROQ_PAGES.has(page)) {
+function resolveRoute(page, playgroundModel, taskType) {
+  // Free-tier pages (including SkillsDevelopmentPage) → fallback chain
+  if (FREE_TIER_PAGES.has(page)) {
     return { provider: 'groq', model: GROQ_MODEL };
   }
-  if (SONNET_PAGES.has(page)) {
+
+  // Hybrid coding pages → Sonnet for coding, free-tier for everything else
+  if (HYBRID_CODING_PAGES.has(page)) {
+    if (taskType === 'non-coding') {
+      return { provider: 'groq', model: GROQ_MODEL };
+    }
+    // Default to Sonnet (coding) if taskType is 'coding' or omitted
     return { provider: 'anthropic', model: ANTHROPIC_SONNET };
   }
+
+  // SkillsDevelopmentPage-code → always Sonnet (explicit code variant)
+  if (page === 'SkillsDevelopmentPage-code') {
+    return { provider: 'anthropic', model: ANTHROPIC_SONNET };
+  }
+
+  // AIPlaygroundPage → user-selectable model
   if (page === 'AIPlaygroundPage') {
     const model = playgroundModel === ANTHROPIC_SONNET ? ANTHROPIC_SONNET : ANTHROPIC_HAIKU;
     return { provider: 'anthropic', model };
   }
+
+  // Default → Haiku
   return { provider: 'anthropic', model: ANTHROPIC_HAIKU };
 }
 
@@ -192,7 +218,8 @@ async function callAnthropic(model, messages, system, max_tokens, temperature) {
     model,
     max_tokens,
     temperature,
-    messages,...(systemPayload ? { system: systemPayload } : {}),
+    messages,
+    ...(systemPayload ? { system: systemPayload } : {}),
   };
 
   const upstream = await fetch('https://api.anthropic.com/v1/messages', {
@@ -239,7 +266,9 @@ async function callAnthropic(model, messages, system, max_tokens, temperature) {
 // ── Groq call ──────────────────────────────────────────────────────────────────
 
 async function callGroq(model, messages, system, max_tokens, temperature) {
-  const groqMessages = [...(system ? [{ role: 'system', content: system }] : []),...messages,
+  const groqMessages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...messages,
   ];
 
   const upstream = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -260,7 +289,7 @@ async function callGroq(model, messages, system, max_tokens, temperature) {
     throw err;
   }
 
-  return {...data, _route: { provider: 'groq', model } };
+  return { ...data, _route: { provider: 'groq', model } };
 }
 
 // ── Gemini call ────────────────────────────────────────────────────────────────
@@ -269,8 +298,6 @@ async function callGemini(model, messages, system, max_tokens, temperature) {
   const geminiClient = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const geminiModel = geminiClient.getGenerativeModel({ model });
 
-  // Build a single prompt from system + messages (Gemini doesn't have a
-  // separate system field in the basic generateContent path, so we prepend it)
   let prompt = '';
   if (system) prompt += `System instructions: ${system}\n\n`;
   for (const msg of messages) {
@@ -286,7 +313,6 @@ async function callGemini(model, messages, system, max_tokens, temperature) {
 
   const text = result.response.text();
 
-  // Return OpenAI-shaped response so pages need no changes
   return {
     id:     `gemini-${Date.now()}`,
     object: 'chat.completion',
@@ -308,7 +334,9 @@ async function callGemini(model, messages, system, max_tokens, temperature) {
 // ── Cerebras call ──────────────────────────────────────────────────────────────
 
 async function callCerebras(model, messages, system, max_tokens, temperature) {
-  const cereMessages = [...(system ? [{ role: 'system', content: system }] : []),...messages,
+  const cereMessages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...messages,
   ];
 
   const upstream = await fetch('https://api.cerebras.ai/v1/chat/completions', {
@@ -328,13 +356,15 @@ async function callCerebras(model, messages, system, max_tokens, temperature) {
     throw err;
   }
 
-  return {...data, _route: { provider: 'cerebras', model } };
+  return { ...data, _route: { provider: 'cerebras', model } };
 }
 
 // ── OpenRouter call ────────────────────────────────────────────────────────────
 
 async function callOpenRouter(model, messages, system, max_tokens, temperature) {
-  const orMessages = [...(system ? [{ role: 'system', content: system }] : []),...messages,
+  const orMessages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...messages,
   ];
 
   const upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -354,13 +384,15 @@ async function callOpenRouter(model, messages, system, max_tokens, temperature) 
     throw err;
   }
 
-  return {...data, _route: { provider: 'openrouter', model } };
+  return { ...data, _route: { provider: 'openrouter', model } };
 }
 
 // ── Mistral call ───────────────────────────────────────────────────────────────
 
 async function callMistral(model, messages, system, max_tokens, temperature) {
-  const mistralMessages = [...(system ? [{ role: 'system', content: system }] : []),...messages,
+  const mistralMessages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...messages,
   ];
 
   const upstream = await fetch('https://api.mistral.ai/v1/chat/completions', {
@@ -380,12 +412,10 @@ async function callMistral(model, messages, system, max_tokens, temperature) {
     throw err;
   }
 
-  return {...data, _route: { provider: 'mistral', model } };
+  return { ...data, _route: { provider: 'mistral', model } };
 }
 
 // ── Free-tier fallback chain ───────────────────────────────────────────────────
-// Replaces the old callGroqWithFallback. Cascades through all free providers
-// before falling back to paid Anthropic Haiku as the last resort.
 
 async function callWithFallbackChain(messages, system, max_tokens, temperature) {
   const chain = [
@@ -430,14 +460,12 @@ async function callWithFallbackChain(messages, system, max_tokens, temperature) 
   const errors = [];
 
   for (const provider of chain) {
-    // Skip if API key is not configured
     if (!process.env[provider.keyEnv]) {
       console.log(`[chat.js] ⏭️  Skipping ${provider.name} (no ${provider.keyEnv})`);
       errors.push({ provider: provider.name, error: `${provider.keyEnv} not set` });
       continue;
     }
 
-    // Skip if provider is on cooldown from a recent failure
     if (isOnCooldown(provider.name)) {
       console.log(`[chat.js] ⏭️  Skipping ${provider.name} (on cooldown)`);
       errors.push({ provider: provider.name, error: 'on cooldown' });
@@ -468,7 +496,6 @@ async function callWithFallbackChain(messages, system, max_tokens, temperature) 
     }
   }
 
-  // All providers failed — throw with full details
   const err = new Error(
     `All AI providers failed:\n${errors.map(e => `  ${e.provider}: ${e.error}`).join('\n')}`
   );
@@ -496,7 +523,8 @@ async function callAnthropicStreaming(model, messages, system, max_tokens, tempe
       max_tokens,
       temperature,
       messages,
-      stream: true,...(systemPayload ? { system: systemPayload } : {}),
+      stream: true,
+      ...(systemPayload ? { system: systemPayload } : {}),
     }),
   });
 
@@ -578,7 +606,7 @@ export default async function handler(req, res) {
         'openrouter/llama-3.3-70b:free (free fallback)',
         'mistral/small (free fallback)',
         'anthropic/haiku (paid fallback)',
-        'anthropic/sonnet (code pages)',
+        'anthropic/sonnet (coding tasks)',
       ],
       method:    'GET',
       timestamp: new Date().toISOString(),
@@ -598,6 +626,7 @@ export default async function handler(req, res) {
       temperature     = 0.7,
       page            = '',
       playgroundModel = null,
+      taskType        = null,
       userId          = null,
       city            = null,
       stream          = false,
@@ -608,9 +637,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Messages array is required' });
     }
 
-    const { provider, model } = resolveRoute(page, playgroundModel);
+    const { provider, model } = resolveRoute(page, playgroundModel, taskType);
 
-    console.log(`[chat.js] page="${page}" stream=${stream} → provider=${provider} model=${model}`);
+    console.log(`[chat.js] page="${page}" taskType="${taskType}" stream=${stream} → provider=${provider} model=${model}`);
 
     // ── Streaming path (AIPlaygroundPage opts in) ──────────────────────────────
     if (stream && provider === 'anthropic') {
@@ -625,7 +654,7 @@ export default async function handler(req, res) {
         outputTokens:      usage.outputTokens,
         cacheHitTokens:    usage.cacheHitTokens,
         cacheWriteTokens:  usage.cacheWriteTokens,
-        userId, city,
+        userId, city, taskType,
       });
       return;
     }
@@ -633,7 +662,7 @@ export default async function handler(req, res) {
     // ── Non-streaming path ─────────────────────────────────────────────────────
     res.setHeader('Content-Type', 'application/json');
 
-    // GROQ-ROUTED PAGES → use full fallback chain
+    // FREE-TIER-ROUTED → use full fallback chain
     if (provider === 'groq') {
       const { result, actualProvider, actualModel, wasFallback } =
         await callWithFallbackChain(messages, system, max_tokens, temperature);
@@ -646,7 +675,7 @@ export default async function handler(req, res) {
         outputTokens:      result.usage?.completion_tokens           ?? 0,
         cacheHitTokens:    result.usage?.cache_read_input_tokens     ?? 0,
         cacheWriteTokens:  result.usage?.cache_creation_input_tokens ?? 0,
-        userId, city,
+        userId, city, taskType,
       });
 
       if (wasFallback) {
@@ -656,7 +685,7 @@ export default async function handler(req, res) {
       return res.status(200).json(result);
     }
 
-    // ANTHROPIC-ROUTED PAGES (Sonnet for code, Haiku for default) → direct call
+    // ANTHROPIC-ROUTED (Sonnet for coding, Haiku for default/playground)
     if (!process.env.ANTHROPIC_API_KEY) {
       res.setHeader('Content-Type', 'application/json');
       return res.status(500).json({ error: 'Anthropic API key not configured' });
@@ -669,7 +698,7 @@ export default async function handler(req, res) {
       outputTokens:      result.usage?.completion_tokens ?? 0,
       cacheHitTokens:    result.usage?.cache_read_input_tokens    ?? 0,
       cacheWriteTokens:  result.usage?.cache_creation_input_tokens ?? 0,
-      userId, city,
+      userId, city, taskType,
     });
     return res.status(200).json(result);
 
