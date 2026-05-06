@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
-import { Github, Mail, Eye, EyeOff } from 'lucide-react';
+import { Github, Eye, EyeOff } from 'lucide-react';
 
 interface AuthFormProps {
   mode: 'login' | 'signup';
@@ -47,7 +47,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
         const exists = await emailAlreadyExists(email);
         if (exists) {
           setError(
-            'An account with this email already exists. Please sign in, or use "Sign in with Email Link" below if you\'ve forgotten your password.'
+            'An account with this email already exists. Please sign in, or use "Forgot your password?" below if you\'ve forgotten your password.'
           );
           setLoading(false);
           return;
@@ -80,7 +80,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
 
       if (raw.includes('Invalid login credentials')) {
         friendly =
-          'Incorrect email or password. Try again, or click "Forgot password?" below to reset it.';
+          'Incorrect email or password. Try again, or click "Forgot your password?" below to reset it.';
       } else if (raw.includes('Email not confirmed')) {
         friendly =
           'Please confirm your email before signing in. Check your inbox for the confirmation link.';
@@ -140,7 +140,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
     }
   };
 
-  // ─── Magic link / reset link sent confirmation ────────────────────────────
+  // ─── Magic link sent confirmation ─────────────────────────────────────────
   if (view === 'magic-link-sent') {
     return (
       <div className="text-center">
@@ -223,8 +223,8 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
           fullWidth
         />
 
+        {/* Password field with show/hide toggle */}
         <div>
-          {/* Password field with show/hide toggle */}
           <div className="relative">
             <Input
               label="Password"
@@ -247,28 +247,26 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
             </button>
           </div>
 
-          {/* Forgot password nudge — login only */}
+          {/* Forgot password — login mode only */}
           {mode === 'login' && (
-            <p className="mt-2 text-sm text-gray-500">
-              Forgot your password?{' '}
+            <div className="mt-2 text-right">
               <button
                 type="button"
                 onClick={handleForgotPassword}
-                className="font-medium text-blue-600 hover:text-blue-500 underline"
+                className="text-sm text-blue-600 hover:text-blue-500 font-medium"
               >
-                Reset it via email link
+                Forgot your password?
               </button>
-            </p>
+            </div>
           )}
         </div>
 
-        <div>
-          <Button type="submit" fullWidth isLoading={loading} size="lg">
-            {mode === 'login' ? 'Sign in' : 'Sign up'}
-          </Button>
-        </div>
+        <Button type="submit" fullWidth isLoading={loading} size="lg">
+          {mode === 'login' ? 'Sign in' : 'Sign up'}
+        </Button>
       </form>
 
+      {/* OAuth — Google and GitHub only, no Email Link button */}
       <div className="mt-6">
         <div className="relative">
           <div className="absolute inset-0 flex items-center">
@@ -279,7 +277,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-3 gap-3">
+        <div className="mt-6 grid grid-cols-2 gap-3">
           <Button
             type="button"
             variant="outline"
@@ -296,15 +294,6 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
             fullWidth
           >
             GitHub
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleForgotPassword}
-            icon={<Mail size={16} />}
-            fullWidth
-          >
-            Email Link
           </Button>
         </div>
       </div>
