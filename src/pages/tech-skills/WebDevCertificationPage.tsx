@@ -14,6 +14,7 @@
 // Activity stored as: 'Web Development Certification'
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import Navbar from '../../components/layout/Navbar';
 import { supabase } from '../../lib/supabaseClient';
 import { chatJSON } from '../../lib/chatClient';
@@ -29,6 +30,54 @@ import {
   Wand2, Play, AlertCircle, Copy, Check, ClipboardList,
   ArrowRight, RefreshCw, X, Sparkles,
 } from 'lucide-react';
+
+// ─── Markdown components (dark theme, indigo/violet accents) ─────────────────
+
+const markdownComponents = {
+  h1: ({ children }: any) => (
+    <h1 className="text-sm font-bold text-white mb-2 mt-3">{children}</h1>
+  ),
+  h2: ({ children }: any) => (
+    <h2 className="text-xs font-bold text-gray-100 mb-1.5 mt-3">{children}</h2>
+  ),
+  h3: ({ children }: any) => (
+    <h3 className="text-xs font-semibold text-gray-200 mb-1 mt-2">{children}</h3>
+  ),
+  p: ({ children }: any) => (
+    <p className="text-xs text-gray-300 mb-2 leading-relaxed">{children}</p>
+  ),
+  strong: ({ children }: any) => (
+    <strong className="font-semibold text-white">{children}</strong>
+  ),
+  em: ({ children }: any) => (
+    <em className="italic text-gray-400">{children}</em>
+  ),
+  ul: ({ children }: any) => (
+    <ul className="list-disc list-inside space-y-1 mb-2 text-gray-300 ml-2 text-xs">{children}</ul>
+  ),
+  ol: ({ children }: any) => (
+    <ol className="list-decimal list-inside space-y-1 mb-2 text-gray-300 ml-2 text-xs">{children}</ol>
+  ),
+  li: ({ children }: any) => (
+    <li className="leading-relaxed">{children}</li>
+  ),
+  hr: () => <hr className="my-3 border-gray-600" />,
+  blockquote: ({ children }: any) => (
+    <blockquote className="border-l-4 border-indigo-500 pl-3 italic text-gray-400 my-2 text-xs">{children}</blockquote>
+  ),
+  a: ({ href, children }: any) => (
+    <a href={href || '#'} target="_blank" rel="noopener noreferrer"
+      className="text-indigo-400 hover:text-indigo-300 underline font-medium">
+      {children}
+    </a>
+  ),
+  code: ({ children }: any) => (
+    <code className="bg-gray-800 text-indigo-300 px-1 py-0.5 rounded text-[10px] font-mono">{children}</code>
+  ),
+  pre: ({ children }: any) => (
+    <pre className="bg-gray-900 text-green-400 p-2 rounded text-[10px] font-mono overflow-x-auto mb-2">{children}</pre>
+  ),
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -238,7 +287,7 @@ const WebDevCertificationPage: React.FC = () => {
   const [communicationLevel, setCommunicationLevel] = useState(1);
 
   // ── Voice + Branding ────────────────────────────────────────────────
-  const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin'); // Africa default
+  const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin');
   const branding = useBranding();
 
   useEffect(() => {
@@ -286,7 +335,7 @@ const WebDevCertificationPage: React.FC = () => {
 
   const activeFile = projectFiles.find(f => f.path === activeFilePath) ?? projectFiles[0];
 
-  // ── Load voices ───────────────────────────────────────────────────────
+  // ── Voice helpers ─────────────────────────────────────────────────────
   const speak = (text: string) => hookSpeak(text.slice(0, 400));
   const stopSpeaking = () => cancelSpeech();
 
@@ -295,23 +344,19 @@ const WebDevCertificationPage: React.FC = () => {
     if (!user?.id) return;
     setLoadingData(true); setDataError(null);
     try {
-      // Personality
       const { data: pb } = await supabase.from('user_personality_baseline')
         .select('communication_level').eq('user_id', user.id).maybeSingle();
       if (pb?.communication_level != null) setCommunicationLevel(pb.communication_level);
 
-      // Assessments
       const { data: aData, error: aErr } = await supabase
         .from('certification_assessments').select('*')
         .eq('certification_name', CERT_NAME).order('assessment_order');
       if (aErr) throw aErr;
       setAssessments(aData || []);
 
-      // Existing dashboard record
       const { data: dash } = await supabase.from('dashboard').select('*')
         .eq('user_id', user.id).eq('activity', CERT_ACTIVITY).maybeSingle();
 
-      // Map scores from web_dev_evaluation JSON (stored per-assessment)
       const evalData = dash?.web_dev_evaluation as any;
       const scores: AssessmentScore[] = (aData || []).map(a => ({
         assessment_name: a.assessment_name,
@@ -320,7 +365,6 @@ const WebDevCertificationPage: React.FC = () => {
       }));
       setAssessmentScores(scores);
 
-      // Restore project if one was saved
       if (dash?.web_dev_pages?.length) {
         const files = (dash.web_dev_pages as any[]).map(p => ({ path: p.path || p.name, content: p.content || '' }));
         if (files.length) { setProjectFiles(files); }
@@ -449,7 +493,6 @@ Respond ONLY in this JSON format:
       setEvalProgress('');
       setAssessmentScores(newScores);
 
-      // Persist to dashboard
       const overallAvg = newScores.reduce((s, a) => s + (a.score ?? 0), 0) / newScores.length;
       const allProficient = newScores.every(s => (s.score ?? 0) >= 2);
 
@@ -511,11 +554,9 @@ Respond ONLY in this JSON format:
       const certLevel = minScore === 3 ? 'Advanced' : minScore >= 2 ? 'Proficient' : 'Emerging';
       const overallAvg = assessmentScores.reduce((s, a) => s + (a.score ?? 0), 0) / assessmentScores.length;
 
-      // Borders
       doc.setLineWidth(3); doc.setDrawColor(99, 102, 241); doc.rect(10, 10, W - 20, H - 20);
       doc.setLineWidth(1); doc.setDrawColor(129, 140, 248); doc.rect(15, 15, W - 30, H - 30);
 
-      // Header
       doc.setFontSize(34); doc.setFont('helvetica', 'bold'); doc.setTextColor(99, 102, 241);
       doc.text('Certificate of Achievement', W / 2, 30, { align: 'center' });
 
@@ -526,7 +567,6 @@ Respond ONLY in this JSON format:
       doc.setFontSize(13); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100);
       doc.text('This certificate is proudly presented to', W / 2, 64, { align: 'center' });
 
-      // Name
       doc.setFontSize(36); doc.setFont('helvetica', 'bold'); doc.setTextColor(20, 20, 20);
       doc.text(certName.trim(), W / 2, 78, { align: 'center' });
 
@@ -534,11 +574,9 @@ Respond ONLY in this JSON format:
       doc.text('For successfully completing the React / Vite Web Development Certification,', W / 2, 88, { align: 'center' });
       doc.text('demonstrating the ability to design, build, and deploy a responsive web application using AI-assisted vibe coding.', W / 2, 95, { align: 'center' });
 
-      // Overall score
       doc.setFontSize(13); doc.setFont('helvetica', 'bold'); doc.setTextColor(99, 102, 241);
       doc.text(`Overall Score: ${overallAvg.toFixed(1)}/3.0 — ${certLevel}`, W / 2, 106, { align: 'center' });
 
-      // Criteria grid
       doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(50, 50, 50);
       doc.text('Assessment Competencies:', 20, 116);
 
@@ -548,7 +586,6 @@ Respond ONLY in this JSON format:
 
       assessmentScores.forEach((sc, i) => {
         const xPos = 20 + col * colW;
-        const sl = scoreLabel(sc.score);
         const levelText = sc.score === 3 ? 'Advanced' : sc.score === 2 ? 'Proficient' : sc.score === 1 ? 'Emerging' : 'No Evidence';
 
         doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(40, 40, 40);
@@ -564,7 +601,6 @@ Respond ONLY in this JSON format:
         if (col >= cols) { col = 0; yPos += 22; }
       });
 
-      // Footer
       const footerY = H - 22;
       doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(130, 130, 130);
       doc.text(`Awarded: ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`, 20, footerY);
@@ -623,7 +659,6 @@ Respond ONLY in this JSON format:
     <div className="flex flex-col h-screen bg-gray-900 text-white overflow-hidden">
       <Navbar />
 
-      {/* Voice fallback — fixed overlay when TTS unavailable (e.g. no network voice in Nigeria) */}
       {fallbackText && (
         <div className="fixed bottom-4 right-4 z-50 max-w-sm">
           <VoiceFallback text={fallbackText} onDismiss={clearFallback} />
@@ -671,7 +706,6 @@ Respond ONLY in this JSON format:
                   value={sessionName} onChange={e => setSessionName(e.target.value)} placeholder="Project name…" />
               </>
             )}
-            {/* Navigation pills */}
             <div className="flex items-center gap-1 ml-2">
               {(['overview', 'build', 'results', 'certificate'] as ViewMode[]).map(v => (
                 <button key={v} onClick={() => setView(v)}
@@ -830,7 +864,6 @@ Respond ONLY in this JSON format:
             {/* ── Left: Vibe coding + criteria ─────────────────────── */}
             <div className="w-80 flex-shrink-0 flex flex-col bg-[#1a1d23] border-r border-gray-700 overflow-hidden">
 
-              {/* Vibe coding header */}
               <div className="flex-shrink-0 px-4 py-3 border-b border-indigo-500/30 bg-indigo-500/10">
                 <div className="flex items-center gap-2">
                   <Wand2 size={16} className="text-indigo-400" />
@@ -843,7 +876,6 @@ Respond ONLY in this JSON format:
 
               <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
 
-                {/* AI explanation from last generation */}
                 {explanation && (
                   <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
                     <p className="text-[9px] font-bold text-indigo-400 uppercase mb-1">What was built</p>
@@ -851,7 +883,6 @@ Respond ONLY in this JSON format:
                   </div>
                 )}
 
-                {/* Error */}
                 {genError && (
                   <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg flex gap-2">
                     <AlertCircle size={12} className="flex-shrink-0 text-red-400 mt-0.5" />
@@ -859,7 +890,6 @@ Respond ONLY in this JSON format:
                   </div>
                 )}
 
-                {/* Eval error */}
                 {evalError && (
                   <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg flex gap-2">
                     <AlertCircle size={12} className="flex-shrink-0 text-red-400 mt-0.5" />
@@ -867,7 +897,6 @@ Respond ONLY in this JSON format:
                   </div>
                 )}
 
-                {/* Prompt textarea */}
                 <div>
                   <label className="text-[10px] text-gray-500 uppercase font-bold block mb-1">
                     {lvl <= 1 ? 'Describe what you want to build or change:' : 'Your vibe coding prompt:'}
@@ -942,7 +971,6 @@ Respond ONLY in this JSON format:
 
             {/* ── Right: Monaco editor ─────────────────────────────── */}
             <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Editor toolbar */}
               <div className="flex items-center gap-2 px-3 py-2 bg-gray-800/80 border-b border-gray-700 flex-shrink-0">
                 <FileCode size={13} className="text-indigo-400" />
                 <span className="text-xs text-gray-400 truncate flex-1">{activeFilePath}</span>
@@ -954,13 +982,11 @@ Respond ONLY in this JSON format:
               </div>
 
               <div className="flex flex-1 overflow-hidden">
-                {/* File tree */}
                 <div className="w-44 flex-shrink-0 border-r border-gray-700 overflow-y-auto" style={{ background: '#161820' }}>
                   <div className="px-3 pt-2 pb-1"><p className="text-[9px] font-bold text-gray-700 uppercase tracking-wide">Files</p></div>
                   <FileTreePanel files={projectFiles} activeFile={activeFilePath} onSelect={setActiveFilePath} />
                 </div>
 
-                {/* Monaco */}
                 <div className="flex-1">
                   <Editor height="100%"
                     language={getLanguage(activeFilePath)}
@@ -1037,27 +1063,47 @@ Respond ONLY in this JSON format:
                           </div>
                           {isOpen ? <ChevronUp size={14} className="text-gray-400 flex-shrink-0" /> : <ChevronDown size={14} className="text-gray-400 flex-shrink-0" />}
                         </button>
+
                         {isOpen && (
                           <div className="px-4 pb-4 border-t border-white/10 pt-3 space-y-3">
+                            {/* ── Evidence — rendered as markdown ── */}
                             {sc.evidence && (
                               <div>
                                 <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Evidence</p>
-                                <p className="text-xs text-gray-300 leading-relaxed">{sc.evidence}</p>
+                                <div className="prose prose-invert max-w-none">
+                                  <ReactMarkdown components={markdownComponents}>
+                                    {sc.evidence}
+                                  </ReactMarkdown>
+                                </div>
                               </div>
                             )}
+
+                            {/* ── Rubric levels — metric text rendered as markdown ── */}
                             {assessment && (
                               <div>
                                 <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Rubric</p>
-                                <div className="space-y-1">
+                                <div className="space-y-1.5">
                                   {[
-                                    { level: 0, text: assessment.certification_level0_metric, color: 'text-red-400' },
-                                    { level: 1, text: assessment.certification_level1_metric, color: 'text-amber-400' },
-                                    { level: 2, text: assessment.certification_level2_metric, color: 'text-blue-400' },
-                                    { level: 3, text: assessment.certification_level3_metric, color: 'text-emerald-400' },
-                                  ].map(({ level, text, color }) => (
-                                    <div key={level} className={`flex gap-1.5 text-[10px] ${sc.score === level ? color : 'text-gray-600'}`}>
-                                      <span className="font-bold flex-shrink-0">{sc.score === level ? '▶' : ' '} L{level}:</span>
-                                      <span>{text}</span>
+                                    { level: 0, text: assessment.certification_level0_metric, color: 'text-red-400',     activeColor: 'bg-red-500/10 border border-red-500/20'     },
+                                    { level: 1, text: assessment.certification_level1_metric, color: 'text-amber-400',   activeColor: 'bg-amber-500/10 border border-amber-500/20'   },
+                                    { level: 2, text: assessment.certification_level2_metric, color: 'text-blue-400',    activeColor: 'bg-blue-500/10 border border-blue-500/20'    },
+                                    { level: 3, text: assessment.certification_level3_metric, color: 'text-emerald-400', activeColor: 'bg-emerald-500/10 border border-emerald-500/20' },
+                                  ].map(({ level, text, color, activeColor }) => (
+                                    <div key={level}
+                                      className={`rounded-lg px-2.5 py-1.5 ${sc.score === level ? activeColor : ''}`}>
+                                      <span className={`text-[10px] font-bold ${color} block mb-0.5`}>
+                                        {sc.score === level ? '▶ ' : ''}L{level}:
+                                      </span>
+                                      <div className={sc.score === level ? color : 'text-gray-600'}>
+                                        <ReactMarkdown components={{
+                                          ...markdownComponents,
+                                          p: ({ children }: any) => (
+                                            <p className={`text-[10px] leading-relaxed ${sc.score === level ? '' : 'text-gray-600'}`}>{children}</p>
+                                          ),
+                                        }}>
+                                          {text}
+                                        </ReactMarkdown>
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
@@ -1111,7 +1157,7 @@ Respond ONLY in this JSON format:
                     : 'A Proficient score (2+) on all assessment criteria is required. Review your results, improve your project, and re-evaluate.'}
                 </p>
                 <button onClick={() => setView('results')} className="flex items-center gap-2 mx-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors">
-                  <BarChart3 size={16} /> View Results
+                  📊 View Results
                 </button>
               </div>
             ) : (
