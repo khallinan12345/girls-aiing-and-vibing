@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import AppLayout from '../components/layout/AppLayout';
 import { 
   Award, 
@@ -139,6 +140,50 @@ const ASSESSMENT_COLUMN_MAP: Record<string, string> = {
   'Ethics & Responsibility': 'certification_ai_proficiency_ethics_responsibility',
   'Understanding AI': 'certification_ai_proficiency_understanding_ai',
   'Verification & Bias': 'certification_ai_proficiency_verification_bias'
+};
+
+// ---------------------------------------------------------------------------
+// Utility: parse the tailored prompt to extract numbered question labels
+// so we can build a matching answer template.
+// ---------------------------------------------------------------------------
+const buildAnswerTemplate = (promptText: string): string => {
+  // Try to extract numbered items like "1. **Data** — ..." or "1. Data —"
+  const lines = promptText.split('\n');
+  const questionLines: string[] = [];
+
+  lines.forEach((line) => {
+    // Match lines that start with a number followed by . or )
+    const match = line.match(/^\s*(\d+)[.)]\s+\*{0,2}([^*\n—–-]+)\*{0,2}/);
+    if (match) {
+      // Strip any trailing punctuation / dashes
+      const label = match[2].trim().replace(/[—–\-:]+$/, '').trim();
+      questionLines.push(label);
+    }
+  });
+
+  if (questionLines.length === 0) {
+    // Fallback: generic template
+    return `1. [Answer Here]
+
+
+
+2. [Answer Here]
+
+
+
+3. [Answer Here]
+
+
+
+4. [Answer Here]
+
+
+`;
+  }
+
+  return questionLines
+    .map((label, i) => `${i + 1}. ${label}\n\n[Answer Here]\n\n\n`)
+    .join('\n');
 };
 
 
@@ -415,6 +460,9 @@ const AIProficiencyPage: React.FC = () => {
       // Tailor the generic prompt to the learner's context
       const tailored = await tailorPromptToContext();
       setTailoredPrompt(tailored);
+
+      // Pre-populate the response textarea with the answer template
+      setUserResponse(buildAnswerTemplate(tailored));
       
       setViewMode('take-assessment');
     } catch (err) {
@@ -1493,6 +1541,10 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
     </div>
   );
 
+  // ---------------------------------------------------------------------------
+  // renderTakeAssessment — renders the prompt as formatted markdown and
+  // pre-populates the response textarea with a structured answer template.
+  // ---------------------------------------------------------------------------
   const renderTakeAssessment = () => (
     <div className="max-w-4xl mx-auto">
       <button
@@ -1506,6 +1558,8 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
         <h2 className="text-3xl font-bold text-gray-800 mb-4">
           {selectedAssessment?.assessment_name}
         </h2>
+
+        {/* Context summary */}
         <div className="bg-purple-50 border-2 border-purple-300 rounded-xl p-6 mb-6">
           <h3 className="text-lg font-bold text-gray-800 mb-3">Your Context</h3>
           <div className="grid grid-cols-2 gap-4 text-sm">
@@ -1515,14 +1569,39 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
             <div><span className="font-semibold text-gray-700">Audience:</span> {learnerContext.audience}</div>
           </div>
         </div>
+
+        {/* ── Personalized Assessment Prompt (rendered as markdown) ── */}
         <div className="bg-blue-50 border-2 border-blue-300 rounded-xl p-6 mb-6">
           <h3 className="text-lg font-bold text-gray-800 mb-3">Your Personalized Assessment Prompt</h3>
+
           {renderVoiceBar(
             `${tailoredPrompt || selectedAssessment?.certification_prompt || ''}. Scoring rubric: Level 0, No Evidence: ${selectedAssessment?.certification_level0_metric}. Level 1, Emerging: ${selectedAssessment?.certification_level1_metric}. Level 2, Proficient: ${selectedAssessment?.certification_level2_metric}. Level 3, Advanced: ${selectedAssessment?.certification_level3_metric}.`,
             'Read prompt & rubric'
           )}
-          <p className="text-gray-800 whitespace-pre-wrap">{tailoredPrompt || selectedAssessment?.certification_prompt}</p>
+
+          {/* Markdown-rendered prompt */}
+          <div className="prose prose-blue max-w-none text-gray-800
+            prose-headings:text-gray-900 prose-headings:font-bold
+            prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
+            prose-strong:text-gray-900
+            prose-li:my-1 prose-ul:my-2 prose-ol:my-2
+            prose-p:leading-relaxed prose-p:my-2">
+            <ReactMarkdown>
+              {tailoredPrompt || selectedAssessment?.certification_prompt || ''}
+            </ReactMarkdown>
+          </div>
+
+          {/* Closing instruction message */}
+          <div className="mt-5 pt-4 border-t border-blue-200">
+            <p className="text-gray-700 text-sm leading-relaxed">
+              Answer the questions below in the <strong>"Your Response"</strong> section without AI help.&nbsp;
+              The more detailed you are in answering each question, the better your evaluation will be.
+            </p>
+            <p className="text-gray-700 text-sm font-semibold mt-1">Good luck. 🍀</p>
+          </div>
         </div>
+
+        {/* Scoring rubric */}
         <div className="bg-green-50 border-2 border-green-300 rounded-xl p-6 mb-6">
           <h3 className="text-lg font-bold text-gray-800 mb-3">Scoring Rubric</h3>
           <p className="text-sm text-gray-700 mb-3">Your response will be evaluated on a 0-3 scale:</p>
@@ -1533,6 +1612,8 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
             <li><strong>3 (Advanced):</strong> {selectedAssessment?.certification_level3_metric}</li>
           </ul>
         </div>
+
+        {/* ── Your Response textarea (pre-populated with answer template) ── */}
         <div className="mb-6">
           <label className="block text-sm font-semibold text-gray-700 mb-2">
             Your Response <span className="text-red-500">*</span>
@@ -1540,14 +1621,14 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
           <textarea
             value={userResponse}
             onChange={(e) => setUserResponse(e.target.value)}
-            placeholder="Enter your complete response here. Be thorough and demonstrate your understanding..."
-            className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none min-h-[300px]"
+            className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none min-h-[420px] font-mono text-sm leading-relaxed"
           />
           <p className="text-sm text-gray-500 mt-2">
-            Provide a complete, thoughtful response that demonstrates your AI proficiency skills. 
-            You'll receive a score and personalized feedback.
+            Replace each <em>[Answer Here]</em> with your own answer. Be thorough — the more detail you provide, the better your evaluation will be.
           </p>
         </div>
+
+        {/* Improve English button */}
         <div className="flex justify-end mb-3">
           <button
             onClick={handleImproveEnglish}
@@ -1559,12 +1640,14 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
               : <><Wand2 size={15} /> Improve my English</>}
           </button>
         </div>
+
         {error && (
           <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4 flex items-start gap-3 mb-6">
             <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
             <p className="text-red-700">{error}</p>
           </div>
         )}
+
         <button
           onClick={handleResponseSubmit}
           disabled={loading || !userResponse.trim()}
