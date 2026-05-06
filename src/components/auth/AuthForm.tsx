@@ -17,6 +17,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [view, setView] = useState<'form' | 'magic-link-sent'>('form');
 
   // ─── Duplicate email check ────────────────────────────────────────────────
   const emailAlreadyExists = async (email: string): Promise<boolean> => {
@@ -31,6 +32,33 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
       return false;
     }
     return !!data;
+  };
+
+  // ─── Forgot password (magic link to reset page) ───────────────────────────
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError('Please enter your email address above first.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError('');
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/reset-password`,
+        },
+      });
+
+      if (error) throw error;
+      setView('magic-link-sent');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to send reset link. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ─── Main auth handler ────────────────────────────────────────────────────
@@ -107,6 +135,22 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
       setError(err?.message || 'OAuth login failed. Please try again.');
     }
   };
+
+  // ─── Magic link sent confirmation ─────────────────────────────────────────
+  if (view === 'magic-link-sent') {
+    return (
+      <div className="text-center space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Check your email</h3>
+        <p className="text-gray-600 text-sm">
+          We sent a password reset link to <strong>{email}</strong>.<br />
+          Click the link in the email to set a new password.
+        </p>
+        <Button variant="outline" onClick={() => setView('form')}>
+          Back to sign in
+        </Button>
+      </div>
+    );
+  }
 
   // ─── Main form ────────────────────────────────────────────────────────────
   return (
@@ -196,6 +240,19 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
           >
             {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
           </button>
+
+          {/* Forgot password link — login mode only */}
+          {mode === 'login' && (
+            <div className="mt-2 text-right">
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                className="text-sm text-blue-600 hover:text-blue-500 font-medium"
+              >
+                Forgot your password?
+              </button>
+            </div>
+          )}
         </div>
 
         <div>
