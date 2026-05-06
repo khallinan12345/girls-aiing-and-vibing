@@ -9,8 +9,6 @@ interface AuthFormProps {
   mode: 'login' | 'signup';
 }
 
-type AuthView = 'form' | 'magic-link-sent';
-
 const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -18,7 +16,6 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [view, setView] = useState<AuthView>('form');
   const [showPassword, setShowPassword] = useState(false);
 
   // ─── Duplicate email check ────────────────────────────────────────────────
@@ -47,7 +44,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
         const exists = await emailAlreadyExists(email);
         if (exists) {
           setError(
-            'An account with this email already exists. Please sign in, or use "Forgot your password?" below if you\'ve forgotten your password.'
+            'An account with this email already exists. Please sign in instead.'
           );
           setLoading(false);
           return;
@@ -79,14 +76,12 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
       let friendly = 'An unexpected error occurred. Please try again.';
 
       if (raw.includes('Invalid login credentials')) {
-        friendly =
-          'Incorrect email or password. Try again, or click "Forgot your password?" below to reset it.';
+        friendly = 'Incorrect email or password. Please try again.';
       } else if (raw.includes('Email not confirmed')) {
         friendly =
           'Please confirm your email before signing in. Check your inbox for the confirmation link.';
       } else if (raw.includes('User already registered')) {
-        friendly =
-          'An account with this email already exists. Sign in instead, or reset your password below.';
+        friendly = 'An account with this email already exists. Please sign in instead.';
       } else if (raw.includes('Password should be')) {
         friendly = 'Password must be at least 6 characters.';
       } else if (raw) {
@@ -112,49 +107,6 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
       setError(err?.message || 'OAuth login failed. Please try again.');
     }
   };
-
-  // ─── Forgot password → magic link to /auth/reset-password ────────────────
-  const handleForgotPassword = async () => {
-    if (!email) {
-      setError('Please enter your email address above first.');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError('');
-
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/reset-password`,
-        },
-      });
-
-      if (error) throw error;
-      setView('magic-link-sent');
-    } catch (err: any) {
-      setError(err?.message || 'Failed to send reset link. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ─── Magic link sent confirmation ─────────────────────────────────────────
-  if (view === 'magic-link-sent') {
-    return (
-      <div className="text-center">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Check your email</h3>
-        <p className="text-gray-600 mb-4">
-          We sent a sign-in link to <strong>{email}</strong>.<br />
-          Click the link to be taken to the password reset page.
-        </p>
-        <Button variant="outline" onClick={() => setView('form')}>
-          Try another method
-        </Button>
-      </div>
-    );
-  }
 
   // ─── Main form ────────────────────────────────────────────────────────────
   return (
@@ -224,49 +176,36 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
         />
 
         {/* Password field with show/hide toggle */}
-        <div>
-          <div className="relative">
-            <Input
-              label="Password"
-              id="password"
-              name="password"
-              type={showPassword ? 'text' : 'password'}
-              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              fullWidth
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-3 top-9 text-gray-400 hover:text-gray-600"
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
-            >
-              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
-          </div>
-
-          {/* Forgot password — login mode only */}
-          {mode === 'login' && (
-            <div className="mt-2 text-right">
-              <button
-                type="button"
-                onClick={handleForgotPassword}
-                className="text-sm text-blue-600 hover:text-blue-500 font-medium"
-              >
-                Forgot your password?
-              </button>
-            </div>
-          )}
+        <div className="relative">
+          <Input
+            label="Password"
+            id="password"
+            name="password"
+            type={showPassword ? 'text' : 'password'}
+            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            fullWidth
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            className="absolute right-3 top-9 text-gray-400 hover:text-gray-600"
+            aria-label={showPassword ? 'Hide password' : 'Show password'}
+          >
+            {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+          </button>
         </div>
 
-        <Button type="submit" fullWidth isLoading={loading} size="lg">
-          {mode === 'login' ? 'Sign in' : 'Sign up'}
-        </Button>
+        <div>
+          <Button type="submit" fullWidth isLoading={loading} size="lg">
+            {mode === 'login' ? 'Sign in' : 'Sign up'}
+          </Button>
+        </div>
       </form>
 
-      {/* OAuth — Google and GitHub only, no Email Link button */}
+      {/* OAuth */}
       <div className="mt-6">
         <div className="relative">
           <div className="absolute inset-0 flex items-center">
