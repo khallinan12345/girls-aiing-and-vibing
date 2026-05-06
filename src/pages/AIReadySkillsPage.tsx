@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import AppLayout from '../components/layout/AppLayout';
 import { 
   Brain,
@@ -32,6 +33,88 @@ import { supabase } from '../lib/supabaseClient';
 import { useVoice } from '../hooks/useVoice';
 import { VoiceFallback } from '../components/VoiceFallback';
 import { useBranding, addBrandingToPDF } from '../lib/useBranding';
+
+// ---------------------------------------------------------------------------
+// Shared prose styles for ReactMarkdown rendering
+// ---------------------------------------------------------------------------
+const markdownComponents = {
+  h1: ({ children }: any) => (
+    <h1 className="text-xl font-bold text-gray-900 mb-3 mt-4">{children}</h1>
+  ),
+  h2: ({ children }: any) => (
+    <h2 className="text-lg font-bold text-gray-800 mb-2 mt-4">{children}</h2>
+  ),
+  h3: ({ children }: any) => (
+    <h3 className="text-base font-semibold text-gray-800 mb-2 mt-3">{children}</h3>
+  ),
+  p: ({ children }: any) => (
+    <p className="text-gray-800 mb-3 leading-relaxed">{children}</p>
+  ),
+  strong: ({ children }: any) => (
+    <strong className="font-semibold text-gray-900">{children}</strong>
+  ),
+  em: ({ children }: any) => (
+    <em className="italic text-gray-700">{children}</em>
+  ),
+  ul: ({ children }: any) => (
+    <ul className="list-disc list-inside space-y-1 mb-3 text-gray-800 ml-2">{children}</ul>
+  ),
+  ol: ({ children }: any) => (
+    <ol className="list-decimal list-inside space-y-2 mb-3 text-gray-800 ml-2">{children}</ol>
+  ),
+  li: ({ children }: any) => (
+    <li className="leading-relaxed">{children}</li>
+  ),
+  hr: () => <hr className="my-4 border-gray-300" />,
+  blockquote: ({ children }: any) => (
+    <blockquote className="border-l-4 border-purple-400 pl-4 italic text-gray-700 my-3">{children}</blockquote>
+  ),
+  a: ({ href, children }: any) => (
+    <Link to={href || '#'} className="text-blue-600 hover:text-blue-800 underline font-medium">
+      {children}
+    </Link>
+  ),
+};
+
+// ---------------------------------------------------------------------------
+// Utility: parse the tailored prompt to extract numbered question labels
+// so we can build a matching answer template.
+// ---------------------------------------------------------------------------
+const buildAnswerTemplate = (promptText: string): string => {
+  const lines = promptText.split('\n');
+  const questionLines: string[] = [];
+
+  lines.forEach((line) => {
+    const match = line.match(/^\s*(\d+)[.)]\s+\*{0,2}([^*\n—–\-]+)\*{0,2}/);
+    if (match) {
+      const label = match[2].trim().replace(/[—–\-:]+$/, '').trim();
+      questionLines.push(label);
+    }
+  });
+
+  if (questionLines.length === 0) {
+    return `1. [Answer Here]
+
+
+
+2. [Answer Here]
+
+
+
+3. [Answer Here]
+
+
+
+4. [Answer Here]
+
+
+`;
+  }
+
+  return questionLines
+    .map((label, i) => `${i + 1}. ${label}\n\n[Answer Here]\n\n\n`)
+    .join('\n');
+};
 
 // Distorted Background Component
 const DistortedBackground: React.FC<{ imageUrl: string }> = ({ imageUrl }) => {
@@ -173,7 +256,6 @@ const AIReadySkillsPage: React.FC = () => {
   const [isImproving, setIsImproving] = useState(false);
 
   // ── Voice state ────────────────────────────────────────────────────────
-  // ── Voice state ────────────────────────────────────────────────────────
   const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin'); // Africa default
 
   const branding = useBranding();
@@ -230,32 +312,6 @@ Return ONLY valid JSON: { "improved_text": "..." }`
     learningStrategy: null
   });
   const [communicationLevel, setCommunicationLevel] = useState<number>(1);
-
-  // Helper function to render text with markdown links as React Router Links
-  const renderAdviceWithLinks = (text: string) => {
-    // Split by markdown link pattern: [text](url)
-    const parts = text.split(/(\[.*?\]\(.*?\))/g);
-    
-    return parts.map((part, index) => {
-      // Check if this part is a markdown link
-      const linkMatch = part.match(/\[(.*?)\]\((.*?)\)/);
-      if (linkMatch) {
-        const [, linkText, url] = linkMatch;
-        return (
-          <Link 
-            key={index} 
-            to={url} 
-            className="text-blue-600 hover:text-blue-800 underline font-medium"
-          >
-            {linkText}
-          </Link>
-        );
-      }
-      
-      // Otherwise, return text with line breaks preserved
-      return <span key={index}>{part}</span>;
-    });
-  };
 
   // Fetch certifications on mount
   useEffect(() => {
@@ -444,6 +500,10 @@ Return ONLY valid JSON: { "improved_text": "..." }`
       
       const tailored = await tailorPromptToContext();
       setTailoredPrompt(tailored);
+
+      // Pre-populate the answer template based on the tailored prompt
+      const template = buildAnswerTemplate(tailored);
+      setUserResponse(template);
       
       setViewMode('take-assessment');
     } catch (err) {
@@ -470,8 +530,6 @@ Adapt the language and framing of the prompt to match this learner's style.
 This context should be woven into the challenge so the learner is asked to demonstrate the skill in a way that connects directly to this real economic or productive activity.`
       : '';
 
-    // ── Communication-level language register ────────────────────────────────
-    // Controls vocabulary, sentence complexity, and framing of the challenge prompt.
     const commLevelBlock = communicationLevel <= 0
       ? `
 COMMUNICATION LEVEL: 0 — PRE-LITERATE / VERY BASIC
@@ -708,7 +766,6 @@ Respond ONLY in this JSON format:
     if (!user?.id) return [];
 
     try {
-      // Fetch user profile for grade level and continent
       const { data: profile } = await supabase
         .from('profiles')
         .select('grade_level, continent')
@@ -718,7 +775,6 @@ Respond ONLY in this JSON format:
       const userGradeLevel = profile?.grade_level || 5;
       const userContinent = profile?.continent || 'North America';
 
-      // Map certification + assessment names to learning module categories/sub-categories
       const categoryMap: Record<string, Record<string, { category: string; sub_category: string }>> = {
         'Critical Thinking': {
           'Reflection': { category: 'Skills', sub_category: 'Critical Thinking' },
@@ -757,7 +813,6 @@ Respond ONLY in this JSON format:
 
       const mapping = categoryMap[certificationName]?.[assessmentName];
       if (!mapping) {
-        // Fallback: try to match by certification name as category
         const fallbackMapping = { category: 'Skills', sub_category: certificationName };
         return await queryLearningModules(fallbackMapping, userGradeLevel, userContinent, assessmentName);
       }
@@ -775,24 +830,20 @@ Respond ONLY in this JSON format:
     continent: string,
     assessmentName: string
   ): Promise<LearningModule[]> => {
-    // Query learning modules
     let query = supabase
       .from('learning_modules')
       .select('learning_module_id, title, description, category, sub_category, grade_level')
       .eq('category', mapping.category)
       .eq('public', 1)
-      .lte('grade_level', gradeLevel + 2) // Allow up to 2 grades above
-      .gte('grade_level', Math.max(1, gradeLevel - 2)) // Allow up to 2 grades below
+      .lte('grade_level', gradeLevel + 2)
+      .gte('grade_level', Math.max(1, gradeLevel - 2))
       .limit(5);
 
-    // Prefer modules from user's continent but don't require it
     const { data: continentModules } = await query.eq('continent', continent);
     const { data: allModules } = await query;
 
-    // Prioritize continent-specific modules, fall back to any continent
     const modules = continentModules && continentModules.length > 0 ? continentModules : allModules;
 
-    // Filter by sub-category if possible, otherwise just use category match
     const filteredModules = modules?.filter(m => 
       m.sub_category?.includes(mapping.sub_category) || 
       m.sub_category?.toLowerCase().includes(assessmentName.toLowerCase()) ||
@@ -805,7 +856,6 @@ Respond ONLY in this JSON format:
   const generateImprovementAdvice = async (score: number, evidence: string) => {
     if (!selectedAssessment || !selectedCertification) return '';
 
-    // Fetch relevant learning modules
     const recommendedModules = await fetchRelevantLearningModules(
       selectedCertification.certification_name,
       selectedAssessment.assessment_name
@@ -822,7 +872,6 @@ ${ls?.recommendations?.length ? `  Learning Tips: ${ls.recommendations.join('; '
 Adapt your feedback tone, phrasing, and examples to match this profile.
 ` : '';
 
-    // ── Communication-level register for feedback ─────────────────────────────
     const feedbackLevelBlock = communicationLevel <= 0
       ? `
 COMMUNICATION LEVEL: 0 — Write feedback using ONLY the simplest words. Maximum 2 short sentences per point. No jargon at all. Be very warm and encouraging. Use emojis sparingly to anchor meaning (e.g. "Well done! 👏").`
@@ -888,7 +937,6 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
         temperature: 0.7
       });
       
-      // Append learning module recommendations if available and score < 3
       let fullAdvice = advice;
       
       if (score < 3 && recommendedModules.length > 0) {
@@ -965,11 +1013,9 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
 
-      // Calculate minimum certification level from assessment scores
       const minScore = Math.min(...assessmentScores.filter(s => s.score !== null).map(s => s.score as number));
       const certLevel = minScore === 3 ? 'Advanced' : minScore === 2 ? 'Proficient' : 'Emerging';
 
-      // Category descriptions (13pt Helvetica, italicized)
       const CATEGORY_DESCRIPTIONS: Record<string, string> = {
         'Critical Thinking': 'This certification is grounded in the Partnership for 21st Century Learning Framework for 21st Century Learning, which identifies critical thinking as essential for learners to analyze and evaluate evidence, arguments, and claims, synthesize information across sources, and make reasoned judgments and decisions in complex contexts.',
         'Creativity': 'This certification is grounded in the Partnership for 21st Century Learning Framework for 21st Century Learning, which identifies creativity and innovation as essential competencies for generating new ideas, refining existing concepts, and producing meaningful solutions in academic, professional, and community contexts.',
@@ -979,7 +1025,6 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
         'Vibe Coding': 'The Vibe Coding Certification is an applied computational thinking and AI collaboration credential. While not tied to a single global standard, it synthesizes principles from the Partnership for 21st Century Learning emphasis on critical thinking, creativity, collaboration, and technology literacy, and aligns with the innovation and knowledge-economy priorities of African Union STISA-2024.'
       };
 
-      // Add watermark image as background (if exists)
       try {
         console.log('[Certificate] Loading watermark...');
         
@@ -988,22 +1033,14 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
         
         if (response && response.ok) {
           const blob = await response.blob();
-          console.log('[Certificate] Watermark fetched, size:', blob.size);
           
           const base64Image = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
-            reader.onloadend = () => {
-              const result = reader.result as string;
-              console.log('[Certificate] Base64 conversion complete');
-              resolve(result);
-            };
-            reader.onerror = () => {
-              reject(new Error('FileReader failed'));
-            };
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('FileReader failed'));
             reader.readAsDataURL(blob);
           });
           
-          // Calculate dimensions to center the watermark
           const imgWidth = 180;
           const imgHeight = 126;
           const imgX = (pageWidth - imgWidth) / 2;
@@ -1011,50 +1048,41 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
           
           doc.addImage(base64Image, 'PNG', imgX, imgY, imgWidth, imgHeight, undefined, 'NONE');
           console.log('[Certificate] ✅ Watermark added successfully!');
-        } else {
-          console.log('[Certificate] No watermark found, continuing without it');
         }
       } catch (error) {
         console.error('[Certificate] ❌ Watermark failed:', error);
       }
 
-      // Border (double border like AI Proficiency)
       doc.setLineWidth(3);
-      doc.setDrawColor(138, 43, 226); // Purple
+      doc.setDrawColor(138, 43, 226);
       doc.rect(10, 10, pageWidth - 20, pageHeight - 20);
 
       doc.setLineWidth(1);
-      doc.setDrawColor(219, 112, 147); // Pink
+      doc.setDrawColor(219, 112, 147);
       doc.rect(15, 15, pageWidth - 30, pageHeight - 30);
 
-      // ========== TITLE ==========
       doc.setFontSize(36);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(138, 43, 226); // Purple
+      doc.setTextColor(138, 43, 226);
       doc.text('AI Ready Skill Certification', pageWidth / 2, 28, { align: 'center' });
 
-      // Skill Category
       doc.setFontSize(28);
-      doc.setTextColor(219, 112, 147); // Pink
+      doc.setTextColor(219, 112, 147);
       doc.text(selectedCertification.certification_name, pageWidth / 2, 40, { align: 'center' });
 
-      // ========== LEVEL OF ACHIEVEMENT ==========
       doc.setFontSize(20);
       doc.setTextColor(80, 80, 80);
       doc.text(`Level of Achievement: ${certLevel}`, pageWidth / 2, 50, { align: 'center' });
 
-      // ========== PRESENTED TO ==========
       doc.setFontSize(14);
       doc.setTextColor(80, 80, 80);
       doc.text('This certificate is proudly presented to', pageWidth / 2, 60, { align: 'center' });
 
-      // Name
       doc.setFontSize(36);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(0, 0, 0);
       doc.text(certificateName || 'Recipient Name', pageWidth / 2, 72, { align: 'center' });
 
-      // ========== DESCRIPTION (13pt, italicized) ==========
       doc.setFontSize(13);
       doc.setFont('helvetica', 'italic');
       doc.setTextColor(60, 60, 60);
@@ -1068,29 +1096,25 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
         yPos += 4.5;
       });
 
-      // ========== ASSESSMENT COMPETENCIES ==========
       yPos += 4;
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(138, 43, 226); // Purple
+      doc.setTextColor(138, 43, 226);
       doc.text('Assessment Competencies:', 20, yPos);
 
-      // Extract first name
       const firstName = certificateName.split(' ')[0] || 'The recipient';
 
-      // Generate concise competency descriptions
       console.log('[Certificate] Generating concise competency descriptions...');
       const competencyDescriptions: { name: string; score: number; level: string; description: string }[] = [];
       
       for (const scoreData of assessmentScores) {
-        if (scoreData.score === null) continue; // Skip if no score
+        if (scoreData.score === null) continue;
         
         const level = scoreData.score === 3 ? 'Advanced' : 
                       scoreData.score === 2 ? 'Proficient' : 
                       scoreData.score === 1 ? 'Emerging' : 'No Evidence';
         
         try {
-          // Call OpenAI to generate concise description
           const conciseDescription = await chatText({ page: 'AIReadySkillsPage',
             messages: [{
               role: 'user',
@@ -1124,11 +1148,7 @@ Return ONLY the description, nothing else.`
             level,
             description: conciseDescription.trim()
           });
-          
-          console.log(`[Certificate] Generated description for ${scoreData.assessment_name}`);
         } catch (error) {
-          console.error(`[Certificate] Error generating description for ${scoreData.assessment_name}:`, error);
-          // Fallback to a simple description
           competencyDescriptions.push({
             name: scoreData.assessment_name,
             score: scoreData.score,
@@ -1138,7 +1158,6 @@ Return ONLY the description, nothing else.`
         }
       }
 
-      // Sub-category evaluations
       doc.setFontSize(11);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(40, 40, 40);
@@ -1152,13 +1171,11 @@ Return ONLY the description, nothing else.`
       competencyDescriptions.forEach((comp, index) => {
         const xPos = columnSwitch ? rightCol : leftCol;
         
-        // Assessment name and score (bold, 12pt)
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(12);
         doc.setTextColor(40, 40, 40);
         doc.text(`${comp.name}: ${comp.score}/3 - ${comp.level}`, xPos, yPos);
         
-        // Concise description (normal, 13pt)
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(13);
         doc.setTextColor(60, 60, 60);
@@ -1171,26 +1188,22 @@ Return ONLY the description, nothing else.`
           yPos += 4.5;
         });
         
-        yPos += 3; // Space before next assessment
+        yPos += 3;
         
-        // Switch columns after half the items (rounded up)
         const halfPoint = Math.ceil(competencyDescriptions.length / 2);
         if (!columnSwitch && index === halfPoint - 1) {
           columnSwitch = true;
-          // Calculate starting Y position for right column
           const descLineCount = descLines.length;
-          yPos = 82 + (descLineCount * 4.5) + 4 + 7; // Reset to top of competencies section
+          yPos = 82 + (descLineCount * 4.5) + 4 + 7;
         }
       });
 
-      // ========== ORGANIZATION (footer) ==========
       const footerY = pageHeight - 34.35;
       doc.setFontSize(36);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(138, 43, 226); // Purple
+      doc.setTextColor(138, 43, 226);
       await addBrandingToPDF({ doc, pageWidth, pageHeight, footerY, branding });
 
-      // Date
       doc.setFontSize(14);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(80, 80, 80);
@@ -1201,63 +1214,40 @@ Return ONLY the description, nothing else.`
       });
       doc.text(`Date: ${date}`, pageWidth / 2, footerY + 12, { align: 'center' });
 
-      // Save the PDF
       const filename = `AI_Ready_Skill_Certificate_${selectedCertification.certification_name.replace(/ /g, '_')}_${certificateName.replace(/ /g, '_')}.pdf`;
-      
-      // Generate PDF blob instead of immediately saving
       const pdfBlob = doc.output('blob');
       
-      // Upload to Supabase Storage
       if (user?.id) {
         try {
-          console.log('[Certificate] Uploading to Supabase Storage...');
-          
           const certNameSlug = selectedCertification.certification_name.toLowerCase().replace(/ /g, '_');
           const storagePath = `${user.id}/${certNameSlug}_certificate.pdf`;
           
-          // Upload to storage bucket 'certificates'
           const { data: uploadData, error: uploadError } = await supabase.storage
             .from('certificates')
             .upload(storagePath, pdfBlob, {
               contentType: 'application/pdf',
-              upsert: true // Overwrite if exists
+              upsert: true
             });
           
           if (uploadError) {
             console.error('[Certificate] Upload error:', uploadError);
-            console.error('[Certificate] Error message:', uploadError.message);
-            console.error('[Certificate] Error details:', JSON.stringify(uploadError, null, 2));
           } else {
-            console.log('[Certificate] Upload successful:', uploadData);
-            
-            // Get public URL
             const { data: urlData } = supabase.storage
               .from('certificates')
               .getPublicUrl(storagePath);
             
-            console.log('[Certificate] Public URL:', urlData.publicUrl);
-            
-            // Update dashboard table with certificate URL
             const activityName = `${selectedCertification.certification_name} Certification`;
-            const { error: updateError } = await supabase
+            await supabase
               .from('dashboard')
               .update({ certificate_pdf_url: urlData.publicUrl })
               .eq('user_id', user.id)
               .eq('activity', activityName);
-            
-            if (updateError) {
-              console.error('[Certificate] Dashboard update error:', updateError);
-            } else {
-              console.log('[Certificate] Dashboard updated with certificate URL');
-            }
           }
         } catch (storageError) {
           console.error('[Certificate] Storage operation failed:', storageError);
-          // Continue with download even if storage fails
         }
       }
       
-      // Download the certificate (original behavior)
       const url = URL.createObjectURL(pdfBlob);
       const link = document.createElement('a');
       link.href = url;
@@ -1265,19 +1255,13 @@ Return ONLY the description, nothing else.`
       link.click();
       URL.revokeObjectURL(url);
       
-      console.log('[Certificate] ✅ Certificate generated successfully:', filename);
       setGeneratingCertificate(false);
       
-      // Trigger confetti
       try {
         if (typeof window !== 'undefined') {
           const confettiModule = await import('canvas-confetti').catch(() => null);
           if (confettiModule?.default) {
-            confettiModule.default({
-              particleCount: 100,
-              spread: 70,
-              origin: { y: 0.6 }
-            });
+            confettiModule.default({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
           }
         }
       } catch (error) {
@@ -1290,7 +1274,10 @@ Return ONLY the description, nothing else.`
     }
   };
 
+  // ---------------------------------------------------------------------------
   // Render functions
+  // ---------------------------------------------------------------------------
+
   const renderOverview = () => {
     if (!selectedCertification) return null;
 
@@ -1306,7 +1293,6 @@ Return ONLY the description, nothing else.`
             Each certification validates your proficiency in critical competencies.
           </p>
           
-          {/* Certification Selector */}
           {certifications.length > 1 && (
             <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 max-w-2xl">
               <label className="block text-sm font-semibold mb-2">Select Certification:</label>
@@ -1458,15 +1444,11 @@ Return ONLY the description, nothing else.`
             <div className="relative">
               <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 h-full border-2 border-blue-300">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold text-lg">
-                    1
-                  </div>
+                  <div className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold text-lg">1</div>
                   <ClipboardList className="h-8 w-8 text-blue-600" />
                 </div>
                 <h3 className="text-xl font-bold text-gray-800 mb-3">Define Context</h3>
-                <p className="text-gray-700">
-                  Choose a real-world topic, setting, constraints, and audience for your assessment.
-                </p>
+                <p className="text-gray-700">Choose a real-world topic, setting, constraints, and audience for your assessment.</p>
               </div>
               <ArrowRight className="hidden md:block absolute top-1/2 -right-8 transform -translate-y-1/2 h-8 w-8 text-gray-400" />
             </div>
@@ -1474,15 +1456,11 @@ Return ONLY the description, nothing else.`
             <div className="relative">
               <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 h-full border-2 border-purple-300">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="bg-purple-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold text-lg">
-                    2
-                  </div>
+                  <div className="bg-purple-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold text-lg">2</div>
                   <Brain className="h-8 w-8 text-purple-600" />
                 </div>
                 <h3 className="text-xl font-bold text-gray-800 mb-3">Complete Assessment</h3>
-                <p className="text-gray-700">
-                  Respond to the personalized prompt demonstrating your mastery.
-                </p>
+                <p className="text-gray-700">Respond to the personalized prompt demonstrating your mastery.</p>
               </div>
               <ArrowRight className="hidden md:block absolute top-1/2 -right-8 transform -translate-y-1/2 h-8 w-8 text-gray-400" />
             </div>
@@ -1490,15 +1468,11 @@ Return ONLY the description, nothing else.`
             <div className="relative">
               <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6 h-full border-2 border-green-300">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="bg-green-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold text-lg">
-                    3
-                  </div>
+                  <div className="bg-green-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold text-lg">3</div>
                   <GraduationCap className="h-8 w-8 text-green-600" />
                 </div>
                 <h3 className="text-xl font-bold text-gray-800 mb-3">Receive Evaluation</h3>
-                <p className="text-gray-700">
-                  Get your score, evidence, and personalized advice for improvement.
-                </p>
+                <p className="text-gray-700">Get your score, evidence, and personalized advice for improvement.</p>
               </div>
             </div>
           </div>
@@ -1507,9 +1481,7 @@ Return ONLY the description, nothing else.`
         {/* Framework Section */}
         <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-2xl p-8 shadow-lg">
           <h2 className="text-2xl font-bold text-gray-800 mb-4">Backed by Global Frameworks</h2>
-          <p className="text-lg text-gray-700 mb-4">
-            Our certifications are aligned with internationally recognized standards:
-          </p>
+          <p className="text-lg text-gray-700 mb-4">Our certifications are aligned with internationally recognized standards:</p>
           <div className="flex flex-wrap gap-6 items-center justify-center">
             <div className="text-center">
               <div className="text-3xl font-bold text-purple-600">ISTE</div>
@@ -1543,9 +1515,7 @@ Return ONLY the description, nothing else.`
         </button>
 
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-8 shadow-lg">
-          <h2 className="text-3xl font-bold text-gray-800 mb-2">
-            {selectedCertification.certification_name}
-          </h2>
+          <h2 className="text-3xl font-bold text-gray-800 mb-2">{selectedCertification.certification_name}</h2>
           <p className="text-gray-600 mb-6">Select an assessment to begin</p>
 
           <div className="space-y-4">
@@ -1560,18 +1530,14 @@ Return ONLY the description, nothing else.`
                   className="w-full flex items-center justify-between p-6 bg-gray-50 rounded-xl hover:bg-gray-100 hover:shadow-md transition-all text-left"
                 >
                   <div className="flex-1">
-                    <h3 className="text-xl font-bold text-gray-800 mb-2">
-                      {assessment.assessment_name}
-                    </h3>
+                    <h3 className="text-xl font-bold text-gray-800 mb-2">{assessment.assessment_name}</h3>
                     <p className="text-gray-600">{assessment.description}</p>
                   </div>
                   <div className="flex items-center gap-4">
                     {score && score.score !== null && score.score !== undefined ? (
                       <div className="flex items-center gap-2">
                         <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                          score.score >= 2 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-yellow-100 text-yellow-800'
+                          score.score >= 2 ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
                         }`}>
                           {score.score === 0 ? 'No Evidence' : 
                            score.score === 1 ? 'Emerging' :
@@ -1606,12 +1572,9 @@ Return ONLY the description, nothing else.`
       </button>
 
       <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-8 shadow-lg">
-        <h2 className="text-3xl font-bold text-gray-800 mb-2">
-          {selectedAssessment?.assessment_name}
-        </h2>
+        <h2 className="text-3xl font-bold text-gray-800 mb-2">{selectedAssessment?.assessment_name}</h2>
         <p className="text-gray-600 mb-6">{selectedAssessment?.description}</p>
 
-        {/* Certification framing banner */}
         <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-5 mb-8 flex items-start gap-4">
           <span className="text-3xl flex-shrink-0">🎓</span>
           <div>
@@ -1637,9 +1600,7 @@ Return ONLY the description, nothing else.`
               placeholder="e.g. Solar-powered cold storage for fish, AI crop disease detection, Mobile money for market traders"
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
             />
-            <p className="text-sm text-gray-500 mt-1">
-              What real-world subject, challenge, or project will your assessment focus on?
-            </p>
+            <p className="text-sm text-gray-500 mt-1">What real-world subject, challenge, or project will your assessment focus on?</p>
           </div>
 
           <div>
@@ -1653,9 +1614,7 @@ Return ONLY the description, nothing else.`
               placeholder="e.g. Rural farming community in Bayelsa, Small market stall in Oloibiri, School in a town with unreliable electricity"
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
             />
-            <p className="text-sm text-gray-500 mt-1">
-              Where does this challenge occur? Be as specific as possible.
-            </p>
+            <p className="text-sm text-gray-500 mt-1">Where does this challenge occur? Be as specific as possible.</p>
           </div>
 
           <div>
@@ -1669,9 +1628,7 @@ Return ONLY the description, nothing else.`
               placeholder="e.g. Limited budget, no reliable internet, low digital literacy in the community, seasonal income, language barriers"
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none resize-none"
             />
-            <p className="text-sm text-gray-500 mt-1">
-              What limits what you can do? Budget, infrastructure, time, skills, access to technology?
-            </p>
+            <p className="text-sm text-gray-500 mt-1">What limits what you can do? Budget, infrastructure, time, skills, access to technology?</p>
           </div>
 
           <div>
@@ -1685,24 +1642,21 @@ Return ONLY the description, nothing else.`
               placeholder="e.g. Smallholder farmers aged 35–60, market traders with low digital skills, cooperative members, local school students"
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
             />
-            <p className="text-sm text-gray-500 mt-1">
-              Who is this for? Describe the people who will be affected or who need to understand your solution.
-            </p>
+            <p className="text-sm text-gray-500 mt-1">Who is this for? Describe the people who will be affected or who need to understand your solution.</p>
           </div>
 
-          {/* PUE / Entrepreneurial angle — new field */}
           <div className="bg-green-50 border border-green-200 rounded-xl p-4">
             <label className="block text-sm font-semibold text-green-900 mb-1">
               💼 Entrepreneurial or Productive-Use Angle <span className="text-gray-400 font-normal">(strongly recommended)</span>
             </label>
             <p className="text-xs text-green-700 mb-2">
-              How does this challenge connect to creating real economic value — earning income, reducing costs, improving a business, or making a community service more productive? The more specific you are, the stronger your assessment prompt will be.
+              How does this challenge connect to creating real economic value — earning income, reducing costs, improving a business, or making a community service more productive?
             </p>
             <textarea
               rows={3}
               value={learnerContext.entrepreneurialContext}
               onChange={(e) => setLearnerContext({...learnerContext, entrepreneurialContext: e.target.value})}
-              placeholder="e.g. I want to start a paid service diagnosing crop disease using AI so farmers in my area get faster advice. Or: My family runs a solar kiosk and I want to use better thinking to decide which services to offer. Or: I want to help the women's cooperative reduce post-harvest losses and sell at better prices."
+              placeholder="e.g. I want to start a paid service diagnosing crop disease using AI so farmers in my area get faster advice."
               className="w-full border border-green-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-400 focus:border-green-400 resize-none bg-white"
             />
           </div>
@@ -1741,11 +1695,8 @@ Return ONLY the description, nothing else.`
       </button>
 
       <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-8 shadow-lg">
-        <h2 className="text-3xl font-bold text-gray-800 mb-4">
-          {selectedAssessment?.assessment_name}
-        </h2>
+        <h2 className="text-3xl font-bold text-gray-800 mb-4">{selectedAssessment?.assessment_name}</h2>
 
-        {/* Independent work reminder */}
         <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 mb-6 flex items-start gap-3">
           <span className="text-2xl flex-shrink-0">✍️</span>
           <div>
@@ -1771,20 +1722,31 @@ Return ONLY the description, nothing else.`
           </div>
         </div>
 
+        {/* ── Prompt panel — rendered as formatted markdown ── */}
         <div className="bg-blue-50 border-2 border-blue-300 rounded-xl p-6 mb-6">
           <h3 className="text-lg font-bold text-gray-800 mb-3">Your Personalised Assessment Challenge</h3>
           {renderVoiceBar(
             `${tailoredPrompt || selectedAssessment?.certification_prompt || ''}. Scoring rubric: Level 0, No Evidence: ${selectedAssessment?.certification_level0_metric}. Level 1, Emerging: ${selectedAssessment?.certification_level1_metric}. Level 2, Proficient: ${selectedAssessment?.certification_level2_metric}. Level 3, Advanced: ${selectedAssessment?.certification_level3_metric}.`,
             'Read challenge aloud'
           )}
-          <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{tailoredPrompt || selectedAssessment?.certification_prompt}</p>
+          <div className="prose prose-sm max-w-none">
+            <ReactMarkdown components={markdownComponents}>
+              {tailoredPrompt || selectedAssessment?.certification_prompt || ''}
+            </ReactMarkdown>
+          </div>
+          {/* Closing instruction */}
+          <div className="mt-4 pt-4 border-t border-blue-200">
+            <p className="text-sm text-blue-900 font-medium leading-relaxed">
+              Answer the questions below in the <strong>'Your Response'</strong> section without AI help.
+              The more detailed you are in answering each question, the better your evaluation will be.
+              Good luck. 🍀
+            </p>
+          </div>
         </div>
 
         <div className="bg-green-50 border-2 border-green-300 rounded-xl p-6 mb-6">
           <h3 className="text-lg font-bold text-gray-800 mb-3">Scoring Rubric</h3>
-          <p className="text-sm text-gray-700 mb-3">
-            Your response will be evaluated on a 0-3 scale:
-          </p>
+          <p className="text-sm text-gray-700 mb-3">Your response will be evaluated on a 0-3 scale:</p>
           <ul className="space-y-2 text-sm">
             <li><strong>0 (No Evidence):</strong> {selectedAssessment?.certification_level0_metric}</li>
             <li><strong>1 (Emerging):</strong> {selectedAssessment?.certification_level1_metric}</li>
@@ -1800,15 +1762,14 @@ Return ONLY the description, nothing else.`
           <textarea
             value={userResponse}
             onChange={(e) => setUserResponse(e.target.value)}
-            placeholder="Write your complete, independent response here. Address each part of the challenge above. Be specific, use real examples from your context, and show your thinking clearly. The more detail you provide, the better your score can be."
-            className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none min-h-[300px]"
+            className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none min-h-[300px] font-mono text-sm"
           />
           <p className="text-sm text-gray-500 mt-2">
             This is your own work — no AI help during the attempt. Address all parts of the challenge above and connect your answer to your real-world context.
           </p>
         </div>
 
-<div className="flex justify-end mb-3">
+        <div className="flex justify-end mb-3">
           <button
             onClick={handleImproveEnglish}
             disabled={!userResponse.trim() || isImproving}
@@ -1833,10 +1794,7 @@ Return ONLY the description, nothing else.`
           className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-lg font-bold text-lg hover:from-purple-700 hover:to-pink-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {loading ? (
-            <>
-              <Loader2 className="h-5 w-5 animate-spin" />
-              Evaluating...
-            </>
+            <><Loader2 className="h-5 w-5 animate-spin" /> Evaluating...</>
           ) : (
             <><GraduationCap className="h-5 w-5" /> Submit for Certification Evaluation</>
           )}
@@ -1884,15 +1842,21 @@ Return ONLY the description, nothing else.`
             )}
           </div>
 
+          {/* ── Assessment Feedback — rendered as formatted markdown ── */}
           <div className="bg-gray-50 border-2 border-gray-300 rounded-xl p-6 mb-6">
-            <h3 className="text-lg font-bold text-gray-800 mb-3">Evaluation Evidence</h3>
+            <h3 className="text-lg font-bold text-gray-800 mb-3">Assessment Feedback</h3>
             {renderVoiceBar(
               `Your score is ${evaluationScore !== null ? ['No Evidence', 'Emerging', 'Proficient', 'Advanced'][evaluationScore] : ''}. ${evaluationEvidence}${improvementAdvice ? ' ' + improvementAdvice.replace(/\*\*/g, '').replace(/\[.*?\]\(.*?\)/g, '') : ''}`,
               'Hear feedback'
             )}
-            <div className="text-gray-700 whitespace-pre-wrap">{evaluationEvidence}</div>
+            <div className="prose prose-sm max-w-none">
+              <ReactMarkdown components={markdownComponents}>
+                {evaluationEvidence}
+              </ReactMarkdown>
+            </div>
           </div>
 
+          {/* ── Improvement / Celebratory Advice — rendered as formatted markdown ── */}
           <div className="bg-blue-50 border-2 border-blue-300 rounded-xl p-6 mb-8">
             <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
               <Brain className="h-6 w-6 text-blue-600" />
@@ -1902,8 +1866,22 @@ Return ONLY the description, nothing else.`
                   : 'Path to Advanced'
                 : 'Improvement Advice'}
             </h3>
-            <div className="text-gray-700 whitespace-pre-wrap leading-relaxed">
-              {renderAdviceWithLinks(improvementAdvice)}
+            <div className="prose prose-sm max-w-none">
+              <ReactMarkdown
+                components={{
+                  ...markdownComponents,
+                  a: ({ href, children }: any) => (
+                    <Link
+                      to={href || '#'}
+                      className="text-blue-600 hover:text-blue-800 underline font-medium"
+                    >
+                      {children}
+                    </Link>
+                  ),
+                }}
+              >
+                {improvementAdvice}
+              </ReactMarkdown>
             </div>
           </div>
 
@@ -1943,7 +1921,7 @@ Return ONLY the description, nothing else.`
               onClick={() => {
                 setViewMode('overview');
                 setSelectedAssessment(null);
-                setLearnerContext({ topic: '', setting: '', constraints: '', audience: '' });
+                setLearnerContext({ topic: '', setting: '', constraints: '', audience: '', entrepreneurialContext: '' });
                 setUserResponse('');
                 setEvaluationScore(null);
                 setImprovementAdvice('');
@@ -1980,9 +1958,7 @@ Return ONLY the description, nothing else.`
           <Award className="h-24 w-24 text-purple-600" />
         </div>
 
-        <h2 className="text-4xl font-bold text-gray-800 mb-4">
-          Congratulations! 🎉
-        </h2>
+        <h2 className="text-4xl font-bold text-gray-800 mb-4">Congratulations! 🎉</h2>
 
         <p className="text-xl text-gray-700 mb-8">
           You've successfully completed all {selectedCertification?.certification_name} assessments! 
@@ -2008,15 +1984,9 @@ Return ONLY the description, nothing else.`
           className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-8 py-4 rounded-lg font-bold text-lg hover:from-purple-700 hover:to-pink-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-3"
         >
           {generatingCertificate ? (
-            <>
-              <Loader2 className="h-6 w-6 animate-spin" />
-              Generating Certificate...
-            </>
+            <><Loader2 className="h-6 w-6 animate-spin" /> Generating Certificate...</>
           ) : (
-            <>
-              <Download className="h-6 w-6" />
-              Download Certificate
-            </>
+            <><Download className="h-6 w-6" /> Download Certificate</>
           )}
         </button>
 
@@ -2044,14 +2014,12 @@ Return ONLY the description, nothing else.`
     <AppLayout>
       <DistortedBackground imageUrl="/background_ai_ready_skills.png" />
 
-      {/* Voice fallback — shown when TTS unavailable (e.g. no network voice in Nigeria) */}
       {fallbackText && (
         <div className="fixed bottom-4 right-4 z-50 max-w-sm">
           <VoiceFallback text={fallbackText} onDismiss={clearFallback} />
         </div>
       )}
 
-      {/* Content */}
       <div className="relative z-10">
         {viewMode === 'overview' && renderOverview()}
         {viewMode === 'select-assessment' && renderSelectAssessment()}
