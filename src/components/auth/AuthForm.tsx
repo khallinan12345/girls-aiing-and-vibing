@@ -9,6 +9,8 @@ interface AuthFormProps {
   mode: 'login' | 'signup';
 }
 
+type AuthView = 'form' | 'magic-link-sent' | 'reset-sent';
+
 const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -16,8 +18,50 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [view, setView] = useState<AuthView>('form');
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
 
+  // ─── Duplicate email check ────────────────────────────────────────────────
+  const emailAlreadyExists = async (email: string): Promise<boolean> => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Email existence check failed:', error);
+      return false; // Fail open — let Supabase handle it
+    }
+    return !!data;
+  };
+
+  // ─── Forgot password ──────────────────────────────────────────────────────
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError('Please enter your email address above first.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError('');
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      });
+
+      if (error) throw error;
+
+      setView('reset-sent');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to send reset email. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── Main auth handler ────────────────────────────────────────────────────
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -25,141 +69,139 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
 
     try {
       if (mode === 'signup') {
-        console.log('Attempting signup with:', { email, username });
-        
+        // Guard: prevent duplicate accounts
+        const exists = await emailAlreadyExists(email);
+        if (exists) {
+          setError(
+            'An account with this email already exists. Please sign in, or use "Forgot password?" if you\'ve lost access.'
+          );
+          setLoading(false);
+          return;
+        }
+
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
           options: {
             data: {
               username,
-              role: 'student', // Default role for new users
-            }
-          }
+              role: 'student',
+            },
+          },
         });
 
-        console.log('Signup response:', { data, error: signUpError });
+        if (signUpError) throw signUpError;
 
-        if (signUpError) {
-          console.error('Signup error:', signUpError);
-          throw signUpError;
-        }
-        
-        // Don't create profile immediately - wait for email confirmation
-        // The profile will be created via a database trigger or in the confirmation flow
-        console.log('User signed up successfully, awaiting email confirmation');
-        
-        // Navigate to confirmation page
+        console.log('Signup successful, awaiting email confirmation:', data);
         navigate('/auth/confirmation');
       } else {
         // Login
-        console.log('Attempting login with:', { email });
-        
-        const { data: loginData, error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        
-        console.log('Login result:', { data: loginData, error: signInError });
-        
-        if (signInError) {
-          console.error('Login error:', signInError);
-          throw signInError;
-        }
+        const { data: loginData, error: signInError } =
+          await supabase.auth.signInWithPassword({ email, password });
 
-        console.log('Login successful, navigating to home...');
-        
-        // Navigate to home on successful login
+        if (signInError) throw signInError;
+
+        console.log('Login successful:', loginData);
         navigate('/home');
       }
-    } catch (error: any) {
-      console.error('Authentication error:', error);
-      
-      // Better error handling
-      let errorMessage = 'An unexpected error occurred';
-      
-      if (error?.message) {
-        errorMessage = error.message;
-      } else if (typeof error === 'string') {
-        errorMessage = error;
-      } else if (error?.error_description) {
-        errorMessage = error.error_description;
+    } catch (err: any) {
+      console.error('Authentication error:', err);
+
+      // Map Supabase error messages to user-friendly copy
+      const raw: string = err?.message || '';
+      let friendly = 'An unexpected error occurred. Please try again.';
+
+      if (raw.includes('Invalid login credentials')) {
+        friendly = 'Incorrect email or password. Please try again, or use "Forgot password?" below.';
+      } else if (raw.includes('Email not confirmed')) {
+        friendly = 'Please confirm your email before signing in. Check your inbox for the confirmation link.';
+      } else if (raw.includes('User already registered')) {
+        friendly =
+          'An account with this email already exists. Sign in instead, or reset your password if needed.';
+      } else if (raw.includes('Password should be')) {
+        friendly = 'Password must be at least 6 characters.';
+      } else if (raw) {
+        friendly = raw;
       }
-      
-      setError(errorMessage);
+
+      setError(friendly);
     } finally {
       setLoading(false);
     }
   };
 
+  // ─── OAuth ────────────────────────────────────────────────────────────────
   const handleOAuthLogin = async (provider: 'google' | 'github') => {
     try {
       setError('');
-      console.log('Attempting OAuth login with:', provider);
-      
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`
-        }
+        options: { redirectTo: `${window.location.origin}/auth/callback` },
       });
-      
-      if (error) {
-        console.error('OAuth error:', error);
-        throw error;
-      }
-    } catch (error: any) {
-      console.error('OAuth error:', error);
-      setError(error?.message || 'OAuth login failed');
+      if (error) throw error;
+    } catch (err: any) {
+      setError(err?.message || 'OAuth login failed. Please try again.');
     }
   };
 
+  // ─── Magic link ───────────────────────────────────────────────────────────
   const handleMagicLink = async () => {
+    if (!email) {
+      setError('Please enter your email address above first.');
+      return;
+    }
+
     try {
       setLoading(true);
       setError('');
-      
-      console.log('Sending magic link to:', email);
-      
+
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`
-        }
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
       });
-      
-      if (error) {
-        console.error('Magic link error:', error);
-        throw error;
-      }
-      
-      setMagicLinkSent(true);
-    } catch (error: any) {
-      console.error('Magic link error:', error);
-      setError(error?.message || 'Failed to send magic link');
+
+      if (error) throw error;
+
+      setView('magic-link-sent');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to send magic link. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (magicLinkSent) {
+  // ─── Post-submit views ────────────────────────────────────────────────────
+  if (view === 'magic-link-sent') {
     return (
       <div className="text-center">
         <h3 className="text-lg font-medium text-gray-900 mb-4">Check your email</h3>
         <p className="text-gray-600 mb-4">
-          We've sent you a magic link to {email}.<br />
+          We sent a magic link to <strong>{email}</strong>.<br />
           Click the link in the email to sign in.
         </p>
-        <Button
-          variant="outline"
-          onClick={() => setMagicLinkSent(false)}
-        >
+        <Button variant="outline" onClick={() => setView('form')}>
           Try another method
         </Button>
       </div>
     );
   }
 
+  if (view === 'reset-sent') {
+    return (
+      <div className="text-center">
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Password reset email sent</h3>
+        <p className="text-gray-600 mb-4">
+          We sent a password reset link to <strong>{email}</strong>.<br />
+          Check your inbox and follow the instructions.
+        </p>
+        <Button variant="outline" onClick={() => { setView('form'); setIsForgotPassword(false); }}>
+          Back to sign in
+        </Button>
+      </div>
+    );
+  }
+
+  // ─── Main form ────────────────────────────────────────────────────────────
   return (
     <div className="max-w-md w-full space-y-8">
       <div>
@@ -170,13 +212,10 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
           {mode === 'login' ? (
             <>
               Or{' '}
-              <a 
-                href="/signup" 
+              <a
+                href="/signup"
                 className="font-medium text-blue-600 hover:text-blue-500"
-                onClick={(e) => {
-                  e.preventDefault();
-                  navigate('/signup');
-                }}
+                onClick={(e) => { e.preventDefault(); navigate('/signup'); }}
               >
                 create a new account
               </a>
@@ -184,13 +223,10 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
           ) : (
             <>
               Already have an account?{' '}
-              <a 
-                href="/login" 
+              <a
+                href="/login"
                 className="font-medium text-blue-600 hover:text-blue-500"
-                onClick={(e) => {
-                  e.preventDefault();
-                  navigate('/login');
-                }}
+                onClick={(e) => { e.preventDefault(); navigate('/login'); }}
               >
                 Sign in
               </a>
@@ -198,13 +234,13 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
           )}
         </p>
       </div>
-      
+
       {error && (
-        <div className="bg-red-50 text-red-800 p-4 rounded-md text-sm">
-          <strong>Error:</strong> {error}
+        <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-md text-sm">
+          {error}
         </div>
       )}
-      
+
       <form className="mt-8 space-y-6" onSubmit={handleAuth}>
         {mode === 'signup' && (
           <Input
@@ -219,7 +255,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
             fullWidth
           />
         )}
-        
+
         <Input
           label="Email address"
           id="email"
@@ -231,26 +267,37 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode }) => {
           onChange={(e) => setEmail(e.target.value)}
           fullWidth
         />
-        
-        <Input
-          label="Password"
-          id="password"
-          name="password"
-          type="password"
-          autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          fullWidth
-        />
-        
+
         <div>
-          <Button
-            type="submit"
+          <Input
+            label="Password"
+            id="password"
+            name="password"
+            type="password"
+            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
             fullWidth
-            isLoading={loading}
-            size="lg"
-          >
+          />
+
+          {/* Forgot password — login mode only */}
+          {mode === 'login' && (
+            <div className="mt-2 text-right">
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                disabled={loading}
+                className="text-sm font-medium text-blue-600 hover:text-blue-500 disabled:opacity-50"
+              >
+                Forgot your password?
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <Button type="submit" fullWidth isLoading={loading} size="lg">
             {mode === 'login' ? 'Sign in' : 'Sign up'}
           </Button>
         </div>
