@@ -521,6 +521,8 @@ const HealthcareNavigatorPage: React.FC = () => {
 
   // ─── Load assessments ─────────────────────────────────────────────────────
   const loadAssessments = useCallback(async (patientId: string) => {
+
+    if (!patientId) return;
     setLoadingAssessments(true);
     try {
       const { data, error } = await supabase
