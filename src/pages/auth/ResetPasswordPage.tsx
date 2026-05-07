@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
-import Button from '../ui/Button';
-import Input from '../ui/Input';
+import Button from '../../components/ui/Button';
+import Input from '../../components/ui/Input';
 import { Eye, EyeOff } from 'lucide-react';
 
 const ResetPasswordPage: React.FC = () => {
