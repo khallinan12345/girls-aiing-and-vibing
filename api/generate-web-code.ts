@@ -81,7 +81,7 @@ async function logCost({
       model,
       input_tokens:  inputTokens,
       output_tokens: outputTokens,
-      cost_usd,
+      estimated_cost_usd: cost_usd,
       user_id:       user_id  ?? null,
       cohort:        cohort   ?? null,
       created_at:    new Date().toISOString(),

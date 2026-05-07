@@ -64,7 +64,7 @@ export function logApiCost(params: LogApiCostParams): void {
       model:         params.model,
       input_tokens:  inputTokens,
       output_tokens: outputTokens,
-      cost_usd:      cost,
+      estimated_cost_usd: cost,
       user_id:       params.user_id  ?? null,
       cohort:        params.cohort   ?? null,
       created_at:    new Date().toISOString(),
