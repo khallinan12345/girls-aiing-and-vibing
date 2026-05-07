@@ -1,23 +1,35 @@
 // api/generate-react-code.ts
 // Handles: generate | iterate | critique actions for Vite/React/Supabase projects
 //
+// PATCH 2026-05-07:
+//   1. communicationStrategy / learningStrategy removed — add ~300 tokens per call
+//      with no effect on generated code quality.
+//   2. critique uses Haiku (was Sonnet) — prompt feedback doesn't need Sonnet reasoning.
+//   3. max_tokens split by action: critique=800, generate/iterate=6000.
+//   4. projectFiles content cap tightened: 400 chars/file (was 600), max 6 files (was 8).
+//   5. Cost logging added via shared api-cost-logger.
+//
 // Request body:
 //   action: 'generate' | 'iterate' | 'critique'
 //   prompt: string
 //   taskId: string
 //   projectFiles: { path: string; content: string }[]
 //   sessionContext: { appName?, appPurpose?, audience?, tables?, components? }
+//   source?:  string  — page label for cost attribution (default: 'WebDevelopmentPage')
+//   user_id?: string
+//   cohort?:  string
 //
 // Response (generate/iterate):
 //   { files: { path, content }[], explanation: string, sessionContext? }
-//
 // Response (critique):
 //   { critique: string, feedback: string }
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-// Migrated from OpenAI → Anthropic direct fetch
-const ANTHROPIC_URL   = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+import { logApiCost } from '../lib/api-cost-logger';
+
+const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
+const MODEL_SONNET  = 'claude-sonnet-4-6';
+const MODEL_HAIKU   = 'claude-haiku-4-5-20251001'; // critique only
 
 // ─── Task context strings (guide the AI per task) ────────────────────────────
 
@@ -112,22 +124,13 @@ Add comments explaining the deployment process (Vercel recommended for Vite+Reac
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(action: string, taskId: string, sessionContext: any, communicationStrategy?: any, learningStrategy?: any): string {
+function buildSystemPrompt(action: string, taskId: string, sessionContext: any): string {
+  // communicationStrategy / learningStrategy removed — they add ~300 tokens per call
+  // with zero effect on code quality. Claude's job here is to write correct JSX.
   const taskGuidance = TASK_GUIDANCE[taskId] || '';
 
-  // Personality adaptation block — shapes explanation tone for all branches
-  const commStr = communicationStrategy ? JSON.stringify(communicationStrategy) : null;
-  const learnStr = learningStrategy ? JSON.stringify(learningStrategy) : null;
-  const personalityBlock = (commStr || learnStr)
-    ? '\n\nLEARNER PERSONALITY PROFILE — adapt your explanation and feedback to match:\n'
-      + (commStr  ? `Communication strategy: ${commStr}\n` : '')
-      + (learnStr ? `Learning strategy: ${learnStr}\n` : '')
-      + '- Match the learner\'s preferred communication style in the "explanation" field\n'
-      + '- Adjust detail level, vocabulary, and encouragement to their learning strategy\n'
-    : '';
-
   if (action === 'critique') {
-    return `You are an expert React developer and educator reviewing a student's prompt for a React/Vite/Supabase project.${personalityBlock}
+    return `You are an expert React developer and educator reviewing a student's prompt for a React/Vite/Supabase project.
 
 Evaluate the prompt on:
 1. Clarity — Is it clear what they want?
@@ -152,7 +155,7 @@ Return as JSON: { "critique": "...", "improvedPrompt": "...", "score": 2, "feedb
     ctx.components && `Planned components: ${ctx.components}`,
   ].filter(Boolean).join('\n');
 
-  return `You are an expert React/Vite/Supabase developer helping a student build a real web application.${personalityBlock}
+  return `You are an expert React/Vite/Supabase developer helping a student build a real web application.
 
 ${ctxStr ? `PROJECT CONTEXT:\n${ctxStr}\n` : ''}
 TASK GUIDANCE:\n${taskGuidance}
@@ -189,17 +192,26 @@ Only return the JSON object, no markdown backticks or extra text.`;
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { action, prompt, taskId, projectFiles, sessionContext, communicationStrategy, learningStrategy } = req.body;
+  const {
+    action, prompt, taskId, projectFiles, sessionContext,
+    source  = 'WebDevelopmentPage',
+    user_id,
+    cohort,
+  } = req.body;
+  // communicationStrategy / learningStrategy intentionally not destructured.
 
   if (!prompt?.trim()) return res.status(400).json({ error: 'Prompt is required' });
 
   try {
-    // Build the user message — include relevant existing files for context
-    const relevantFiles = (projectFiles || [])
-      .filter((f: any) => f.content?.length > 10)
-      .slice(0, 8) // cap at 8 files to stay within token limits
-      .map((f: any) => `=== ${f.path} ===\n${f.content.substring(0, 600)}`)
-      .join('\n\n');
+    // Tightened caps: 6 files max (was 8), 400 chars/file (was 600)
+    // Critique gets no file context — it's reviewing a prompt, not the codebase
+    const relevantFiles = action === 'critique'
+      ? ''
+      : (projectFiles || [])
+          .filter((f: any) => f.content?.length > 10)
+          .slice(0, 6)
+          .map((f: any) => `=== ${f.path} ===\n${f.content.substring(0, 400)}`)
+          .join('\n\n');
 
     const userMessage = action === 'critique'
       ? `Review this prompt for a React/Vite/Supabase project:\n\n"${prompt}"`
@@ -207,38 +219,53 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           relevantFiles ? `Current project files:\n${relevantFiles}` : ''
         }`;
 
-    const _apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!_apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
-    const _response = await fetch(ANTHROPIC_URL, {
+    // critique → Haiku + 800 tokens; generate/iterate → Sonnet + 6000 tokens
+    const model     = action === 'critique' ? MODEL_HAIKU  : MODEL_SONNET;
+    const maxTokens = action === 'critique' ? 800          : 6000;
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
+
+    const response = await fetch(ANTHROPIC_URL, {
       method: 'POST',
       headers: {
         'Content-Type':      'application/json',
-        'x-api-key':         _apiKey,
+        'x-api-key':         apiKey,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model:       ANTHROPIC_MODEL,
-        max_tokens:  4000,
+        model,
+        max_tokens:  maxTokens,
         temperature: 0.2,
-        system:      buildSystemPrompt(action, taskId, sessionContext, communicationStrategy, learningStrategy),
+        system:      buildSystemPrompt(action, taskId, sessionContext),
         messages:    [{ role: 'user', content: userMessage }],
       }),
     });
-    if (!_response.ok) {
-      const _err = await _response.json().catch(() => ({}));
-      throw new Error(`Anthropic API error (${_response.status}): ${(_err as any)?.error?.message || 'Unknown'}`);
-    }
-    const _completion = await _response.json();
-    const raw = _completion.content?.[0]?.text || '{}';
 
-    // Strip markdown fences if present
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(`Anthropic API error (${response.status}): ${(err as any)?.error?.message || 'Unknown'}`);
+    }
+
+    const completion = await response.json();
+
+    // Log cost — fire-and-forget
+    logApiCost({
+      source,
+      model,
+      action,
+      usage:   completion.usage,
+      user_id,
+      cohort,
+    });
+
+    const raw     = completion.content?.[0]?.text || '{}';
     const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
 
     let result: any;
     try {
       result = JSON.parse(cleaned);
     } catch {
-      // If JSON parse fails, return as explanation text
       if (action === 'critique') {
         return res.status(200).json({ critique: raw, feedback: raw });
       }
@@ -247,18 +274,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (action === 'critique') {
       return res.status(200).json({
-        critique: result.critique || result.feedback || raw,
-        feedback: result.feedback || result.critique || raw,
+        critique:       result.critique       || result.feedback || raw,
+        feedback:       result.feedback       || result.critique || raw,
         improvedPrompt: result.improvedPrompt,
-        score: result.score,
+        score:          result.score,
       });
     }
 
     return res.status(200).json({
-      files: result.files || [],
-      explanation: result.explanation || '',
+      files:          result.files          || [],
+      explanation:    result.explanation    || '',
       sessionContext: result.sessionContext,
     });
+
   } catch (err: any) {
     console.error('[generate-react-code]', err);
     return res.status(500).json({ error: err.message || 'Generation failed' });

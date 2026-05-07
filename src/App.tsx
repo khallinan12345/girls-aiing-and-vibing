@@ -19,6 +19,7 @@ import ProfileCompletionPopup from './components/profile/ProfileCompletionPopup'
 // Auth Pages
 import LoginPage from './pages/auth/LoginPage';
 import SignupPage from './pages/auth/SignupPage';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import ConfirmationPage from './pages/auth/ConfirmationPage';
 import AuthCallback from './pages/auth/AuthCallback';
 import EmailConfirmationSuccess from './pages/auth/EmailConfirmationSuccess';
@@ -175,6 +176,7 @@ const AppContent: React.FC = () => {
         {/* Auth Routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
         <Route path="/auth/confirmation" element={<ConfirmationPage />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/auth/confirmation-success" element={<EmailConfirmationSuccess />} />

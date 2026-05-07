@@ -1,14 +1,21 @@
 // api/generate-site-code.ts
 // Generates / iterates Vite + React static website code (no database).
 //
+// PATCH 2026-05-07:
+//   1. communicationStrategy / learningStrategy removed from system prompt —
+//      they add 200–400 tokens per call (×N chunks) with no effect on code quality.
+//   2. callAnthropic() now returns usage tokens for cost logging.
+//   3. logApiCost() writes to api_cost_log after every Anthropic call.
+//
 // Request body:
 //   action: 'generate' | 'iterate' | 'critique'
 //   prompt: string
 //   taskId: string
 //   projectFiles: { path: string; content: string }[]
 //   sessionContext: { siteName?, sitePurpose?, audience?, pages?, components? }
-//   communicationStrategy?: any
-//   learningStrategy?: any
+//   source?:   string   — page label for cost attribution (default: 'WebDevelopmentPage')
+//   user_id?:  string
+//   cohort?:   string
 //
 // Response (generate/iterate):
 //   { files: { path, content }[], explanation: string, sessionContext? }
@@ -31,8 +38,11 @@
 // followed by ":" or "—") so it handles the natural free-text format learners use.
 
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { logApiCost } from '../lib/api-cost-logger';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+const MODEL_SONNET      = 'claude-sonnet-4-6';
+const MODEL_HAIKU       = 'claude-haiku-4-5-20251001'; // used for critique
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -151,24 +161,16 @@ function buildSystemPrompt(
   action: string,
   taskId: string,
   sessionContext: any,
-  communicationStrategy?: any,
-  learningStrategy?: any,
   freeFormInstruction?: string,
 ): string {
-  const commStr  = communicationStrategy ? JSON.stringify(communicationStrategy) : null;
-  const learnStr = learningStrategy      ? JSON.stringify(learningStrategy)      : null;
-  const personalityBlock = (commStr || learnStr)
-    ? '\n\nLEARNER PERSONALITY PROFILE — adapt your explanation and feedback to match:\n'
-      + (commStr  ? `Communication strategy: ${commStr}\n` : '')
-      + (learnStr ? `Learning strategy: ${learnStr}\n`     : '')
-      + "- Match the learner's preferred communication style in the \"explanation\" field\n"
-      + '- Adjust detail level and encouragement to their learning strategy\n'
-    : '';
+  // communicationStrategy / learningStrategy removed — they add ~200–400 tokens
+  // per call (and per chunk in splitAndGenerate) without affecting code quality.
+  // Claude's job here is to write correct JSX, not adapt its conversational tone.
 
   const taskGuidance = freeFormInstruction || TASK_GUIDANCE[taskId] || '';
 
   if (action === 'critique') {
-    return `You are an expert React developer reviewing a student's vibe coding prompt for a Vite + React static website.${personalityBlock}
+    return `You are an expert React developer reviewing a student's vibe coding prompt for a Vite + React static website.
 
 Evaluate the prompt on:
 1. Clarity — is it clear what they want?
@@ -189,7 +191,7 @@ Return JSON only:
     ctx.components  && `Planned components: ${ctx.components}`,
   ].filter(Boolean).join('\n');
 
-  return `You are an expert Vite + React developer helping a student build a static informational website (no database).${personalityBlock}
+  return `You are an expert Vite + React developer helping a student build a static informational website (no database).
 
 ${ctxStr ? `PROJECT CONTEXT:\n${ctxStr}\n` : ''}
 TASK GUIDANCE:\n${taskGuidance}
@@ -222,7 +224,8 @@ async function callAnthropic(
   systemPrompt: string,
   userContent: any,
   maxTokens: number,
-): Promise<{ raw: string; stopReason: string }> {
+  model = MODEL_SONNET,
+): Promise<{ raw: string; stopReason: string; inputTokens: number; outputTokens: number }> {
   const response = await fetch(ANTHROPIC_API_URL, {
     method: 'POST',
     headers: {
@@ -231,7 +234,7 @@ async function callAnthropic(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model:      'claude-sonnet-4-6',
+      model,
       max_tokens: maxTokens,
       system:     systemPrompt,
       messages:   [{ role: 'user', content: userContent }],
@@ -245,8 +248,10 @@ async function callAnthropic(
 
   const completion = await response.json();
   return {
-    raw:        completion.content?.[0]?.text || '{}',
-    stopReason: completion.stop_reason || 'end_turn',
+    raw:          completion.content?.[0]?.text || '{}',
+    stopReason:   completion.stop_reason        || 'end_turn',
+    inputTokens:  completion.usage?.input_tokens  ?? 0,
+    outputTokens: completion.usage?.output_tokens ?? 0,
   };
 }
 
@@ -272,6 +277,11 @@ async function generateOnce(
   imageMediaType?: string,
   imageName?: string,
   maxTokens = 16000,
+  model = MODEL_SONNET,
+  source = 'WebDevelopmentPage',
+  action = 'generate',
+  user_id?: string,
+  cohort?: string,
 ): Promise<GenerateResult> {
   const userContent: any = imageData
     ? [
@@ -280,9 +290,12 @@ async function generateOnce(
       ]
     : userMessage;
 
-  const { raw, stopReason } = await callAnthropic(apiKey, systemPrompt, userContent, maxTokens);
+  const { raw, stopReason, inputTokens, outputTokens } = await callAnthropic(apiKey, systemPrompt, userContent, maxTokens, model);
 
-  console.log(`[generate-site-code] stop_reason=${stopReason} raw_len=${raw.length} max_tokens=${maxTokens}`);
+  // Log cost — fire-and-forget
+  logApiCost({ source, model, action, usage: { input_tokens: inputTokens, output_tokens: outputTokens }, user_id, cohort });
+
+  console.log(`[generate-site-code] stop_reason=${stopReason} raw_len=${raw.length} max_tokens=${maxTokens} in=${inputTokens} out=${outputTokens}`);
 
   if (stopReason === 'max_tokens') {
     console.error('[generate-site-code] Response truncated — JSON will be malformed.');
@@ -474,13 +487,14 @@ async function splitAndGenerate(
   action: string,
   taskId: string,
   sessionContext: any,
-  communicationStrategy: any,
-  learningStrategy: any,
   imageData?: string,
   imageMediaType?: string,
   imageName?: string,
   contentCap = 250,
   maxTokens = 16000,
+  source = 'WebDevelopmentPage',
+  user_id?: string,
+  cohort?: string,
 ): Promise<GenerateResult> {
   const chunks = splitPromptIntoChunks(prompt);
 
@@ -491,7 +505,7 @@ async function splitAndGenerate(
     console.log(`[generate-site-code] splitAndGenerate: no split detected for taskId=${taskId}, using single call`);
     const relevantFiles = buildRelevantFiles(projectFiles, taskId, contentCap);
     const userMessage = buildUserMessage(action, taskId, prompt, relevantFiles);
-    return generateOnce(apiKey, systemPrompt, userMessage, imageData, imageMediaType, imageName, maxTokens);
+    return generateOnce(apiKey, systemPrompt, userMessage, imageData, imageMediaType, imageName, maxTokens, MODEL_SONNET, source, action, user_id, cohort);
   }
 
   console.log(`[generate-site-code] splitAndGenerate: ${chunks.length} chunks for taskId=${taskId}`);
@@ -524,6 +538,12 @@ async function splitAndGenerate(
         i === 0 ? imageData       : undefined,
         i === 0 ? imageMediaType  : undefined,
         i === 0 ? imageName       : undefined,
+        maxTokens,
+        MODEL_SONNET,
+        source,
+        action,
+        user_id,
+        cohort,
       );
     } catch (err: any) {
       // A single chunk failing should not abort all subsequent chunks.
@@ -613,10 +633,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const {
-    action, prompt, taskId, projectFiles, sessionContext, communicationStrategy, learningStrategy,
+    action, prompt, taskId, projectFiles, sessionContext,
     imageData, imageMediaType, imageName,
     freeFormFeedback, freeFormInstruction,
+    source  = 'WebDevelopmentPage',
+    user_id,
+    cohort,
   } = req.body;
+  // communicationStrategy / learningStrategy intentionally not destructured —
+  // they are no longer passed to the system prompt for code generation tasks.
 
   if (!prompt?.trim()) return res.status(400).json({ error: 'Prompt is required' });
 
@@ -653,8 +678,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       action,
       taskId,
       sessionContext,
-      communicationStrategy,
-      learningStrategy,
       freeFormFeedback ? freeFormInstruction : undefined,
     );
 
@@ -662,7 +685,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (action === 'critique') {
       const relevantFiles = buildRelevantFiles(projectFiles || [], taskId, contentCap);
       const userMessage   = buildUserMessage(action, taskId, prompt.trim(), relevantFiles);
-      const { raw, stopReason } = await callAnthropic(apiKey, systemPrompt, userMessage, maxTokens);
+      const { raw, stopReason, inputTokens, outputTokens } = await callAnthropic(apiKey, systemPrompt, userMessage, maxTokens, MODEL_HAIKU);
+
+      // Critique uses Haiku — adequate for prompt feedback, ~3× cheaper than Sonnet
+      logApiCost({ source, model: MODEL_HAIKU, action: 'critique', usage: { input_tokens: inputTokens, output_tokens: outputTokens }, user_id, cohort });
 
       console.log(`[generate-site-code] critique stop_reason=${stopReason} raw_len=${raw.length}`);
 
@@ -691,13 +717,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         action,
         taskId,
         sessionContext,
-        communicationStrategy,
-        learningStrategy,
         imageData,
         imageMediaType,
         imageName,
         contentCap,
         maxTokens,
+        source,
+        user_id,
+        cohort,
       );
     } else {
       // Standard path: single call (all non-splittable tasks).
@@ -713,6 +740,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           imageMediaType,
           imageName,
           maxTokens,
+          MODEL_SONNET,
+          source,
+          action,
+          user_id,
+          cohort,
         );
       } catch (parseErr: any) {
         return res.status(500).json({ error: parseErr.message });
