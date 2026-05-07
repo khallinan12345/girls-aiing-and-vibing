@@ -561,22 +561,14 @@ const HealthcareNavigatorPage: React.FC = () => {
 
   // ─── Save assessment ──────────────────────────────────────────────────────
   const saveAssessment = async () => {
-    console.log('[saveAssessment] called');
-    console.log('[saveAssessment] user:', user);
-    console.log('[saveAssessment] selectedPatient:', selectedPatient);
-    console.log('[saveAssessment] triageResult:', triageResult);
-    if (!user || !selectedPatient || !triageResult) {
-      console.log('[saveAssessment] EARLY RETURN — missing:', { user: !!user, selectedPatient: !!selectedPatient, triageResult: !!triageResult });
-      return;
-    }
+    if (!user || !selectedPatient || !triageResult) return;
     setSavingAssessment(true);
     try {
-      console.log('[saveAssessment] About to insert...');
       const { data, error } = await supabase
         .from('health_assessments')
         .insert({
           youth_user_id: user.id,
-          patient_id: selectedPatient.id,
+          patient_id: (selectedPatient as any).patient_id ?? selectedPatient.id,
           assessment_data: assessment,
           triage_level: triageResult.level,
           ai_triage_summary: triageResult.summary,
@@ -589,14 +581,11 @@ const HealthcareNavigatorPage: React.FC = () => {
         })
         .select('id')
         .single();
-      console.log('[saveAssessment] insert result — data:', data, 'error:', error);
       if (!error && data) {
         setAssessmentSaved(true);
         await loadPatients();
-        await loadAssessments(selectedPatient.id);
+        await loadAssessments((selectedPatient as any).patient_id ?? selectedPatient.id);
       }
-    } catch (e) {
-      console.error('[saveAssessment] caught exception:', e);
     } finally { setSavingAssessment(false); }
   };
 
@@ -704,7 +693,7 @@ const HealthcareNavigatorPage: React.FC = () => {
 
   const markResolved = async (assessId: string) => {
     await supabase.from('health_assessments').update({ resolved: true }).eq('id', assessId);
-    if (selectedPatient) loadAssessments(selectedPatient.id);
+    if (selectedPatient) loadAssessments((selectedPatient as any).patient_id ?? selectedPatient.id);
     await loadPatients();
   };
 
