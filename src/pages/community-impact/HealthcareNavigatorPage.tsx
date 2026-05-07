@@ -238,6 +238,66 @@ REFERRAL NOTE — ALWAYS INCLUDE:
   Treatment given before referral | Navigator name + contact | Date and time
 `;
 
+// ─── Clinical tooltips for navigator education ───────────────────────────────
+
+const VITAL_TOOLTIPS: Record<string, string> = {
+  tempC: 'Normal axillary temp is 36.0–37.4°C. Fever ≥38°C needs investigation. In Bayelsa, fever = malaria until proven otherwise.',
+  respiratoryRate: 'Count breaths for a full 60 seconds watching the chest rise. Fast breathing in adults (≥25/min) or children may mean pneumonia.',
+  pulseRate: 'Normal adult pulse is 60–100 bpm. Above 100 at rest (tachycardia) can mean infection, dehydration, or pain.',
+  bpSystolic: 'Top number. ≥140 in adults = hypertension needing referral. ≥180 = emergency. In pregnancy, ≥140 = urgent.',
+  bpDiastolic: 'Bottom number. ≥90 in adults = hypertension. ≥120 = hypertensive crisis.',
+  weightKg: 'Weight is essential for calculating drug doses and detecting malnutrition. Weigh without shoes if possible.',
+  heightCm: 'Used with weight to assess growth in children. Measure without shoes, standing straight.',
+  muacCm: 'Mid-Upper Arm Circumference — fastest way to screen for malnutrition in children 6–59 months. <11.5cm = severe (RED). 11.5–12.4cm = moderate (YELLOW).',
+};
+
+const SYMPTOM_TOOLTIPS: Record<string, string> = {
+  fever: 'Fever in Bayelsa is malaria until an RDT proves otherwise. Ask how many days, whether it comes and goes, and if there are chills or sweating.',
+  cough: 'Cough + fast breathing + chest indrawing = pneumonia in children. For adults, ask about duration, sputum colour, and whether it is worse at night.',
+  chestIndrawing: 'Watch the lower chest during breathing. If it pulls INWARD when the child breathes IN — that is chest indrawing, a danger sign. Not the same as normal chest movement.',
+  diarrhoea: 'Ask how many stools per day and whether there is blood. Assess dehydration: sunken eyes, skin turgor (pinch belly skin — does it spring back?), can they drink?',
+  vomiting: 'Ask how many times, whether they can keep any fluid down, and if there is blood. Vomiting everything = danger sign.',
+  palmarPallor: 'Look at the palms in good light. Pale or white palms suggest anaemia, which can be caused by malaria, malnutrition, or bleeding.',
+  stiffNeck: 'Ask patient to touch chin to chest. If they cannot or it causes pain, this is a danger sign for meningitis — refer immediately.',
+  eyeJaundice: 'Look at the whites of the eyes in natural light. Yellow colouration (jaundice) indicates liver involvement — possible severe malaria, hepatitis, or sickle cell crisis.',
+  oedema: 'Press the top of the foot with your thumb for 3 seconds. If a pit (dent) remains, that is pitting oedema — sign of severe malnutrition, heart or kidney problems.',
+  malariaSuspected: 'In Oloibiri, suspect malaria for any fever, headache, body aches, or child with poor feeding. Always test with RDT before treating.',
+};
+
+// ─── Symptom probe system prompt ─────────────────────────────────────────────
+
+function buildProbePrompt(symptom: string, patient: Patient, currentAssessment: AssessmentData): string {
+  const pg = PATIENT_GROUPS[patient.patient_group];
+  const ageStr = patient.age_years != null ? `${patient.age_years} years` : patient.age_months != null ? `${patient.age_months} months` : 'age unknown';
+  return `You are coaching a Community Health Navigator in Oloibiri, Bayelsa State, Nigeria, during a live patient assessment. The navigator is sitting with the patient RIGHT NOW and needs you to guide the clinical interview.
+
+PATIENT: ${patient.patient_name}, ${pg.label} (${ageStr}), ${patient.sex || 'sex unknown'}, ${patient.village}
+CHIEF COMPLAINT: ${currentAssessment.chiefComplaint || 'not yet recorded'}
+SYMPTOM BEING PROBED: ${symptom}
+OTHER SYMPTOMS NOTED SO FAR: ${[
+    currentAssessment.fever && 'fever',
+    currentAssessment.cough && 'cough',
+    currentAssessment.diarrhoea && 'diarrhoea',
+    currentAssessment.vomiting && 'vomiting',
+    currentAssessment.chestIndrawing && 'chest indrawing',
+    currentAssessment.palmarPallor && 'palmar pallor',
+    currentAssessment.stiffNeck && 'stiff neck',
+    currentAssessment.oedema && 'oedema',
+  ].filter(Boolean).join(', ') || 'none yet'}
+
+YOUR ROLE:
+- Ask ONE focused clinical question at a time that the navigator can read directly to the patient or caregiver
+- Keep language very simple — the navigator may translate to Ijaw or Yoruba
+- After each answer, decide: do you need more information, or is this symptom fully characterised?
+- When the symptom is fully characterised, end your message with the exact phrase: "✅ This symptom is well characterised. You can move on."
+- Never ask more than 6 questions for any symptom
+- Draw on Bayelsa disease context: malaria, typhoid, pneumonia, cholera, malnutrition, oil-related illness
+
+FORMAT: One short question. After the navigator gives you the patient's answer, probe deeper or confirm characterisation. Be direct, be brief, speak as if coaching the navigator in real time.
+
+Start now with your FIRST question about: ${symptom}`;
+}
+
 // ─── Patient group config ─────────────────────────────────────────────────────
 
 const PATIENT_GROUPS: Record<PatientGroup, {
@@ -323,7 +383,13 @@ YOUR TASK — provide a structured triage response:
 3. **IMMEDIATE ACTIONS**: What the navigator must do RIGHT NOW (step by step)
 4. **REFERRAL GUIDANCE** (if RED or YELLOW): Where to go, what to say, what pre-referral actions to take
 5. **REFERRAL NOTE DRAFT**: Write a ready-to-use referral note the navigator can copy or read aloud
-6. **FOLLOW-UP**: If GREEN or YELLOW, when to reassess and what warning signs to watch for
+6. **HOME CARE PLAN** (ALWAYS include this section even for RED cases — for what to do while waiting or if referral is not possible):
+   - Safe, specific actions the patient/caregiver can take at home
+   - ORS preparation if dehydration risk; paracetamol for fever (state adult dose: 500mg–1g every 6–8 hours)
+   - Positioning, fluids, rest, nutrition advice appropriate to this case
+   - Clear warning signs: "Go to hospital immediately if…" (list 2–3 specific signs)
+   - What NOT to do (e.g. do not give aspirin to children, do not stop ORS if vomiting)
+7. **FOLLOW-UP**: When to reassess and what warning signs to watch for
 
 IMPORTANT CONSTRAINTS:
 - You are supporting a trained navigator, NOT replacing clinical judgement
@@ -410,24 +476,148 @@ const MarkdownText: React.FC<{ text: string }> = ({ text }) => (
   </div>
 );
 
+// ─── Info tooltip ─────────────────────────────────────────────────────────────
+
+const InfoTooltip: React.FC<{ id: string; text: string; open: boolean; onToggle: () => void }> = ({ id, text, open, onToggle }) => (
+  <div className="relative inline-block">
+    <button onClick={onToggle} className="ml-1.5 text-blue-400 hover:text-blue-600 focus:outline-none" aria-label="More info">
+      <Lightbulb size={13}/>
+    </button>
+    {open && (
+      <div className="absolute z-50 left-0 top-6 w-64 bg-blue-900 text-blue-50 text-xs rounded-xl px-3 py-2.5 shadow-xl leading-relaxed">
+        {text}
+        <button onClick={onToggle} className="absolute top-1.5 right-2 text-blue-300 hover:text-white"><X size={11}/></button>
+      </div>
+    )}
+  </div>
+);
+
 // ─── Checkbox row helper ──────────────────────────────────────────────────────
 
 const CheckRow: React.FC<{
   label: string; checked: boolean; onChange: (v: boolean) => void;
   danger?: boolean; subField?: React.ReactNode;
-}> = ({ label, checked, onChange, danger, subField }) => (
+  tooltip?: string; tooltipOpen?: boolean; onTooltipToggle?: () => void;
+  onProbe?: () => void; probeActive?: boolean;
+}> = ({ label, checked, onChange, danger, subField, tooltip, tooltipOpen, onTooltipToggle, onProbe, probeActive }) => (
   <div>
-    <label className={classNames('flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-colors',
+    <div className={classNames('flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-colors',
       checked
         ? danger ? 'bg-red-50 border-red-400' : 'bg-blue-50 border-blue-400'
         : 'border-gray-200 hover:border-gray-300')}>
       <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
-        className={classNames('w-4 h-4', danger ? 'accent-red-600' : 'accent-blue-600')} />
-      <span className={classNames('text-sm font-medium', checked && danger ? 'text-red-700 font-bold' : 'text-gray-800')}>
+        className={classNames('w-4 h-4 flex-shrink-0', danger ? 'accent-red-600' : 'accent-blue-600')} />
+      <span className={classNames('text-sm font-medium flex-1', checked && danger ? 'text-red-700 font-bold' : 'text-gray-800')}
+        onClick={() => onChange(!checked)}>
         {danger && checked && '⚠️ '}{label}
       </span>
-    </label>
+      {tooltip && onTooltipToggle && (
+        <InfoTooltip id={label} text={tooltip} open={!!tooltipOpen} onToggle={onTooltipToggle}/>
+      )}
+      {checked && onProbe && (
+        <button onClick={e => { e.stopPropagation(); onProbe(); }}
+          className={classNames('ml-1 px-2 py-0.5 rounded-lg text-xs font-bold border transition-colors flex-shrink-0',
+            probeActive ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-indigo-50 text-indigo-700 border-indigo-300 hover:bg-indigo-100')}>
+          {probeActive ? '🔍 Probing…' : '🔍 Probe'}
+        </button>
+      )}
+    </div>
     {checked && subField && <div className="mt-1 ml-10">{subField}</div>}
+  </div>
+);
+
+// ─── Symptom Probe Panel (modal sheet) ───────────────────────────────────────
+
+interface ProbePanelProps {
+  symptom: string;
+  messages: ChatMessage[];
+  loading: boolean;
+  done: boolean;
+  input: string;
+  onInputChange: (v: string) => void;
+  onSend: () => void;
+  onClose: () => void;
+  chatEndRef: React.RefObject<HTMLDivElement>;
+}
+
+const ProbePanel: React.FC<ProbePanelProps> = ({
+  symptom, messages, loading, done, input, onInputChange, onSend, onClose, chatEndRef
+}) => (
+  <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm px-2 pb-2">
+    <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: '85vh' }}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b bg-indigo-50 rounded-t-2xl">
+        <div>
+          <p className="text-xs font-bold text-indigo-500 uppercase tracking-wide">Clinical Interview Coach</p>
+          <p className="text-sm font-bold text-indigo-900">Probing: {symptom}</p>
+        </div>
+        <button onClick={onClose} className="p-2 rounded-xl text-indigo-400 hover:text-indigo-700 hover:bg-indigo-100">
+          <X size={18}/>
+        </button>
+      </div>
+
+      {/* Instruction bar */}
+      <div className="px-4 py-2 bg-indigo-900 text-indigo-100 text-xs flex items-start gap-2">
+        <span className="text-base">💬</span>
+        <span>Read each question aloud to the patient. Type or speak their answer, then tap Send.</span>
+      </div>
+
+      {/* Chat messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        {messages.map(msg => (
+          <div key={msg.id} className={classNames('flex items-start gap-2', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+            {msg.role === 'assistant' && (
+              <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-xs flex-shrink-0">🏥</div>
+            )}
+            <div className={classNames('max-w-[85%] rounded-2xl px-3 py-2.5 text-sm leading-relaxed',
+              msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-indigo-50 text-indigo-900 rounded-tl-sm border border-indigo-100')}>
+              {msg.role === 'assistant' && <p className="text-xs font-bold text-indigo-400 mb-1">AI Coach</p>}
+              {msg.role === 'user' && <p className="text-xs font-bold text-blue-200 mb-1">Navigator answer</p>}
+              <MarkdownText text={msg.content}/>
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex items-start gap-2">
+            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-xs">🏥</div>
+            <div className="bg-indigo-50 rounded-2xl rounded-tl-sm px-3 py-2.5">
+              <div className="flex gap-1 items-center h-4">{[0,150,300].map(d => <div key={d} className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: `${d}ms` }}/>)}</div>
+            </div>
+          </div>
+        )}
+        <div ref={chatEndRef}/>
+      </div>
+
+      {/* Done banner */}
+      {done && (
+        <div className="mx-4 mb-2 bg-green-50 border border-green-300 rounded-xl px-3 py-2.5 flex items-center gap-2 text-green-800 text-sm font-semibold">
+          <CheckCircle size={16} className="text-green-600 flex-shrink-0"/>
+          Symptom fully characterised. Tap "Move On" when ready.
+        </div>
+      )}
+
+      {/* Input */}
+      <div className="border-t px-3 py-3 rounded-b-2xl">
+        <div className="flex gap-2">
+          <input
+            value={input}
+            onChange={e => onInputChange(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onSend(); } }}
+            placeholder="Type patient's answer…"
+            disabled={loading}
+            className="flex-1 px-3 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
+          />
+          <button onClick={onSend} disabled={!input.trim() || loading}
+            className="px-3 py-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40">
+            <Send size={15}/>
+          </button>
+          <button onClick={onClose}
+            className="px-4 py-2.5 rounded-xl bg-green-600 text-white text-sm font-bold hover:bg-green-700 whitespace-nowrap">
+            Move On ✓
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 );
 
@@ -470,6 +660,18 @@ const HealthcareNavigatorPage: React.FC = () => {
   const [followUpNotes, setFollowUpNotes] = useState('');
   const [savingAssessment, setSavingAssessment] = useState(false);
   const [assessmentSaved, setAssessmentSaved] = useState(false);
+
+  // ── Symptom probe panel
+  const [probeSymptom, setProbeSymptom] = useState<string | null>(null);
+  const [probeMessages, setProbeMessages] = useState<ChatMessage[]>([]);
+  const [probeInput, setProbeInput] = useState('');
+  const [probeLoading, setProbeLoading] = useState(false);
+  const [probeDone, setProbeDone] = useState(false);
+  const [probeNotes, setProbeNotes] = useState<Record<string, string>>({});
+  const probeChatEndRef = useRef<HTMLDivElement>(null);
+
+  // ── Tooltip visibility
+  const [openTooltip, setOpenTooltip] = useState<string | null>(null);
 
   // ── Follow-up chat
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -533,6 +735,71 @@ const HealthcareNavigatorPage: React.FC = () => {
       if (!error && data) setAssessments(data as Assessment[]);
     } finally { setLoadingAssessments(false); }
   }, []);
+
+  // ─── Open symptom probe panel ─────────────────────────────────────────────
+  const openProbe = useCallback(async (symptomKey: string, symptomLabel: string) => {
+    if (!selectedPatient) return;
+    setProbeSymptom(symptomLabel);
+    setProbeMessages([]);
+    setProbeInput('');
+    setProbeDone(false);
+    setProbeLoading(true);
+    try {
+      const systemPrompt = buildProbePrompt(symptomLabel, selectedPatient, assessment);
+      const reply = await chatText({
+        page: 'HealthcareNavigatorPage',
+        messages: [{ role: 'user', content: `Start probing: ${symptomLabel}` }],
+        system: systemPrompt,
+        max_tokens: 300,
+      });
+      const isDone = reply.includes('✅ This symptom is well characterised');
+      setProbeDone(isDone);
+      setProbeMessages([{ id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() }]);
+    } finally { setProbeLoading(false); }
+  }, [selectedPatient, assessment]);
+
+  // ─── Send probe reply ─────────────────────────────────────────────────────
+  const sendProbeMessage = useCallback(async () => {
+    if (!probeInput.trim() || probeLoading || !selectedPatient || !probeSymptom) return;
+    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: probeInput.trim(), timestamp: new Date() };
+    const updated = [...probeMessages, userMsg];
+    setProbeMessages(updated);
+    setProbeInput('');
+    setProbeLoading(true);
+    try {
+      const systemPrompt = buildProbePrompt(probeSymptom, selectedPatient, assessment);
+      const reply = await chatText({
+        page: 'HealthcareNavigatorPage',
+        messages: updated.map(m => ({ role: m.role, content: m.content })),
+        system: systemPrompt,
+        max_tokens: 300,
+      });
+      const isDone = reply.includes('✅ This symptom is well characterised');
+      setProbeDone(isDone);
+      const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
+      setProbeMessages(prev => [...prev, aiMsg]);
+    } finally { setProbeLoading(false); }
+  }, [probeInput, probeLoading, probeMessages, selectedPatient, probeSymptom, assessment]);
+
+  // ─── Close probe panel and save notes ────────────────────────────────────
+  const closeProbe = useCallback(() => {
+    if (probeSymptom && probeMessages.length > 0) {
+      const summary = probeMessages.map(m => `${m.role === 'assistant' ? 'AI' : 'Navigator'}: ${m.content}`).join('\n');
+      setProbeNotes(prev => ({ ...prev, [probeSymptom]: summary }));
+      // Append to additionalNotes
+      setAssessment(prev => ({
+        ...prev,
+        additionalNotes: prev.additionalNotes
+          ? `${prev.additionalNotes}\n\n[${probeSymptom} probe]\n${summary}`
+          : `[${probeSymptom} probe]\n${summary}`,
+      }));
+    }
+    setProbeSymptom(null);
+    setProbeMessages([]);
+    setProbeDone(false);
+  }, [probeSymptom, probeMessages]);
+
+  useEffect(() => { probeChatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [probeMessages, probeLoading]);
 
   // ─── Field updater ────────────────────────────────────────────────────────
   const setField = <K extends keyof AssessmentData>(key: K, value: AssessmentData[K]) =>
@@ -994,6 +1261,22 @@ const HealthcareNavigatorPage: React.FC = () => {
     return (
       <AppLayout>
         <HealthBackground />
+
+        {/* Symptom Probe Panel Modal */}
+        {probeSymptom && (
+          <ProbePanel
+            symptom={probeSymptom}
+            messages={probeMessages}
+            loading={probeLoading}
+            done={probeDone}
+            input={probeInput}
+            onInputChange={setProbeInput}
+            onSend={sendProbeMessage}
+            onClose={closeProbe}
+            chatEndRef={probeChatEndRef}
+          />
+        )}
+
         <div className="relative z-10 max-w-2xl mx-auto px-4 py-6 space-y-4">
 
           {/* Header */}
@@ -1034,7 +1317,10 @@ const HealthcareNavigatorPage: React.FC = () => {
               {/* Temp */}
               <div className="flex items-center gap-2">
                 <div className="flex-1">
-                  <label className="text-xs font-semibold text-gray-600 block mb-1">Temperature (°C)</label>
+                  <label className="text-xs font-semibold text-gray-600 flex items-center mb-1">
+                    Temperature (°C)
+                    <InfoTooltip id="tempC" text={VITAL_TOOLTIPS.tempC} open={openTooltip === 'tempC'} onToggle={() => setOpenTooltip(openTooltip === 'tempC' ? null : 'tempC')}/>
+                  </label>
                   <input type="number" step="0.1" value={assessment.tempC} onChange={e => setField('tempC', e.target.value)} placeholder="e.g. 38.2"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                 </div>
@@ -1058,12 +1344,18 @@ const HealthcareNavigatorPage: React.FC = () => {
               {/* RR */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-gray-600 block mb-1">Respiratory Rate (breaths/min)</label>
+                  <label className="text-xs font-semibold text-gray-600 flex items-center mb-1">
+                    Respiratory Rate (breaths/min)
+                    <InfoTooltip id="rr" text={VITAL_TOOLTIPS.respiratoryRate} open={openTooltip === 'rr'} onToggle={() => setOpenTooltip(openTooltip === 'rr' ? null : 'rr')}/>
+                  </label>
                   <input type="number" value={assessment.respiratoryRate} onChange={e => setField('respiratoryRate', e.target.value)} placeholder="Count 60 sec"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-gray-600 block mb-1">Pulse (bpm)</label>
+                  <label className="text-xs font-semibold text-gray-600 flex items-center mb-1">
+                    Pulse (bpm)
+                    <InfoTooltip id="pulse" text={VITAL_TOOLTIPS.pulseRate} open={openTooltip === 'pulse'} onToggle={() => setOpenTooltip(openTooltip === 'pulse' ? null : 'pulse')}/>
+                  </label>
                   <input type="number" value={assessment.pulseRate} onChange={e => setField('pulseRate', e.target.value)} placeholder="e.g. 96"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                 </div>
@@ -1072,12 +1364,18 @@ const HealthcareNavigatorPage: React.FC = () => {
               {!isChild && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-semibold text-gray-600 block mb-1">BP Systolic (mmHg)</label>
+                    <label className="text-xs font-semibold text-gray-600 flex items-center mb-1">
+                      BP Systolic (mmHg)
+                      <InfoTooltip id="bpSys" text={VITAL_TOOLTIPS.bpSystolic} open={openTooltip === 'bpSys'} onToggle={() => setOpenTooltip(openTooltip === 'bpSys' ? null : 'bpSys')}/>
+                    </label>
                     <input type="number" value={assessment.bpSystolic} onChange={e => setField('bpSystolic', e.target.value)} placeholder="e.g. 130"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-gray-600 block mb-1">BP Diastolic (mmHg)</label>
+                    <label className="text-xs font-semibold text-gray-600 flex items-center mb-1">
+                      BP Diastolic (mmHg)
+                      <InfoTooltip id="bpDia" text={VITAL_TOOLTIPS.bpDiastolic} open={openTooltip === 'bpDia'} onToggle={() => setOpenTooltip(openTooltip === 'bpDia' ? null : 'bpDia')}/>
+                    </label>
                     <input type="number" value={assessment.bpDiastolic} onChange={e => setField('bpDiastolic', e.target.value)} placeholder="e.g. 85"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                   </div>
@@ -1131,14 +1429,23 @@ const HealthcareNavigatorPage: React.FC = () => {
 
           {/* Symptoms */}
           <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
-            <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2"><Stethoscope size={15} className="text-blue-600"/> Symptoms & Signs</h3>
+            <h3 className="text-sm font-bold text-gray-800 mb-1 flex items-center gap-2"><Stethoscope size={15} className="text-blue-600"/> Symptoms & Signs</h3>
+            <p className="text-xs text-gray-400 mb-3 flex items-center gap-1"><span className="text-indigo-500 font-bold">🔍 Probe</span> — tap after checking a symptom to interview the patient in depth</p>
             <div className="space-y-2">
               <CheckRow label="Fever" checked={assessment.fever} onChange={v => setField('fever', v)}
+                tooltip={SYMPTOM_TOOLTIPS.fever} tooltipOpen={openTooltip === 'fever'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'fever' ? null : 'fever')}
+                onProbe={() => openProbe('fever', 'Fever')} probeActive={probeSymptom === 'Fever'}
                 subField={<input type="text" value={assessment.feverDays} onChange={e => setField('feverDays', e.target.value)} placeholder="Days of fever" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>}/>
               <CheckRow label="Cough" checked={assessment.cough} onChange={v => setField('cough', v)}
+                tooltip={SYMPTOM_TOOLTIPS.cough} tooltipOpen={openTooltip === 'cough'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'cough' ? null : 'cough')}
+                onProbe={() => openProbe('cough', 'Cough')} probeActive={probeSymptom === 'Cough'}
                 subField={<input type="text" value={assessment.coughDays} onChange={e => setField('coughDays', e.target.value)} placeholder="Days of cough" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>}/>
-              <CheckRow label="Chest indrawing (lower chest pulls in when breathing)" checked={assessment.chestIndrawing} onChange={v => setField('chestIndrawing', v)} danger/>
+              <CheckRow label="Chest indrawing (lower chest pulls in when breathing)" checked={assessment.chestIndrawing} onChange={v => setField('chestIndrawing', v)} danger
+                tooltip={SYMPTOM_TOOLTIPS.chestIndrawing} tooltipOpen={openTooltip === 'chestIndrawing'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'chestIndrawing' ? null : 'chestIndrawing')}
+                onProbe={() => openProbe('chestIndrawing', 'Chest Indrawing')} probeActive={probeSymptom === 'Chest Indrawing'}/>
               <CheckRow label="Diarrhoea" checked={assessment.diarrhoea} onChange={v => setField('diarrhoea', v)}
+                tooltip={SYMPTOM_TOOLTIPS.diarrhoea} tooltipOpen={openTooltip === 'diarrhoea'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'diarrhoea' ? null : 'diarrhoea')}
+                onProbe={() => openProbe('diarrhoea', 'Diarrhoea')} probeActive={probeSymptom === 'Diarrhoea'}
                 subField={
                   <div className="space-y-1">
                     <input type="text" value={assessment.diarrhoeaDays} onChange={e => setField('diarrhoeaDays', e.target.value)} placeholder="Days of diarrhoea" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
@@ -1148,11 +1455,49 @@ const HealthcareNavigatorPage: React.FC = () => {
                     </label>
                   </div>
                 }/>
-              <CheckRow label="Vomiting" checked={assessment.vomiting} onChange={v => setField('vomiting', v)}/>
-              <CheckRow label="Palmar pallor (pale palms)" checked={assessment.palmarPallor} onChange={v => setField('palmarPallor', v)}/>
-              <CheckRow label="Stiff neck" checked={assessment.stiffNeck} onChange={v => setField('stiffNeck', v)} danger/>
-              <CheckRow label="Jaundice (yellow eyes)" checked={assessment.eyeJaundice} onChange={v => setField('eyeJaundice', v)}/>
-              <CheckRow label="Oedema (swelling — feet, legs, face)" checked={assessment.oedema} onChange={v => setField('oedema', v)}/>
+              <CheckRow label="Vomiting" checked={assessment.vomiting} onChange={v => setField('vomiting', v)}
+                tooltip={SYMPTOM_TOOLTIPS.vomiting} tooltipOpen={openTooltip === 'vomiting'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'vomiting' ? null : 'vomiting')}
+                onProbe={() => openProbe('vomiting', 'Vomiting')} probeActive={probeSymptom === 'Vomiting'}/>
+              <CheckRow label="Palmar pallor (pale palms)" checked={assessment.palmarPallor} onChange={v => setField('palmarPallor', v)}
+                tooltip={SYMPTOM_TOOLTIPS.palmarPallor} tooltipOpen={openTooltip === 'palmarPallor'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'palmarPallor' ? null : 'palmarPallor')}
+                onProbe={() => openProbe('palmarPallor', 'Palmar Pallor')} probeActive={probeSymptom === 'Palmar Pallor'}/>
+              <CheckRow label="Stiff neck" checked={assessment.stiffNeck} onChange={v => setField('stiffNeck', v)} danger
+                tooltip={SYMPTOM_TOOLTIPS.stiffNeck} tooltipOpen={openTooltip === 'stiffNeck'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'stiffNeck' ? null : 'stiffNeck')}
+                onProbe={() => openProbe('stiffNeck', 'Stiff Neck')} probeActive={probeSymptom === 'Stiff Neck'}/>
+              <CheckRow label="Jaundice (yellow eyes)" checked={assessment.eyeJaundice} onChange={v => setField('eyeJaundice', v)}
+                tooltip={SYMPTOM_TOOLTIPS.eyeJaundice} tooltipOpen={openTooltip === 'eyeJaundice'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'eyeJaundice' ? null : 'eyeJaundice')}
+                onProbe={() => openProbe('eyeJaundice', 'Jaundice')} probeActive={probeSymptom === 'Jaundice'}/>
+              <CheckRow label="Oedema (swelling — feet, legs, face)" checked={assessment.oedema} onChange={v => setField('oedema', v)}
+                tooltip={SYMPTOM_TOOLTIPS.oedema} tooltipOpen={openTooltip === 'oedema'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'oedema' ? null : 'oedema')}
+                onProbe={() => openProbe('oedema', 'Oedema')} probeActive={probeSymptom === 'Oedema'}/>
+            </div>
+          </div>
+
+          {/* Physical Observation */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <h3 className="text-sm font-bold text-gray-800 mb-1 flex items-center gap-2">👁️ Physical Observation</h3>
+            <p className="text-xs text-gray-400 mb-3">Look at the patient carefully. These observations do not require equipment.</p>
+            <div className="space-y-3">
+              {[
+                { key: 'obs_appearance', label: 'General appearance', prompt: 'Does the patient look well, unwell, or very sick? Are they alert, drowsy, or difficult to wake?' },
+                { key: 'obs_breathing', label: 'Breathing pattern', prompt: 'Is breathing fast, laboured, or noisy? Can you hear wheezing or grunting? Any nasal flaring?' },
+                { key: 'obs_skin', label: 'Skin & eyes', prompt: 'Is the skin pale, yellow, or grey? Are the eyes sunken or yellow? Any rashes or wounds?' },
+                { key: 'obs_hydration', label: 'Hydration signs', prompt: 'Pinch the skin on the belly — does it spring back immediately? Are the lips dry? Is the child crying without tears?' },
+              ].map(obs => (
+                <div key={obs.key}>
+                  <label className="text-xs font-semibold text-gray-600 flex items-center gap-1 mb-1">
+                    {obs.label}
+                    <InfoTooltip id={obs.key} text={obs.prompt} open={openTooltip === obs.key} onToggle={() => setOpenTooltip(openTooltip === obs.key ? null : obs.key)}/>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={obs.prompt}
+                    value={(assessment as any)[obs.key] || ''}
+                    onChange={e => setField(obs.key as any, e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+              ))}
             </div>
           </div>
 
