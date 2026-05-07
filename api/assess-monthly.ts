@@ -39,6 +39,7 @@ function sanitize(t: string): string {
 
 import { createClient } from "@supabase/supabase-js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { logApiCost } from "../lib/api-cost-logger";
 
 // ─── Excluded Users (admins / facilitators — never assessed or reported) ─────
 // All Kevin Hallinan and Bennywhite Davidson accounts — never assessed or shown in reports
@@ -80,7 +81,8 @@ async function callClaude(
   systemPrompt: string,
   userPrompt: string,
   maxTokens = 4000,
-  timeoutMs = 240_000  // 4 min — leaves 1 min buffer inside Vercel's 5 min limit
+  timeoutMs = 240_000,  // 4 min — leaves 1 min buffer inside Vercel's 5 min limit
+  userId?: string,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -91,15 +93,12 @@ async function callClaude(
       "Content-Type": "application/json",
       "x-api-key": process.env.ANTHROPIC_API_KEY!,
       "anthropic-version": "2023-06-01",
-      "anthropic-beta": "prompt-caching-2024-07-31",   // Optimisation 2: caching
+      "anthropic-beta": "prompt-caching-2024-07-31",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",                       // Updated to latest Sonnet
+      model: "claude-sonnet-4-6",
       max_tokens: maxTokens,
       temperature: 0.2,
-      // Optimisation 2: cache_control on system prompt — static schema block
-      // is identical for every learner so subsequent calls hit the cache
-      // at ~10% of normal input cost.
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userPrompt }],
     }),
@@ -112,14 +111,25 @@ async function callClaude(
   }
 
   const data = await response.json();
+
+  // Log cost — tagged as monthly_assessment so it's never "unknown" in the dashboard
+  logApiCost({
+    source:  "monthly_assessment",
+    model:   "claude-sonnet-4-6",
+    action:  "assess",
+    usage:   data.usage,
+    user_id: userId ?? null,
+  });
+
   return data.content[0].text;
 }
 
-// Haiku — cheap helper for short structured tasks (Optimisation 1)
+// Haiku — cheap helper for short structured tasks
 async function callClaudeHaiku(
   systemPrompt: string,
   userPrompt: string,
-  maxTokens = 400
+  maxTokens = 400,
+  userId?: string,
 ): Promise<string> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -129,7 +139,7 @@ async function callClaudeHaiku(
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",   // 3x cheaper than Sonnet
+      model: "claude-haiku-4-5-20251001",
       max_tokens: maxTokens,
       temperature: 0.2,
       system: systemPrompt,
@@ -143,6 +153,16 @@ async function callClaudeHaiku(
   }
 
   const data = await response.json();
+
+  // Log cost — tagged as monthly_assessment
+  logApiCost({
+    source:  "monthly_assessment",
+    model:   "claude-haiku-4-5-20251001",
+    action:  "assess_haiku",
+    usage:   data.usage,
+    user_id: userId ?? null,
+  });
+
   return data.content[0].text;
 }
 
@@ -617,7 +637,11 @@ async function assessMonthlySkills(
     } catch { return { messages: [] }; }
   });
 
-  const engagedSessionCount = parsedSessions.filter(
+  // Cap to most recent 30 sessions — a learner with 200 sessions doesn't need
+  // all 200 analysed. Recent activity best reflects current capability level.
+  const cappedSessions = parsedSessions.slice(-30);
+
+  const engagedSessionCount = cappedSessions.filter(
     (s) => s.messages.filter((m) => m.role === "user").length >= 1
   ).length;
 
@@ -625,32 +649,28 @@ async function assessMonthlySkills(
     return { result: null, sessionCount, engagedSessionCount: 0, status: "no_activity" };
   }
 
-  // Optimisation 4: split into two transcript views to reduce token cost.
+  // PATCH 2026-05-07: budgets tightened — previous values (40k/20k) were
+  // producing 150k+ token calls. New values target ~20k tokens per assessment.
   //
-  // scaffoldTranscript — full AI+user turns (needed for scaffolding analysis).
-  //   AI turns kept at 600 chars; learner turns at 600 chars.
-  //
-  // learnerTranscript  — learner turns ONLY for all other metrics (cognitive,
-  //   PUE, reasoning, metacog, role readiness, enterprise artifact).
-  //   Stripping AI turns removes ~50% of tokens for those fields.
+  // scaffoldTranscript — AI+user turns for scaffolding analysis only.
+  // learnerTranscript  — learner turns only for all other metrics.
 
-  const scaffoldTranscript = parsedSessions
+  const scaffoldTranscript = cappedSessions
     .map((s, i) => {
       const msgs = s.messages
         .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => `[${m.role.toUpperCase()}]: ${(m.content || "").slice(0, 600)}`)
+        .map((m) => `[${m.role.toUpperCase()}]: ${(m.content || "").slice(0, 400)}`)
         .join("\n");
       return msgs ? `--- SESSION ${i + 1} ---\n${msgs}` : null;
     })
     .filter(Boolean)
     .join("\n\n");
 
-  // Learner-only transcript for non-scaffolding metrics
-  const learnerOnlyTranscript = parsedSessions
+  const learnerOnlyTranscript = cappedSessions
     .map((s, i) => {
       const msgs = s.messages
         .filter((m) => m.role === "user")
-        .map((m) => `[LEARNER]: ${(m.content || "").slice(0, 600)}`)
+        .map((m) => `[LEARNER]: ${(m.content || "").slice(0, 400)}`)
         .join("\n");
       return msgs ? `--- SESSION ${i + 1} ---\n${msgs}` : null;
     })
@@ -661,11 +681,10 @@ async function assessMonthlySkills(
     return { result: null, sessionCount, engagedSessionCount: 0, status: "no_activity" };
   }
 
-  // Budget: 40k chars learner-only + 20k scaffold (AI turns) = ~60k total
-  // vs old 70k chars of full transcript — fewer tokens, same analytical coverage
-  // Keep most recent sessions — recent activity reflects current capability.
-  const LEARNER_BUDGET  = 40000;
-  const SCAFFOLD_BUDGET = 20000;
+  // Tightened budgets — targets ~20k tokens per assessment (was 150k+)
+  // 15k learner chars ≈ 3,750 tokens; 6k scaffold chars ≈ 1,500 tokens
+  const LEARNER_BUDGET  = 15000;
+  const SCAFFOLD_BUDGET = 6000;
 
   const truncatedLearner = learnerOnlyTranscript.length > LEARNER_BUDGET
     ? "[OLDER SESSIONS TRUNCATED — SHOWING MOST RECENT]\n\n" + learnerOnlyTranscript.slice(-LEARNER_BUDGET)
@@ -706,9 +725,9 @@ async function assessMonthlySkills(
           .join("\n");
         if (section) pgSections.push(`--- PLAYGROUND: ${(row.title || "Chat").slice(0, 60)} ---\n${section}`);
       }
-      // Budget ~10k chars for playground so curriculum remains primary
-      playgroundTranscript = pgSections.join("\n\n").slice(0, 10000);
-      if (pgSections.join("\n\n").length > 10000) playgroundTranscript += "\n[PLAYGROUND TRANSCRIPT TRUNCATED]";
+      // Tightened from 10k to 4k — playground is supplementary context
+      playgroundTranscript = pgSections.join("\n\n").slice(0, 4000);
+      if (pgSections.join("\n\n").length > 4000) playgroundTranscript += "\n[PLAYGROUND TRANSCRIPT TRUNCATED]";
     }
   } catch (pgErr: any) {
     console.warn(`   Playground fetch skipped: ${pgErr.message}`);
@@ -731,7 +750,10 @@ async function assessMonthlySkills(
     }
     const content = await callClaude(
       "Expert educational assessment analyst. Respond ONLY with valid JSON, no markdown.",
-      safePrompt
+      safePrompt,
+      4000,
+      240_000,
+      userId,
     );
 
     if (!content) throw new Error("Empty Claude response");
@@ -792,7 +814,8 @@ Average cert score: ${certData.cert_avg_score ?? "N/A"}/3
 AI Proficiency cert level: ${certData.ai_prof_cert_level}
 AI Proficiency dimension scores (0-3): Application=${certData.ai_prof_application_score ?? "N/A"}, Ethics=${certData.ai_prof_ethics_score ?? "N/A"}, Understanding=${certData.ai_prof_understanding_score ?? "N/A"}, Verification=${certData.ai_prof_verification_score ?? "N/A"}
 Be encouraging and specific. Note strongest and weakest dimensions if AI Proficiency scores exist.`,
-          150
+          150,
+          userId,
         );
       } catch { /* non-fatal */ }
     }
@@ -2528,7 +2551,9 @@ Be encouraging and specific. Note strongest and weakest dimensions if AI Profici
   const startTime = Date.now();
   console.log(`\n${"═".repeat(60)}\nORCHESTRATE — ${monthLabel}\n${"═".repeat(60)}`);
   try {
-    const userIds = await getAfricanUsersNeedingAssessment(startDate, endDate);
+    const rawUserIds = await getAfricanUsersNeedingAssessment(startDate, endDate);
+    // Deduplicate — prevents double-assessment if a userId appears twice in the query result
+    const userIds = [...new Set(rawUserIds)];
     console.log(`📋 ${userIds.length} users need assessment`);
 
     if (userIds.length === 0) {
