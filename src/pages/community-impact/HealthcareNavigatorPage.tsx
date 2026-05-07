@@ -561,9 +561,17 @@ const HealthcareNavigatorPage: React.FC = () => {
 
   // ─── Save assessment ──────────────────────────────────────────────────────
   const saveAssessment = async () => {
-    if (!user || !selectedPatient || !triageResult) return;
+    console.log('[saveAssessment] called');
+    console.log('[saveAssessment] user:', user);
+    console.log('[saveAssessment] selectedPatient:', selectedPatient);
+    console.log('[saveAssessment] triageResult:', triageResult);
+    if (!user || !selectedPatient || !triageResult) {
+      console.log('[saveAssessment] EARLY RETURN — missing:', { user: !!user, selectedPatient: !!selectedPatient, triageResult: !!triageResult });
+      return;
+    }
     setSavingAssessment(true);
     try {
+      console.log('[saveAssessment] About to insert...');
       const { data, error } = await supabase
         .from('health_assessments')
         .insert({
@@ -581,11 +589,14 @@ const HealthcareNavigatorPage: React.FC = () => {
         })
         .select('id')
         .single();
+      console.log('[saveAssessment] insert result — data:', data, 'error:', error);
       if (!error && data) {
         setAssessmentSaved(true);
         await loadPatients();
         await loadAssessments(selectedPatient.id);
       }
+    } catch (e) {
+      console.error('[saveAssessment] caught exception:', e);
     } finally { setSavingAssessment(false); }
   };
 
