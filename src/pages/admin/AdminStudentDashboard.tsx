@@ -895,7 +895,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         {/* Time frame */}
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
           {([1, 7, 30, 90] as const).map(d => (
-            <button key={d} onClick={() => { setDays(d); onRefresh(); }}
+            <button key={d} onClick={() => setDays(d)}
               className={classNames('px-3 py-1.5 rounded text-xs font-semibold transition-colors',
                 days === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
               {d === 1 ? '1d' : d === 7 ? 'Week' : d === 30 ? 'Month' : '3 Month'}
@@ -1377,6 +1377,8 @@ interface LearnerCostProps {
   costOrgId: string;
   setCostOrgId: (id: string) => void;
   loadingOrgs: boolean;
+  days: number;
+  setDays: (d: number) => void;
 }
 
 type LearnerCostSortKey = 'name' | 'cost' | 'requests' | 'free' | 'paid' | 'city';
@@ -1385,12 +1387,12 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
   learners, selectedId, setSelectedId, allCostRows, learnerRows,
   loading, loadingDetail, onRefresh,
   isPlatformAdmin, allOrgs, costOrgId, setCostOrgId, loadingOrgs,
+  days, setDays,
 }) => {
   const [sortKey, setSortKey] = useState<LearnerCostSortKey>('cost');
   const [sortAsc, setSortAsc] = useState(false);
   const [groupBy, setGroupBy] = useState<'page' | 'model' | 'provider'>('page');
   const [search, setSearch] = useState('');
-  const [learnerDays, setLearnerDays] = useState<1 | 7 | 30 | 90>(90);
 
   const costOrgJoinCodes: string[] = costOrgId && costOrgId !== '__all__'
     ? getJoinCodesForOrg(allOrgs, costOrgId)
@@ -1403,9 +1405,8 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
         return costOrgJoinCodes.includes(l.join_code_used);
       });
 
-  // Apply learnerDays time frame to allCostRows for the summary table
-  const timeCutoff = new Date(Date.now() - learnerDays * 86400000).toISOString();
-  const timeFilteredCostRows = allCostRows.filter(r => r.logged_at >= timeCutoff);
+  // allCostRows is already fetched for the selected `days` window by the parent
+  // No secondary local filter needed — just use allCostRows directly
 
   // Show org selector if platform admin hasn't picked an org yet
   if (isPlatformAdmin && !costOrgId) {
@@ -1428,7 +1429,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
   };
 
   const summaries: LearnerSummary[] = filteredLearners.map(l => {
-    const lRows = timeFilteredCostRows.filter(r => r.user_id === l.id);
+    const lRows = allCostRows.filter(r => r.user_id === l.id);
     const freeReqs = lRows.filter(r => (PRICING[r.model]?.input ?? 0) === 0).length;
     const paidReqs = lRows.filter(r => (PRICING[r.model]?.input ?? 0) > 0).length;
     const pageCounts: Record<string, number> = {};
@@ -1621,9 +1622,9 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
         {/* Time frame selector */}
         <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
           {([1, 7, 30, 90] as const).map(d => (
-            <button key={d} onClick={() => setLearnerDays(d)}
+            <button key={d} onClick={() => setDays(d)}
               className={classNames('px-3 py-1.5 rounded text-xs font-semibold transition-colors whitespace-nowrap',
-                learnerDays === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+                days === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
               {d === 1 ? '1d' : d === 7 ? 'Week' : d === 30 ? 'Month' : '3 Month'}
             </button>
           ))}
@@ -2471,6 +2472,7 @@ const AdminStudentDashboard: React.FC = () => {
             onRefresh={() => selectedId ? fetchLearnerCost(selectedId) : fetchCostData(costDays)}
             isPlatformAdmin={isPlatformAdmin} allOrgs={allOrgs}
             costOrgId={costOrgId} setCostOrgId={setCostOrgId} loadingOrgs={loadingOrgs}
+            days={costDays} setDays={(d) => { setCostDays(d); fetchCostData(d); }}
           />
         )}
 
