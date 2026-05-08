@@ -629,11 +629,10 @@ const AIPlaygroundPage: React.FC = () => {
   const QUOTA_WINDOW_MS = 3 * 60 * 60 * 1000; // 3 hours
   const [quotaUsed, setQuotaUsed]         = useState(0);
   const [quotaWindowStart, setQuotaWindowStart] = useState<Date | null>(null);
-  const [playgroundModel, setPlaygroundModel]     = useState<string>('claude-sonnet-4-6');
+  const [playgroundModel, setPlaygroundModel]     = useState<string>('claude-haiku-4-5-20251001'); // default Haiku — overridden by profile
   const [modelLoaded, setModelLoaded]             = useState(false);
   const [showReflection, setShowReflection]       = useState(false);
   const [isDragging, setIsDragging]               = useState(false);
-  const [compressing, setCompressing]             = useState(false); // rolling compression in progress
 
   // ── Session code history: accumulates ALL code blocks seen this session ────────
   const [sessionCodeHistory, setSessionCodeHistory] = useState<HistoryBlock[]>([]);
@@ -669,16 +668,24 @@ const AIPlaygroundPage: React.FC = () => {
     if (!user?.id) return;
     supabase
       .from('profiles')
-      .select('name')
+      .select('name, ai_playground_model')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
         if (data?.name) setProfileName(data.name);
-        setPlaygroundModel('claude-sonnet-4-6');
+        // Use profile model if explicitly set to Sonnet, otherwise default to Haiku
+        const profileModel = data?.ai_playground_model;
+        const model = profileModel === 'claude-sonnet-4-6'
+          ? 'claude-sonnet-4-6'
+          : 'claude-haiku-4-5-20251001';
+        setPlaygroundModel(model);
         setModelLoaded(true);
-        console.log('[Playground] model loaded: sonnet (fixed)');
+        console.log(`[Playground] model loaded: ${model} (profile: ${profileModel ?? 'not set'})`);
       })
-      .catch(() => setModelLoaded(true));
+      .catch(() => {
+        setPlaygroundModel('claude-haiku-4-5-20251001');
+        setModelLoaded(true);
+      });
   }, [user?.id]);
 
   // ── Reset on chat switch — clear history too ──────────────────────────────────
@@ -992,34 +999,6 @@ const AIPlaygroundPage: React.FC = () => {
             const afterOpen = fullText.indexOf('\n', fenceOpen + 1); // skip the opening ``` line
             codeText = fullText.slice(afterOpen + 1, fenceClose);
           }
-
-          // ── Rolling compression ──────────────────────────────────────────────
-          // If chat-stream.js compressed old messages, save the shorter history
-          // back to Supabase so the next turn starts from the compressed array.
-          if (evt.compressedMessages && activeChatId) {
-            setCompressing(true);
-            try {
-              await supabase
-                .from('ai_playground_chats')
-                .update({
-                  messages:   evt.compressedMessages,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', activeChatId);
-              setChats(prev =>
-                prev.map(c =>
-                  c.id === activeChatId
-                    ? { ...c, messages: evt.compressedMessages }
-                    : c
-                )
-              );
-            } catch (compErr) {
-              console.warn('[Playground] Failed to save compressed history:', compErr);
-            } finally {
-              setCompressing(false);
-            }
-          }
-
           break;
         }
         if (!evt.chunk) continue;
@@ -1439,14 +1418,6 @@ const AIPlaygroundPage: React.FC = () => {
           {/* Voice fallback */}
           {fallbackText && <div className="px-6 pb-2"><VoiceFallback text={fallbackText} onDismiss={clearFallback} /></div>}
 
-          {/* Compression toast */}
-          {compressing && (
-            <div className="mx-6 mb-2 flex items-center gap-2 px-3 py-2 bg-violet-50 border border-violet-200 rounded-xl text-xs text-violet-600 animate-pulse">
-              <Loader2 size={13} className="animate-spin flex-shrink-0" />
-              <span>Compressing conversation history to keep things fast…</span>
-            </div>
-          )}
-
           {/* Input area */}
           <div className="px-6 py-4 bg-white border-t border-gray-200 flex-shrink-0">
             {attachments.length > 0 && (
@@ -1478,7 +1449,14 @@ const AIPlaygroundPage: React.FC = () => {
               <textarea ref={textareaRef} value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={handleKeyDown}
                 placeholder={quotaUsed >= QUOTA_TOKENS ? 'Quota reached — please wait for reset' : 'Message Claude...'} rows={1} disabled={sending || !modelLoaded || quotaUsed >= QUOTA_TOKENS}
                 className="flex-1 resize-none outline-none text-base text-gray-800 placeholder-gray-400 bg-transparent min-h-[24px] max-h-[200px] leading-6" />
-              <span className="flex-shrink-0 text-xs mb-0.5 pr-1" style={{ color: '#4b5563', fontWeight: 500 }} title={`model: ${playgroundModel} | loaded: ${modelLoaded}`}>
+              <span
+                className={`flex-shrink-0 text-xs mb-0.5 pr-1 font-medium ${
+                  playgroundModel === 'claude-sonnet-4-6'
+                    ? 'text-violet-600'
+                    : 'text-gray-400'
+                }`}
+                title={`model: ${playgroundModel} | loaded: ${modelLoaded}`}
+              >
                 {modelLoaded ? getModelDisplayName(playgroundModel) : '…'}
               </span>
               <button onClick={toggleVoiceInput} disabled={sending}
