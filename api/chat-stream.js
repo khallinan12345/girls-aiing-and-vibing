@@ -47,12 +47,11 @@ function estimateCost(model, inputTokens, outputTokens) {
 // ─── Inline logger (Edge-safe — no Node imports) ─────────────────────────────
 // Mirrors api-logger.ts but inline because Edge runtime can't import Node modules.
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || '';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const RESEND_KEY   = process.env.RESEND_API_KEY || '';
 const ALERT_EMAIL  = process.env.TRIAGE_ALERT_EMAIL || '';
 // TEMP DIAGNOSTIC — remove after confirming
-console.log('[chat-stream] env check:', { hasSupabaseUrl: !!SUPABASE_URL, hasSupabaseKey: !!SUPABASE_KEY, urlPrefix: SUPABASE_URL.slice(0, 30) });
 async function logEvent({ function_name, event_type, severity, payload, user_id, cohort }) {
   // Write to Supabase (fire-and-forget — never blocks the stream)
   if (SUPABASE_URL && SUPABASE_KEY) {
