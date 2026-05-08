@@ -633,6 +633,7 @@ const AIPlaygroundPage: React.FC = () => {
   const [modelLoaded, setModelLoaded]             = useState(false);
   const [showReflection, setShowReflection]       = useState(false);
   const [isDragging, setIsDragging]               = useState(false);
+  const [compressing, setCompressing]             = useState(false); // rolling compression in progress
 
   // ── Session code history: accumulates ALL code blocks seen this session ────────
   const [sessionCodeHistory, setSessionCodeHistory] = useState<HistoryBlock[]>([]);
@@ -991,6 +992,34 @@ const AIPlaygroundPage: React.FC = () => {
             const afterOpen = fullText.indexOf('\n', fenceOpen + 1); // skip the opening ``` line
             codeText = fullText.slice(afterOpen + 1, fenceClose);
           }
+
+          // ── Rolling compression ──────────────────────────────────────────────
+          // If chat-stream.js compressed old messages, save the shorter history
+          // back to Supabase so the next turn starts from the compressed array.
+          if (evt.compressedMessages && activeChatId) {
+            setCompressing(true);
+            try {
+              await supabase
+                .from('ai_playground_chats')
+                .update({
+                  messages:   evt.compressedMessages,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', activeChatId);
+              setChats(prev =>
+                prev.map(c =>
+                  c.id === activeChatId
+                    ? { ...c, messages: evt.compressedMessages }
+                    : c
+                )
+              );
+            } catch (compErr) {
+              console.warn('[Playground] Failed to save compressed history:', compErr);
+            } finally {
+              setCompressing(false);
+            }
+          }
+
           break;
         }
         if (!evt.chunk) continue;
@@ -1409,6 +1438,14 @@ const AIPlaygroundPage: React.FC = () => {
 
           {/* Voice fallback */}
           {fallbackText && <div className="px-6 pb-2"><VoiceFallback text={fallbackText} onDismiss={clearFallback} /></div>}
+
+          {/* Compression toast */}
+          {compressing && (
+            <div className="mx-6 mb-2 flex items-center gap-2 px-3 py-2 bg-violet-50 border border-violet-200 rounded-xl text-xs text-violet-600 animate-pulse">
+              <Loader2 size={13} className="animate-spin flex-shrink-0" />
+              <span>Compressing conversation history to keep things fast…</span>
+            </div>
+          )}
 
           {/* Input area */}
           <div className="px-6 py-4 bg-white border-t border-gray-200 flex-shrink-0">
