@@ -1482,6 +1482,7 @@ const AIPlaygroundPage: React.FC = () => {
               const barColor = pct >= 100 ? 'bg-red-400' : pct >= 75 ? 'bg-amber-400' : 'bg-purple-400';
               return (
                 <div className="mt-2 px-1">
+                  <p className="text-xs text-gray-400 mb-1">This bar shows your AI usage. To bring AI to as many people as possible, we set a 3-hour limit on the AI Playground. You can also use <a href="https://gemini.google.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-purple-500">Google Gemini</a> or <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-purple-500">ChatGPT</a> for additional AI access.</p>
                   <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
                     <div className={`h-1.5 rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${Math.max(pct, 1)}%` }} />
                   </div>
