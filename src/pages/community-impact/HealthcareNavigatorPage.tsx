@@ -784,7 +784,7 @@ const HealthcareNavigatorPage: React.FC = () => {
   // ─── Close probe panel and save notes ────────────────────────────────────
   const closeProbe = useCallback(() => {
     if (probeSymptom && probeMessages.length > 0) {
-      const summary = probeMessages.map(m => `${m.role === 'assistant' ? 'AI' : 'Navigator'}: ${m.content}`).join('\n');
+      const summary = probeMessages.slice(-10).map(m => `${m.role === 'assistant' ? 'AI' : 'Navigator'}: ${m.content.slice(0, 500)}`).join('\n');
       setProbeNotes(prev => ({ ...prev, [probeSymptom]: summary }));
       // Append to additionalNotes
       setAssessment(prev => ({

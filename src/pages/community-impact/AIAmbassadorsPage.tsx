@@ -562,7 +562,7 @@ const AIAmbassadorsPage: React.FC = () => {
     if (isEvaluating || !selectedPersona || messages.length < 4) return;
     setIsEvaluating(true);
     const userTurns = messages.filter(m => m.role === 'user');
-    const conversation = messages.map(m => `${m.role === 'user' ? 'STUDENT (Ambassador)' : `COMMUNITY MEMBER (${selectedPersona.name})`}: ${m.content}`).join('\n\n');
+    const conversation = messages.slice(-10).map(m => `${m.role === 'user' ? 'STUDENT (Ambassador)' : `COMMUNITY MEMBER (${selectedPersona.name})`}: ${m.content.slice(0, 500)}`).join('\n\n');
     try {
       const result = await chatJSON({
         page: 'AIAmbassadorsPage',  // → Groq Llama 3.3 70B

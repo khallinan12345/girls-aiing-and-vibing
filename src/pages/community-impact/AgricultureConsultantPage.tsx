@@ -648,7 +648,7 @@ const AgricultureConsultantPage: React.FC = () => {
     if (isEvaluating || learnMessages.length < 4 || !selectedTopic) return;
     setIsEvaluating(true);
     const userTurns = learnMessages.filter(m => m.role === 'user').length;
-    const conversation = learnMessages.map(m => `${m.role === 'user' ? 'STUDENT' : 'AI TUTOR'}: ${m.content}`).join('\n\n');
+    const conversation = learnMessages.slice(-10).map(m => `${m.role === 'user' ? 'STUDENT' : 'AI TUTOR'}: ${m.content.slice(0, 500)}`).join('\n\n');
     try {
       const result = await chatJSON({
         page: 'AgricultureConsultantPage',

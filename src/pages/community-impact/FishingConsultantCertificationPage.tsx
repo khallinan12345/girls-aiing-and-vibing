@@ -517,7 +517,7 @@ const FishingConsultantCertificationPage: React.FC = () => {
     try {
       const sessionsText = portfolio.sessions.map((s, i) =>
         `--- SESSION ${i + 1}: ${s.personaName} ${s.personaEmoji} (${s.turnCount} student turns) ---\n` +
-        s.transcript.map(m => `${m.role === 'user' ? 'CONSULTANT STUDENT' : s.personaName}: ${m.content}`).join('\n\n')
+        s.transcript.slice(-10).map(m => `${m.role === 'user' ? 'CONSULTANT STUDENT' : s.personaName}: ${m.content.slice(0, 500)}`).join('\n\n')
       ).join('\n\n');
 
       const prompt = `You are evaluating a student's Fishing Consultant Certification portfolio from the ${branding.institutionName}.

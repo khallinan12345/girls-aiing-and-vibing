@@ -622,7 +622,7 @@ const EntrepreneurshipConsultantPage: React.FC = () => {
     if (isEvaluating || messages.length < 4) return;
     setIsEvaluating(true);
     const uTurns = messages.filter(m => m.role === 'user').length;
-    const conv = messages.map(m => `${m.role === 'user' ? 'ADVISOR STUDENT' : (mode === 'consult-chat' ? `ENTREPRENEUR (${selectedPersona?.name})` : 'AI TUTOR')}: ${m.content}`).join('\n\n');
+    const conv = messages.slice(-10).map(m => `${m.role === 'user' ? 'ADVISOR STUDENT' : (mode === 'consult-chat' ? `ENTREPRENEUR (${selectedPersona?.name})` : 'AI TUTOR')}: ${m.content.slice(0, 500)}`).join('\n\n');
     try {
       const result = await chatJSON({
         page: 'EntrepreneurshipConsultantPage',  // → Groq Llama 3.3 70B
