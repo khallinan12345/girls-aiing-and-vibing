@@ -1986,12 +1986,14 @@ const AdminStudentDashboard: React.FC = () => {
     setCostError(null);
     try {
       const since = new Date(Date.now() - days * 86400000).toISOString();
+      console.log(`[fetchCostData] fetching ${days} days since ${since}`);
       const { data, error } = await supabase
         .from('api_cost_log')
         .select('*')
         .gte('logged_at', since)
         .order('logged_at', { ascending: false })
         .limit(5000);
+      console.log(`[fetchCostData] result: ${data?.length ?? 0} rows, error: ${error?.message ?? 'none'}`);
       if (error) throw error;
       setCostRows(data || []);
     } catch (err: any) {
