@@ -67,7 +67,7 @@ export function logApiCost(params: LogApiCostParams): void {
       estimated_cost_usd: cost,
       user_id:       params.user_id  ?? null,
       cohort:        params.cohort   ?? null,
-      created_at:    new Date().toISOString(),
+      logged_at:     new Date().toISOString(),
     }),
   }).catch(() => {});
 }

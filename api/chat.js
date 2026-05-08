@@ -170,6 +170,7 @@ async function logCost({ page, provider, model, inputTokens, outputTokens,
         user_id:            userId || null,
         city:               city   || null,
         task_type:          taskType || null,
+        logged_at:          new Date().toISOString(),
       }),
     });
   } catch { /* never block the response for logging */ }

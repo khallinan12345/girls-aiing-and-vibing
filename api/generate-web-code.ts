@@ -84,7 +84,7 @@ async function logCost({
       estimated_cost_usd: cost_usd,
       user_id:       user_id  ?? null,
       cohort:        cohort   ?? null,
-      created_at:    new Date().toISOString(),
+      logged_at:     new Date().toISOString(),
     }),
   }).catch(() => {}); // swallow — logging must never crash the handler
 }
