@@ -337,8 +337,8 @@ const evaluateSession = async (
 ): Promise<SessionEvaluation> => {
   const stage = STAGES[stageId];
   const subcats = STAGE_RUBRICS[stageId];
-  const fullHistory = chatHistory
-    .map(m => `${m.role === 'user' ? 'STUDENT' : 'COACH'}: ${m.content}`)
+  const fullHistory = chatHistory.slice(-10)
+    .map(m => `${m.role === 'user' ? 'STUDENT' : 'COACH'}: ${m.content.slice(0, 500)}`)
     .join('\n\n');
 
   const encouragementInstruction = communicationLevel <= 0

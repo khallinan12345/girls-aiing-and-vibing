@@ -412,7 +412,7 @@ When they have a clear enough idea, encourage them to click "Create Vibe Coding 
     if (chatHistory.length < 2) return;
     setGeneratingVibePromptFromChat(true);
     try {
-      const conversation = chatHistory
+      const conversation = chatHistory.slice(-10)
         .map(m => `${m.role === 'assistant' ? 'Coach' : 'Student'}: ${m.content}`)
         .join('\n\n');
 

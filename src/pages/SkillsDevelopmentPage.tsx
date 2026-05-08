@@ -1848,7 +1848,7 @@ Respond ONLY with valid JSON:
       // Get just the last few exchanges for focused evaluation
       const recentHistory = chatHistory.slice(-6); // Last 3 exchanges
       const chatHistoryText = recentHistory.map(msg => 
-        `${msg.role === 'assistant' ? 'AI Assistant' : 'Student'}: ${msg.content}`
+        `${msg.role === 'assistant' ? 'AI Assistant' : 'Student'}: ${msg.content.slice(0, 500)}`
       ).join('\n\n');
 
       const assessmentPrompt = `You are evaluating a student's MOST RECENT response in the "${subCategory}" skill area.
@@ -2066,8 +2066,8 @@ Provide your improvement advice now:`;
         throw new Error(`No rubric dimensions found for sub-category: ${subCategory}`);
       }
 
-      const chatHistoryText = chatHistory.slice(1).map(msg => 
-        `${msg.role === 'assistant' ? 'AI Assistant' : 'Student'}: ${msg.content}`
+      const chatHistoryText = chatHistory.slice(-10).map(msg => 
+        `${msg.role === 'assistant' ? 'AI Assistant' : 'Student'}: ${msg.content.slice(0, 500)}`
       ).join('\n\n');
 
       const reflectionSection = reflectionText

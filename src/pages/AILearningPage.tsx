@@ -1635,8 +1635,8 @@ Respond ONLY with valid JSON:
     try {
       console.log('[UNESCO Comprehensive Assessment] Evaluating full conversation history');
       
-      const chatHistoryText = chatHistory.slice(1).map(msg => 
-        `${msg.role === 'assistant' ? 'AI Assistant' : 'Learner'}: ${msg.content}`
+      const chatHistoryText = chatHistory.slice(-10).map(msg => 
+        `${msg.role === 'assistant' ? 'AI Assistant' : 'Learner'}: ${msg.content.slice(0, 500)}`
       ).join('\n\n');
 
       const effectiveReflection = overrideReflection ?? reflectionText;
@@ -2321,8 +2321,8 @@ Respond ONLY with valid JSON:
       console.log('[UNESCO Assessment] Evaluating competencies across full conversation...');
       
       // Use FULL conversation history for accurate assessment (not just last few messages)
-      const conversationContext = chatHistory.slice(1).map(msg => 
-        `${msg.role === 'user' ? 'Learner' : 'AI'}: ${msg.content}`
+      const conversationContext = chatHistory.slice(-10).map(msg => 
+        `${msg.role === 'user' ? 'Learner' : 'AI'}: ${msg.content.slice(0, 500)}`
       ).join('\n\n');
 
       // Use the standardized UNESCO assessment instructions (not module-specific ones)

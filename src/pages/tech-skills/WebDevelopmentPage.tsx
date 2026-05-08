@@ -222,8 +222,8 @@ function buildEvalPrompt(
   const hasPhase3 = completedPhases.has('phase_3_refine_it');
 
   const historyText = promptHistory.length > 0
-    ? promptHistory
-        .map(e => `[${e.action.toUpperCase()}] Task:${e.taskId} | Student: ${e.prompt}${e.aiCritique ? ` | AI feedback: ${e.aiCritique}` : ''}`)
+    ? promptHistory.slice(-10)
+        .map(e => `[${e.action.toUpperCase()}] Task:${e.taskId} | Student: ${e.prompt.slice(0, 300)}${e.aiCritique ? ` | AI feedback: ${e.aiCritique.slice(0, 200)}` : ''}`)
         .join('\n')
     : 'No prompts submitted yet — student is in early planning stage.';
 
