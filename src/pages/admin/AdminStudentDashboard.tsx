@@ -531,6 +531,9 @@ const StudentLearnerTable: React.FC<{
   const [sortKey, setSortKey] = useState<'name' | 'total' | 'monthTotal' | 'certAttempted' | 'certAchieved' | 'completionRate' | 'lastActive'>('total');
   const [sortAsc, setSortAsc] = useState(false);
 
+  // Time frame filter: 7d = last week, 30d = last month, 0 = all time (since beginning)
+  const [timeFrame, setTimeFrame] = useState<7 | 30 | 0>(0);
+
   const handleActAs = async (learnerId: string) => {
     try {
       await startImpersonation(learnerId);
@@ -551,8 +554,20 @@ const StudentLearnerTable: React.FC<{
   const _now = new Date();
   const monthStartMs = Date.UTC(_now.getUTCFullYear(), _now.getUTCMonth(), 1);
 
+  // Compute time frame cutoff ms (0 = beginning = April 1, 2025 as platform start)
+  const PLATFORM_START_MS = Date.UTC(2025, 3, 1); // April 1 2025
+  const timeFrameCutoffMs = timeFrame === 0
+    ? PLATFORM_START_MS
+    : Date.now() - timeFrame * 86400000;
+
+  // Filter sessionRows by timeFrame using updated_at
+  const timeFilteredRows = sessionRows.filter(r => {
+    const ts = Date.parse(r.updated_at || '');
+    return !isNaN(ts) && ts >= timeFrameCutoffMs;
+  });
+
   const summaries: StudentSummary[] = learners.map((l) => {
-    const rows = sessionRows.filter((r) => r.user_id === l.id);
+    const rows = timeFilteredRows.filter((r) => r.user_id === l.id);
     const engaged = rows.filter((r) => isEngagedSession(r.progress));
     const currentMonthEngaged = engaged.filter((r) => {
       const ts = Date.parse(r.created_at || '');
@@ -620,16 +635,59 @@ const StudentLearnerTable: React.FC<{
     return sortAsc ? <ChevronUp size={11} className="inline ml-1 text-purple-500" /> : <ChevronDown size={11} className="inline ml-1 text-purple-500" />;
   };
 
+  // Cohort-level aggregates for summary banner
+  const cohortUsers = summaries.length;
+  const cohortActivities = summaries.reduce((s, r) => s + r.totalEngaged + r.certAttempted, 0);
+  const cohortCompleted = summaries.reduce((s, r) => s + r.byCategory['Certification'] ?? 0, 0);
+  const cohortCertsCompleted = summaries.reduce((s, r) => s + r.certAchieved, 0);
+  const cohortCertsAttempted = summaries.reduce((s, r) => s + r.certAttempted, 0);
+
+  const timeFrameLabel = timeFrame === 7 ? 'Last Week' : timeFrame === 30 ? 'Last Month' : 'Since Beginning';
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-6">
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="flex items-center gap-3 flex-wrap">
           <h2 className="text-sm font-bold text-gray-800">Student Learner Overview</h2>
           <span className="text-xs text-gray-400">{filtered.length} learners</span>
+          {/* Time frame selector */}
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 ml-2">
+            {([
+              { val: 7 as const, label: 'Last Week' },
+              { val: 30 as const, label: 'Last Month' },
+              { val: 0 as const, label: 'Since Beginning' },
+            ]).map(({ val, label }) => (
+              <button key={val} onClick={() => setTimeFrame(val)}
+                className={classNames('px-2.5 py-1 rounded text-xs font-semibold transition-colors whitespace-nowrap',
+                  timeFrame === val ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+                {label}
+              </button>
+            ))}
+          </div>
           <input type="text" placeholder="Search by name or email..." value={search} onChange={(e) => setSearch(e.target.value)}
-            className="ml-auto w-full sm:w-72 border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500" />
+            className="ml-auto w-full sm:w-60 border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500" />
         </div>
       </div>
+
+      {/* Cohort summary banner — shown after time frame selection (always visible) */}
+      {!loading && summaries.length > 0 && (
+        <div className="px-5 py-3 bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-purple-100 flex flex-wrap gap-5">
+          <div className="text-xs text-gray-600 font-semibold uppercase tracking-wide self-center">{timeFrameLabel}</div>
+          {[
+            { label: 'Learners', value: cohortUsers, icon: <Users size={13} className="text-purple-500" /> },
+            { label: 'Learning Activities', value: cohortActivities, icon: <BookOpen size={13} className="text-blue-500" /> },
+            { label: 'Activities Completed', value: cohortCompleted, icon: <CheckCircle size={13} className="text-green-500" /> },
+            { label: 'Certs Attempted', value: cohortCertsAttempted, icon: <Trophy size={13} className="text-amber-500" /> },
+            { label: 'Certs Achieved', value: cohortCertsCompleted, icon: <Award size={13} className="text-purple-600" /> },
+          ].map(({ label, value, icon }) => (
+            <div key={label} className="flex items-center gap-1.5">
+              {icon}
+              <span className="text-lg font-black text-gray-900">{value}</span>
+              <span className="text-xs text-gray-500">{label}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {loading && (
         <div className="flex items-center justify-center gap-2 py-12 text-gray-500 text-sm">
@@ -766,25 +824,42 @@ interface CostOverviewProps {
 const CostOverviewPanel: React.FC<CostOverviewProps> = ({
   rows, loading, error, days, setDays, groupBy, setGroupBy, onRefresh
 }) => {
-  const paidCost       = rows.filter(r => (PRICING[r.model]?.input ?? 0) > 0 || (PRICING[r.model]?.output ?? 0) > 0).reduce((s, r) => s + numCost(r.estimated_cost_usd), 0);
-  const totalInTok     = rows.reduce((s, r) => s + r.input_tokens, 0);
-  const totalCacheHit  = rows.reduce((s, r) => s + r.cache_hit_tokens, 0);
+  // Community selector state — all rows until user picks a community
+  const [selectedCommunity, setSelectedCommunity] = useState<string>('__all__');
+
+  // Derive list of communities (cities) from rows
+  const communities = ['__all__', ...Array.from(new Set(rows.map(r => r.city).filter(Boolean) as string[])).sort()];
+
+  const filteredRows = selectedCommunity === '__all__'
+    ? rows
+    : rows.filter(r => r.city === selectedCommunity);
+
+  const paidCost       = filteredRows.filter(r => (PRICING[r.model]?.input ?? 0) > 0 || (PRICING[r.model]?.output ?? 0) > 0).reduce((s, r) => s + numCost(r.estimated_cost_usd), 0);
+  const totalInTok     = filteredRows.reduce((s, r) => s + r.input_tokens, 0);
+  const totalCacheHit  = filteredRows.reduce((s, r) => s + r.cache_hit_tokens, 0);
   const cacheRate      = totalInTok > 0 ? (totalCacheHit / totalInTok * 100) : 0;
-  const freeCalls      = rows.filter(r => (PRICING[r.model]?.input ?? 0) === 0 && (PRICING[r.model]?.output ?? 0) === 0).length;
-  const paidCalls      = rows.filter(r => (PRICING[r.model]?.input ?? 0) > 0 || (PRICING[r.model]?.output ?? 0) > 0).length;
+  const freeCalls      = filteredRows.filter(r => (PRICING[r.model]?.input ?? 0) === 0 && (PRICING[r.model]?.output ?? 0) === 0).length;
+  const paidCalls      = filteredRows.filter(r => (PRICING[r.model]?.input ?? 0) > 0 || (PRICING[r.model]?.output ?? 0) > 0).length;
   const cacheSaved     = (totalCacheHit / 1_000_000) * 1.00 * 0.90;
 
-  const byDay = new Map<string, number>();
-  rows.forEach(r => {
+  // Daily cost breakdown by model — from April 1, 2025 onward (all data range regardless of days filter)
+  const COST_CHART_START = '2025-04-01';
+  const byDayModel = new Map<string, Map<string, number>>();
+  rows.forEach(r => {  // use unfiltered `rows` for the daily chart (April 1 start)
     const day = r.logged_at.slice(0, 10);
-    byDay.set(day, (byDay.get(day) || 0) + numCost(r.estimated_cost_usd));
+    if (day < COST_CHART_START) return;
+    if (!byDayModel.has(day)) byDayModel.set(day, new Map());
+    const dayMap = byDayModel.get(day)!;
+    dayMap.set(r.model, (dayMap.get(r.model) || 0) + numCost(r.estimated_cost_usd));
   });
-  const dayEntries = [...byDay.entries()].sort().slice(-14);
+  const dayEntries = [...byDayModel.entries()].sort();
+  const allModelsInChart = [...new Set(rows.map(r => r.model))];
+  const MODEL_BAR_COLORS = ['bg-blue-400', 'bg-emerald-400', 'bg-cyan-400', 'bg-orange-400', 'bg-pink-400', 'bg-violet-400', 'bg-amber-400'];
 
-  const grouped = groupCostRows(rows, groupBy);
+  const grouped = groupCostRows(filteredRows, groupBy);
   const maxCost = grouped[0]?.[1].cost || 1;
 
-  const allProviders = [...new Set(rows.map(r => r.provider))].sort();
+  const allProviders = [...new Set(filteredRows.map(r => r.provider))].sort();
 
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-20 text-gray-500">
@@ -801,16 +876,33 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Controls */}
       <div className="flex flex-wrap gap-3 items-center">
+        {/* Community selector */}
+        <div className="relative">
+          <select
+            value={selectedCommunity}
+            onChange={e => setSelectedCommunity(e.target.value)}
+            className="appearance-none pl-3 pr-8 py-1.5 text-xs font-semibold border border-gray-300 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+            <option value="__all__">All Communities</option>
+            {communities.filter(c => c !== '__all__').map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        </div>
+        {/* Time frame */}
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          {([7, 30, 90] as const).map(d => (
-            <button key={d} onClick={() => setDays(d)}
+          {([1, 7, 30, 90] as const).map(d => (
+            <button key={d} onClick={() => { setDays(d); onRefresh(); }}
               className={classNames('px-3 py-1.5 rounded text-xs font-semibold transition-colors',
                 days === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
-              {d}d
+              {d === 1 ? '1d' : d === 7 ? 'Week' : d === 30 ? 'Month' : '3 Month'}
             </button>
           ))}
         </div>
+        {/* Group by */}
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
           {(['page', 'model', 'provider'] as const).map(g => (
             <button key={g} onClick={() => setGroupBy(g)}
@@ -827,7 +919,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Paid API cost', value: `$${paidCost.toFixed(2)}`, sub: `last ${days} days`, icon: <DollarSign size={16} className="text-blue-500" />, bg: 'bg-blue-50' },
+          { label: 'Paid API cost', value: `$${paidCost.toFixed(2)}`, sub: `last ${days === 1 ? '24h' : days + ' days'}`, icon: <DollarSign size={16} className="text-blue-500" />, bg: 'bg-blue-50' },
           { label: 'Cache savings',  value: `$${cacheSaved.toFixed(2)}`, sub: `${cacheRate.toFixed(0)}% hit rate`, icon: <Zap size={16} className="text-amber-500" />, bg: 'bg-amber-50' },
           { label: 'Free-tier reqs', value: freeCalls.toLocaleString(), sub: '$0 — free providers', icon: <TrendingUp size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
           { label: 'Paid reqs', value: paidCalls.toLocaleString(), sub: `${fmtTokens(totalInTok)} tokens in`, icon: <Activity size={16} className="text-purple-500" />, bg: 'bg-purple-50' },
@@ -847,7 +939,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
           <DollarSign size={14} className="text-gray-400" />
           <span className="text-sm font-bold text-gray-700">Cost by {groupBy}</span>
-          <span className="text-xs text-gray-400 ml-auto">{rows.length} requests</span>
+          <span className="text-xs text-gray-400 ml-auto">{filteredRows.length} requests</span>
         </div>
         {grouped.length === 0 ? (
           <div className="py-12 text-center text-sm text-gray-400">No cost data yet</div>
@@ -876,23 +968,39 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         )}
       </div>
 
+      {/* Daily cost plot — all models, from April 1, 2025 */}
       {dayEntries.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100">
-            <span className="text-sm font-bold text-gray-700">Daily cost trend</span>
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
+            <span className="text-sm font-bold text-gray-700">Daily cost — all models (from Apr 1)</span>
+            <div className="flex flex-wrap gap-2">
+              {allModelsInChart.map((m, i) => (
+                <span key={m} className="flex items-center gap-1 text-[10px] text-gray-500">
+                  <span className={classNames('w-2.5 h-2.5 rounded-sm', MODEL_BAR_COLORS[i % MODEL_BAR_COLORS.length])} />
+                  {modelLabel(m)}
+                </span>
+              ))}
+            </div>
           </div>
-          <div className="p-5">
-            <div className="flex items-end gap-1.5 h-24">
-              {dayEntries.map(([day, cost]) => {
-                const maxDay = Math.max(...dayEntries.map(([, c]) => c), 0.001);
-                const pct = Math.max(cost / maxDay * 100, 2);
+          <div className="p-5 overflow-x-auto">
+            <div className="flex items-end gap-1 h-28" style={{ minWidth: `${dayEntries.length * 22}px` }}>
+              {dayEntries.map(([day, dayMap]) => {
+                const dayTotal = [...dayMap.values()].reduce((s, n) => s + n, 0);
+                const maxDayTotal = Math.max(...dayEntries.map(([, dm]) => [...dm.values()].reduce((s, n) => s + n, 0)), 0.0001);
                 return (
-                  <div key={day} className="flex-1 flex flex-col items-center gap-1 group relative">
+                  <div key={day} className="flex-shrink-0 w-5 flex flex-col items-center gap-1 group relative">
                     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                      {day}: {fmtCost(cost)}
+                      {day}: {fmtCost(dayTotal)}
                     </div>
-                    <div className="w-full bg-blue-400 rounded-t transition-all" style={{ height: `${pct}%` }} />
-                    <div className="text-[9px] text-gray-400 rotate-45 origin-left mt-1 whitespace-nowrap">{day.slice(5)}</div>
+                    <div className="w-full flex flex-col-reverse rounded-t overflow-hidden" style={{ height: `${Math.max((dayTotal / maxDayTotal) * 100, 2)}%` }}>
+                      {allModelsInChart.map((m, i) => {
+                        const cost = dayMap.get(m) || 0;
+                        if (cost === 0) return null;
+                        const segPct = dayTotal > 0 ? (cost / dayTotal * 100) : 0;
+                        return <div key={m} className={MODEL_BAR_COLORS[i % MODEL_BAR_COLORS.length]} style={{ height: `${segPct}%` }} />;
+                      })}
+                    </div>
+                    <div className="text-[8px] text-gray-400 rotate-45 origin-left mt-1 whitespace-nowrap">{day.slice(5)}</div>
                   </div>
                 );
               })}
@@ -903,7 +1011,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         {allProviders.map(provider => {
-          const pRows = rows.filter(r => r.provider === provider);
+          const pRows = filteredRows.filter(r => r.provider === provider);
           const pCost = pRows.reduce((s, r) => s + numCost(r.estimated_cost_usd), 0);
           const pInTok = pRows.reduce((s, r) => s + r.input_tokens, 0);
           const pOutTok = pRows.reduce((s, r) => s + r.output_tokens, 0);
@@ -1045,11 +1153,11 @@ const ModelOverviewPanel: React.FC<{
     <div className="space-y-6">
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          {([7, 30, 90] as const).map(d => (
+          {([1, 7, 30, 90] as const).map(d => (
             <button key={d} onClick={() => setDays(d)}
               className={classNames('px-3 py-1.5 rounded text-xs font-semibold transition-colors',
                 days === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
-              {d}d
+              {d === 1 ? '1d' : d === 7 ? 'Week' : d === 30 ? 'Month' : '3 Month'}
             </button>
           ))}
         </div>
@@ -1060,7 +1168,7 @@ const ModelOverviewPanel: React.FC<{
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Total requests', value: totalRequests.toLocaleString(), sub: `last ${days} days`, icon: <Activity size={16} className="text-purple-500" />, bg: 'bg-purple-50' },
+          { label: 'Total sessions', value: totalRequests.toLocaleString(), sub: `last ${days === 1 ? '24h' : days + ' days'}`, icon: <Activity size={16} className="text-purple-500" />, bg: 'bg-purple-50' },
           { label: 'Active models', value: modelStats.length, sub: 'unique models', icon: <Server size={16} className="text-blue-500" />, bg: 'bg-blue-50' },
           { label: 'Free-tier %', value: `${freePct.toFixed(0)}%`, sub: `${freeRequests.toLocaleString()} free reqs`, icon: <TrendingUp size={16} className="text-emerald-500" />, bg: 'bg-emerald-50' },
           { label: 'Total cost', value: `$${totalCost.toFixed(2)}`, sub: 'all providers', icon: <DollarSign size={16} className="text-amber-500" />, bg: 'bg-amber-50' },
@@ -1092,11 +1200,11 @@ const ModelOverviewPanel: React.FC<{
                   {([
                     { key: 'model' as const, label: 'Model' },
                     { key: 'provider' as const, label: 'Provider' },
-                    { key: 'requests' as const, label: 'Requests' },
+                    { key: 'requests' as const, label: 'Sessions' },
                     { key: 'users' as const, label: 'Users' },
                     { key: 'inTok' as const, label: 'Input Tokens' },
                     { key: 'outTok' as const, label: 'Output Tokens' },
-                    { key: 'cost' as const, label: 'Cost' },
+                    { key: 'cost' as const, label: 'Est. Cost' },
                   ]).map(({ key, label }) => (
                     <th key={key} onClick={() => toggleSort(key)}
                       className="px-4 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-purple-700 select-none">
@@ -1282,6 +1390,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
   const [sortAsc, setSortAsc] = useState(false);
   const [groupBy, setGroupBy] = useState<'page' | 'model' | 'provider'>('page');
   const [search, setSearch] = useState('');
+  const [learnerDays, setLearnerDays] = useState<1 | 7 | 30 | 90>(90);
 
   const costOrgJoinCodes: string[] = costOrgId && costOrgId !== '__all__'
     ? getJoinCodesForOrg(allOrgs, costOrgId)
@@ -1293,6 +1402,10 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
         if (!l.join_code_used) return false;
         return costOrgJoinCodes.includes(l.join_code_used);
       });
+
+  // Apply learnerDays time frame to allCostRows for the summary table
+  const timeCutoff = new Date(Date.now() - learnerDays * 86400000).toISOString();
+  const timeFilteredCostRows = allCostRows.filter(r => r.logged_at >= timeCutoff);
 
   // Show org selector if platform admin hasn't picked an org yet
   if (isPlatformAdmin && !costOrgId) {
@@ -1315,7 +1428,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
   };
 
   const summaries: LearnerSummary[] = filteredLearners.map(l => {
-    const lRows = allCostRows.filter(r => r.user_id === l.id);
+    const lRows = timeFilteredCostRows.filter(r => r.user_id === l.id);
     const freeReqs = lRows.filter(r => (PRICING[r.model]?.input ?? 0) === 0).length;
     const paidReqs = lRows.filter(r => (PRICING[r.model]?.input ?? 0) > 0).length;
     const pageCounts: Record<string, number> = {};
@@ -1505,6 +1618,16 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
       )}
 
       <div className="flex items-center gap-3 flex-wrap">
+        {/* Time frame selector */}
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+          {([1, 7, 30, 90] as const).map(d => (
+            <button key={d} onClick={() => setLearnerDays(d)}
+              className={classNames('px-3 py-1.5 rounded text-xs font-semibold transition-colors whitespace-nowrap',
+                learnerDays === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+              {d === 1 ? '1d' : d === 7 ? 'Week' : d === 30 ? 'Month' : '3 Month'}
+            </button>
+          ))}
+        </div>
         <input type="text" placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)}
           className="flex-1 min-w-48 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500" />
         <button onClick={onRefresh} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
@@ -1793,7 +1916,9 @@ const AdminStudentDashboard: React.FC = () => {
   const isPlatformAdmin = ADMIN_IDS.has(user?.id ?? '') || userRole === 'platform_administrator';
   const isLeader = userRole === 'leader' && !isPlatformAdmin;
 
-  const [activeTab, setActiveTab] = useState<'student' | 'platform-global' | 'model-overview' | 'cost-overview' | 'cost-learner'>('student');
+  const [activeTab, setActiveTab] = useState<'student' | 'platform-global' | 'model-overview' | 'cost-overview' | 'cost-learner'>(
+    ADMIN_IDS.has(user?.id ?? '') ? 'platform-global' : 'student'
+  );
 
   const [learners, setLearners] = useState<Learner[]>([]);
   const [loadingLearners, setLoadingLearners] = useState(true);
@@ -2220,8 +2345,8 @@ const AdminStudentDashboard: React.FC = () => {
 
         <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit flex-wrap">
           {([
+            { id: 'platform-global' as const, label: 'Global Overview', icon: <Globe size={14} />, show: isPlatformAdmin },
             { id: 'student' as const, label: 'Student Activity', icon: <BookOpen size={14} />, show: true },
-            { id: 'platform-global' as const, label: 'Global Overview', icon: <Users size={14} />, show: isPlatformAdmin },
             { id: 'model-overview' as const, label: 'Model Overview', icon: <Server size={14} />, show: isPlatformAdmin },
             { id: 'cost-overview' as const, label: 'Cost Overview', icon: <DollarSign size={14} />, show: isPlatformAdmin },
             { id: 'cost-learner' as const, label: 'Per-Learner Cost', icon: <Activity size={14} />, show: isPlatformAdmin },
