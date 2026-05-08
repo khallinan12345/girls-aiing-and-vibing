@@ -749,7 +749,7 @@ const AIPlaygroundPage: React.FC = () => {
       const total = (data ?? []).reduce(
         (sum, r) => sum + (r.input_tokens ?? 0) + (r.output_tokens ?? 0), 0
       );
-      setQuotaUsed(total);
+      setQuotaUsed(prev => Math.max(prev, total));
       setQuotaWindowStart(data?.[0]?.logged_at ? new Date(data[0].logged_at) : null);
     } catch (e) {
       console.warn('[Playground] quota fetch failed:', e);
@@ -1104,7 +1104,7 @@ const AIPlaygroundPage: React.FC = () => {
       setSending(false);
       // Update quota optimistically from local estimates, then sync from DB after a delay
       setQuotaUsed(prev => prev + estTokensIn + estTokensOut);
-      setTimeout(() => fetchQuota(), 3000); // DB write may lag — sync after 3s
+      setTimeout(() => fetchQuota(), 8000); // DB write may lag — sync after 8s
     }
   };
 
