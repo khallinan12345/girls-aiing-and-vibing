@@ -169,7 +169,6 @@ async function logCost({ page, provider, model, inputTokens, outputTokens,
         estimated_cost_usd: estimatedCost,
         user_id:            userId || null,
         city:               city   || null,
-        task_type:          taskType || null,
         logged_at:          new Date().toISOString(),
       }),
     });
