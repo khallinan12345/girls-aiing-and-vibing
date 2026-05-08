@@ -1422,31 +1422,59 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 
   const selectedOrgName = costOrgId === '__all__' ? 'All Organizations' : (allOrgs.find(o => o.id === costOrgId)?.name || '');
 
+  // Build a lookup from learners prop (may be empty if Student Activity tab hasn't loaded)
+  const learnerLookup = new Map(learners.map(l => [l.id, l]));
+
+  // Filter allCostRows by org if one is selected
+  const orgFilteredCostRows = (costOrgId === '__all__' || !costOrgId)
+    ? allCostRows
+    : (() => {
+        // If we have learners loaded, filter by their ids
+        if (filteredLearners.length > 0) {
+          const ids = new Set(filteredLearners.map(l => l.id));
+          return allCostRows.filter(r => r.user_id && ids.has(r.user_id));
+        }
+        // Otherwise filter by city from the org (best effort)
+        const org = allOrgs.find(o => o.id === costOrgId);
+        if (org?.city) return allCostRows.filter(r => r.city === org.city);
+        return allCostRows;
+      })();
+
   type LearnerSummary = {
     id: string; name: string; email: string; city: string;
     totalCost: number; requests: number; freeReqs: number; paidReqs: number;
     topPage: string;
   };
 
-  const summaries: LearnerSummary[] = filteredLearners.map(l => {
-    const lRows = allCostRows.filter(r => r.user_id === l.id);
-    const freeReqs = lRows.filter(r => (PRICING[r.model]?.input ?? 0) === 0).length;
-    const paidReqs = lRows.filter(r => (PRICING[r.model]?.input ?? 0) > 0).length;
-    const pageCounts: Record<string, number> = {};
-    lRows.forEach(r => { pageCounts[r.page] = (pageCounts[r.page] || 0) + 1; });
-    const topPage = Object.entries(pageCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
-    return {
-      id: l.id,
-      name: l.name || '(no name)',
-      email: l.email || '',
-      city: (l as any).city || '—',
-      totalCost: lRows.reduce((s, r) => s + numCost(r.estimated_cost_usd), 0),
-      requests: lRows.length,
-      freeReqs,
-      paidReqs,
-      topPage,
-    };
+  // Group by user_id directly from cost rows — no dependency on learners being loaded
+  const userCostMap = new Map<string, CostRow[]>();
+  orgFilteredCostRows.forEach(r => {
+    if (!r.user_id) return;
+    if (!userCostMap.has(r.user_id)) userCostMap.set(r.user_id, []);
+    userCostMap.get(r.user_id)!.push(r);
   });
+
+  const summaries: LearnerSummary[] = [...userCostMap.entries()]
+    .map(([userId, lRows]) => {
+      const learner = learnerLookup.get(userId);
+      const freeReqs = lRows.filter(r => (PRICING[r.model]?.input ?? 0) === 0).length;
+      const paidReqs = lRows.filter(r => (PRICING[r.model]?.input ?? 0) > 0).length;
+      const pageCounts: Record<string, number> = {};
+      lRows.forEach(r => { pageCounts[r.page] = (pageCounts[r.page] || 0) + 1; });
+      const topPage = Object.entries(pageCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
+      return {
+        id: userId,
+        name: learner?.name || '(no name)',
+        email: learner?.email || '',
+        city: lRows[0]?.city || (learner as any)?.city || '—',
+        totalCost: lRows.reduce((s, r) => s + numCost(r.estimated_cost_usd), 0),
+        requests: lRows.length,
+        freeReqs,
+        paidReqs,
+        topPage,
+      };
+    })
+    .filter(s => !EXCLUDED_IDS.has(s.id));
 
   const searchFiltered = summaries.filter(s =>
     search === '' ||
@@ -1478,7 +1506,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 
   const maxCost = Math.max(...summaries.map(s => s.totalCost), 0.001);
 
-  const selectedLearner = filteredLearners.find(l => l.id === selectedId);
+  const selectedLearner = learnerLookup.get(selectedId) || null;
   const totalCost = learnerRows.reduce((s, r) => s + numCost(r.estimated_cost_usd), 0);
   const totalInTok = learnerRows.reduce((s, r) => s + r.input_tokens, 0);
   const totalOutTok = learnerRows.reduce((s, r) => s + r.output_tokens, 0);
@@ -2036,10 +2064,16 @@ const AdminStudentDashboard: React.FC = () => {
     ? getJoinCodesForOrg(allOrgs, adminSelectedOrgId)
     : [];
 
+  // Effective org for learner fetch — either Student Activity selection or Per-Learner Cost selection
+  const effectiveOrgId = adminSelectedOrgId || costOrgId;
+  const effectiveOrgJoinCodes: string[] = effectiveOrgId && effectiveOrgId !== '__all__'
+    ? getJoinCodesForOrg(allOrgs, effectiveOrgId)
+    : [];
+
   // Fetch learners
   useEffect(() => {
     if (!authChecked) return;
-    if (isPlatformAdmin && !adminSelectedOrgId) {
+    if (isPlatformAdmin && !effectiveOrgId) {
       setLearners([]);
       setLoadingLearners(false);
       return;
@@ -2061,12 +2095,12 @@ const AdminStudentDashboard: React.FC = () => {
             if (orgId) query = query.eq('organization_id', orgId);
           }
         } else if (isPlatformAdmin) {
-          if (adminSelectedOrgId === '__all__') {
+          if (effectiveOrgId === '__all__') {
             // No filter
-          } else if (adminOrgJoinCodes.length > 0) {
-            query = query.in('join_code_used', adminOrgJoinCodes);
+          } else if (effectiveOrgJoinCodes.length > 0) {
+            query = query.in('join_code_used', effectiveOrgJoinCodes);
           } else {
-            query = query.eq('organization_id', adminSelectedOrgId);
+            query = query.eq('organization_id', effectiveOrgId);
           }
         }
 
@@ -2079,7 +2113,7 @@ const AdminStudentDashboard: React.FC = () => {
         setLoadingLearners(false);
       }
     })();
-  }, [authChecked, isLeader, isPlatformAdmin, leaderJoinCodes, selectedOrgId, userOrgId, adminSelectedOrgId, adminOrgJoinCodes.join(',')]);
+  }, [authChecked, isLeader, isPlatformAdmin, leaderJoinCodes, selectedOrgId, userOrgId, effectiveOrgId, effectiveOrgJoinCodes.join(',')]);
 
   const fetchStudentSummary = useCallback(async () => {
     if (!learners.length) { setStudentSessionRows([]); return; }
