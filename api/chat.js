@@ -28,7 +28,7 @@
 //   If taskType is omitted on a coding page, it defaults to 'coding' (preserves current behavior).
 //
 // FALLBACK CHAIN (for free-tier-routed pages):
-//   Groq → Gemini 2.0 Flash → Cerebras → OpenRouter (free) → Mistral → Anthropic Haiku
+//   Groq → Gemini 2.0 Flash → Cerebras → Together AI → Cloudflare Workers AI → Hugging Face → OpenRouter (free) → Mistral → Anthropic Haiku
 //
 // PROMPT CACHING: applied automatically on all Anthropic calls.
 //   The system prompt is marked with cache_control so repeated calls within
@@ -66,6 +66,9 @@ const GROQ_MODEL       = 'llama-3.3-70b-versatile';
 
 const GEMINI_MODEL      = 'gemini-2.0-flash';
 const CEREBRAS_MODEL    = 'llama-3.3-70b';
+const TOGETHER_MODEL    = 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free';
+const CLOUDFLARE_MODEL  = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+const HUGGINGFACE_MODEL = 'meta-llama/Llama-3.3-70B-Instruct';
 const OPENROUTER_MODEL  = 'meta-llama/llama-3.3-70b-instruct:free';
 const MISTRAL_MODEL     = 'mistral-small-latest';
 
@@ -77,6 +80,9 @@ const PRICING = {
   'llama-3.3-70b-versatile':     { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  },
   'gemini-2.0-flash':            { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  },
   'llama-3.3-70b':               { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  },
+  'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free': { input: 0.00, output: 0.00, cacheWrite: 0.00, cacheRead: 0.00 },
+  '@cf/meta/llama-3.3-70b-instruct-fp8-fast': { input: 0.00, output: 0.00, cacheWrite: 0.00, cacheRead: 0.00 },
+  'meta-llama/Llama-3.3-70B-Instruct': { input: 0.00, output: 0.00, cacheWrite: 0.00, cacheRead: 0.00 },
   'meta-llama/llama-3.3-70b-instruct:free': { input: 0.00, output: 0.00, cacheWrite: 0.00, cacheRead: 0.00 },
   'mistral-small-latest':        { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  },
 };
@@ -359,6 +365,100 @@ async function callCerebras(model, messages, system, max_tokens, temperature) {
   return { ...data, _route: { provider: 'cerebras', model } };
 }
 
+// ── Together AI call ───────────────────────────────────────────────────────────
+
+async function callTogether(model, messages, system, max_tokens, temperature) {
+  const togetherMessages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...messages,
+  ];
+
+  const upstream = await fetch('https://api.together.xyz/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.AI_TOGETHER_API_KEY}`,
+      'Content-Type':  'application/json',
+    },
+    body: JSON.stringify({ model, messages: togetherMessages, max_tokens, temperature }),
+  });
+
+  const data = await upstream.json();
+
+  if (!upstream.ok) {
+    const err = new Error(data.error?.message || 'Together AI error');
+    err.status = upstream.status;
+    throw err;
+  }
+
+  return { ...data, _route: { provider: 'together', model } };
+}
+
+// ── Cloudflare Workers AI call ────────────────────────────────────────────────
+
+async function callCloudflare(model, messages, system, max_tokens, temperature) {
+  const cfMessages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...messages,
+  ];
+
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const upstream = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({ model, messages: cfMessages, max_tokens, temperature }),
+    }
+  );
+
+  const data = await upstream.json();
+
+  if (!upstream.ok) {
+    const err = new Error(data.errors?.[0]?.message || data.error?.message || 'Cloudflare AI error');
+    err.status = upstream.status;
+    throw err;
+  }
+
+  return { ...data, _route: { provider: 'cloudflare', model } };
+}
+
+// ── Hugging Face Inference call ───────────────────────────────────────────────
+// Uses the HF router with :sambanova suffix for free Llama 3.3 70B inference.
+
+async function callHuggingFace(model, messages, system, max_tokens, temperature) {
+  const hfMessages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...messages,
+  ];
+
+  const upstream = await fetch('https://router.huggingface.co/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.HF_TOKEN}`,
+      'Content-Type':  'application/json',
+    },
+    body: JSON.stringify({
+      model:       `${model}:sambanova`,  // route through SambaNova free tier
+      messages:    hfMessages,
+      max_tokens,
+      temperature,
+    }),
+  });
+
+  const data = await upstream.json();
+
+  if (!upstream.ok) {
+    const err = new Error(data.error?.message || 'Hugging Face inference error');
+    err.status = upstream.status;
+    throw err;
+  }
+
+  return { ...data, _route: { provider: 'huggingface', model } };
+}
+
 // ── OpenRouter call ────────────────────────────────────────────────────────────
 
 async function callOpenRouter(model, messages, system, max_tokens, temperature) {
@@ -436,6 +536,24 @@ async function callWithFallbackChain(messages, system, max_tokens, temperature) 
       model:    CEREBRAS_MODEL,
       keyEnv:   'CEREBRAS_API_KEY',
       fn:       () => callCerebras(CEREBRAS_MODEL, messages, system, max_tokens, temperature),
+    },
+    {
+      name:     'together',
+      model:    TOGETHER_MODEL,
+      keyEnv:   'AI_TOGETHER_API_KEY',
+      fn:       () => callTogether(TOGETHER_MODEL, messages, system, max_tokens, temperature),
+    },
+    {
+      name:     'cloudflare',
+      model:    CLOUDFLARE_MODEL,
+      keyEnv:   'CLOUDFLARE_API_TOKEN',
+      fn:       () => callCloudflare(CLOUDFLARE_MODEL, messages, system, max_tokens, temperature),
+    },
+    {
+      name:     'huggingface',
+      model:    HUGGINGFACE_MODEL,
+      keyEnv:   'HF_TOKEN',
+      fn:       () => callHuggingFace(HUGGINGFACE_MODEL, messages, system, max_tokens, temperature),
     },
     {
       name:     'openrouter',
@@ -603,6 +721,9 @@ export default async function handler(req, res) {
         'groq/llama-3.3-70b (primary free)',
         'gemini/2.0-flash (free fallback)',
         'cerebras/llama-3.3-70b (free fallback)',
+        'together/llama-3.3-70b-free (free fallback)',
+        'cloudflare/llama-3.3-70b-fp8 (free fallback)',
+        'huggingface/llama-3.3-70b:sambanova (free fallback)',
         'openrouter/llama-3.3-70b:free (free fallback)',
         'mistral/small (free fallback)',
         'anthropic/haiku (paid fallback)',
