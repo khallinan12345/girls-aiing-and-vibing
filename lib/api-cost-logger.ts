@@ -61,13 +61,11 @@ export function logApiCost(params: LogApiCostParams): void {
     body: JSON.stringify({
       page:          params.source,
       provider:      'anthropic',
-      action:        params.action,
       model:         params.model,
       input_tokens:  inputTokens,
       output_tokens: outputTokens,
       estimated_cost_usd: cost,
       user_id:       params.user_id  ?? null,
-      cohort:        params.cohort   ?? null,
       logged_at:     new Date().toISOString(),
     }),
   }).catch(() => {});
