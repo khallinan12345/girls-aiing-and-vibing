@@ -1593,6 +1593,7 @@ Respond ONLY with valid JSON:
       console.log('[AI Chat] Sending', messages.length, 'messages to API via client');
 
       const response = await chatText({
+        page: 'AILearningPage',
         messages,
         system: aiInstructions,
         max_tokens: 500,
@@ -1680,6 +1681,7 @@ Calculate overall_score as:
 CRITICAL: Return ONLY the JSON object. No preamble, no explanation, no markdown.`;
 
       const assessment = await chatJSON({
+        page: 'AILearningPage',
         messages: [{ role: 'user', content: comprehensivePrompt }],
         system: 'You are a UNESCO AI Competency evaluator. Respond ONLY with valid JSON. Do not include any other text.',
         max_tokens: 1200,
@@ -1873,6 +1875,7 @@ Provide improvement suggestions in this EXACT format with 3-4 sections:
 Use section headers like "Deepen Understanding:", "Practice Application:", "Develop Critical Skills:", or "Explore Real-World Examples:". Start each section with ** markdown formatting and separate sections with blank lines.`;
 
     const advice = await chatText({
+      page: 'AILearningPage',
       messages: [
         {
           role: 'user',
@@ -1897,6 +1900,7 @@ Use section headers like "Deepen Understanding:", "Practice Application:", "Deve
     setIsImproving(true);
     try {
       const result = await chatJSON({
+        page: 'AILearningPage',
         messages: [{
           role: 'user',
           content: `You are an English language coach helping a student improve their writing.
@@ -1980,6 +1984,7 @@ Respond ONLY with valid JSON:
 
     try {
       const result = await chatJSON({
+        page: 'AILearningPage',
         messages: [{ role: 'user', content: prompt }],
         system: 'You are a learner profile expert making careful, evidence-based incremental updates. Return only valid JSON.',
         max_tokens: 700,
@@ -2325,6 +2330,7 @@ Respond ONLY with valid JSON:
       const standardInstructions = buildUNESCOAssessmentInstructions();
 
       const assessmentResult = await chatJSON({
+        page: 'AILearningPage',
         messages: [
           {
             role: 'user',
@@ -2584,6 +2590,7 @@ Respond ONLY with valid JSON:
       E: '1. Problem Decomposition: breaks problem into ≥2 components with causal connections — must include at least one economic or cost component\n2. AI Suitability: justifies AI vs ≥1 alternative, including a cost-benefit comparison\n3. Outcome Measurement: defines success with ≥1 measurable economic indicator (revenue, cost saving, yield increase, time saved with monetary value, etc.)',
     };
     const result = await chatText({
+      page: 'AILearningPage',
       messages: [{ role: 'user', content: `A learner is doing an AI Proficiency session with an entrepreneurial focus:\n${context}\n\nRubric criteria:\n${rubrics[categoryId] || rubrics['A']}\n\nWrite a concise paragraph (3–5 sentences) describing specific evidence the learner must produce to score Competent (2) or higher on each criterion, grounded in their scenario. Emphasise that answers must connect AI thinking to real economic value, cost-benefit reasoning, or productive outcomes — not just technical accuracy.` }],
       system: 'You are an educational assessment designer who specialises in connecting AI skills to entrepreneurial and productive-use contexts. Be specific, concise, and use the learner\'s context.',
       max_tokens: 400,

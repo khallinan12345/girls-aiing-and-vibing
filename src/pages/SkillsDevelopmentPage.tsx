@@ -1580,6 +1580,7 @@ Respond ONLY with valid JSON in this exact format (no extra fields, no commentar
 
     try {
       const result = await chatJSON({
+        page: 'SkillsDevelopmentPage',
         messages: [{ role: 'user', content: prompt }],
         system: 'You are a learner profile expert making careful, evidence-based incremental updates. Return only valid JSON.',
         max_tokens: 700,
@@ -1900,6 +1901,7 @@ Provide assessment now:`;
       ];
 
       const assessment = await chatJSON({
+        page: 'SkillsDevelopmentPage',
         messages,
         system: 'You are an expert AI assessment evaluator. Evaluate ONLY the most recent student response. Respond only with valid JSON.',
         max_tokens: 1500,
@@ -2033,6 +2035,7 @@ Provide your improvement advice now:`;
       ];
 
       const advice = await chatText({
+        page: 'SkillsDevelopmentPage',
         messages,
         system: 'You are an expert educational coach providing personalized, actionable feedback to help students improve their skills. Be specific, encouraging, and practical. When a learner profile is provided, tailor your tone, examples, and delivery to match their communication and learning preferences.',
         max_tokens: 800,
@@ -2119,6 +2122,7 @@ Provide assessment now:`;
       ];
 
       const assessment = await chatJSON({
+        page: 'SkillsDevelopmentPage-code',
         messages,
         system: 'You are an expert AI assessment evaluator for comprehensive skill evaluation. Respond only with valid JSON.',
         max_tokens: 2000,
@@ -3088,6 +3092,7 @@ Respond with ONLY valid JSON:
     ];
 
     const critiqueResult = await chatJSON({
+      page: 'SkillsDevelopmentPage-code',
       messages,
       system: 'You are an expert at evaluating coding instructions. Respond only with valid JSON.',
       max_tokens: 800,
