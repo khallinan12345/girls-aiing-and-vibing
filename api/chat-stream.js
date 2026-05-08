@@ -28,8 +28,8 @@ const CORS_HEADERS = {
 // Frontend sends up to MAX_API_MESSAGES=40. We compress when we receive >30,
 // keeping the last 20 verbatim. This means long conversations always stay under
 // ~22 messages (summaryPair + 20 recent) going to Anthropic.
-const COMPRESSION_THRESHOLD = 30;
-const KEEP_RECENT           = 20;
+const COMPRESSION_THRESHOLD = 18;
+const KEEP_RECENT           = 10;
 
 // ─── Token prices per million (USD) ──────────────────────────────────────────
 const PRICES = {
