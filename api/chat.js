@@ -203,10 +203,10 @@ function resolveRoute(page, playgroundModel, taskType) {
     return { provider: 'anthropic', model: ANTHROPIC_SONNET };
   }
 
-  // AIPlaygroundPage → user-selectable model
+  // AIPlaygroundPage → Sonnet if profile set, otherwise free-tier chain
   if (page === 'AIPlaygroundPage') {
-    const model = playgroundModel === ANTHROPIC_SONNET ? ANTHROPIC_SONNET : ANTHROPIC_HAIKU;
-    return { provider: 'anthropic', model };
+    if (playgroundModel === ANTHROPIC_SONNET) return { provider: 'anthropic', model: ANTHROPIC_SONNET };
+    return { provider: 'groq', model: GROQ_MODEL };
   }
 
   // Default → Haiku
