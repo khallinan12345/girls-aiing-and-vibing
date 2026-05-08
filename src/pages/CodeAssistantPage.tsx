@@ -1145,6 +1145,7 @@ Provide your assessment now:`;
 
       // Use chatJSON instead of direct OpenAI API call
       const assessment = await chatJSON({
+        page: 'VibeCodingPage',
         messages,
         system: systemMessage,
         max_tokens: 300,
@@ -1345,6 +1346,7 @@ Help them brainstorm and refine their ideas before they start coding.`;
 
       // Use chatText instead of direct OpenAI API call
       const response = await chatText({
+        page: 'VibeCodingPage',
         messages,
         system: finalInstructions,
         max_tokens: mode === 'ideas' ? 300 : mode === 'critique' ? 400 : 2000,
@@ -1755,6 +1757,7 @@ What specifically would you like to build code to do? 🚀✨`,
         : '';
 
       const prompt = await chatText({
+        page: 'VibeCodingPage',
         messages: [{
           role: 'user',
           content: `You are a vibe coding expert. A student has been working with an AI coding coach. Based on their conversation, create a clear, reusable VIBE CODING PROMPT that captures exactly what they want to build.
