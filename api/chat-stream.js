@@ -8,6 +8,12 @@
 //   Anthropic call. The compressed history is returned in the done event
 //   so the frontend can update its local state and Supabase.
 //
+// PATCH 2026-05-08: Cost logging
+//   All Anthropic token usage is now logged to api_cost_log:
+//   - Main Sonnet/Haiku stream: logged in finally block from SSE usage events
+//   - Haiku compression call:   logged immediately after each compression
+//   Both are fire-and-forget and never block the stream or response.
+//
 // TRIAGE PATCH: errors now logged to Supabase system_events + email alert.
 
 export const config = { runtime: 'edge' };
@@ -18,9 +24,25 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-// How many recent messages to keep verbatim — older ones get compressed
-const COMPRESSION_THRESHOLD = 20;
+// How many messages trigger compression, and how many recent ones to keep verbatim.
+// Frontend sends up to MAX_API_MESSAGES=40. We compress when we receive >30,
+// keeping the last 20 verbatim. This means long conversations always stay under
+// ~22 messages (summaryPair + 20 recent) going to Anthropic.
+const COMPRESSION_THRESHOLD = 30;
 const KEEP_RECENT           = 20;
+
+// ─── Token prices per million (USD) ──────────────────────────────────────────
+const PRICES = {
+  'claude-sonnet-4-6':         { input: 3.0,  output: 15.0 },
+  'claude-haiku-4-5-20251001': { input: 1.0,  output:  5.0 },
+  default:                     { input: 3.0,  output: 15.0 },
+};
+
+function estimateCost(model, inputTokens, outputTokens) {
+  const p = PRICES[model] ?? PRICES.default;
+  return (inputTokens / 1_000_000) * p.input
+       + (outputTokens / 1_000_000) * p.output;
+}
 
 // ─── Inline logger (Edge-safe — no Node imports) ─────────────────────────────
 // Mirrors api-logger.ts but inline because Edge runtime can't import Node modules.
@@ -72,6 +94,41 @@ async function logEvent({ function_name, event_type, severity, payload, user_id,
   }
 }
 
+// ─── Cost logger (fire-and-forget, Edge-safe) ─────────────────────────────────
+// Writes one row to api_cost_log per Anthropic call.
+// action: 'generate' for the main stream, 'compress' for Haiku compression calls.
+
+function logCost({ model, action, inputTokens, outputTokens, cacheHitTokens = 0, cacheWriteTokens = 0, user_id, cohort }) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return;
+  if (!inputTokens && !outputTokens) return;
+
+  const cost = estimateCost(model, inputTokens, outputTokens);
+
+  fetch(`${SUPABASE_URL}/rest/v1/api_cost_log`, {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'apikey':        SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Prefer':        'return=minimal',
+    },
+    body: JSON.stringify({
+      page:               'AIPlaygroundPage',
+      provider:           'anthropic',
+      model,
+      action:             action ?? 'generate',
+      input_tokens:       inputTokens,
+      output_tokens:      outputTokens,
+      cache_hit_tokens:   cacheHitTokens,
+      cache_write_tokens: cacheWriteTokens,
+      estimated_cost_usd: cost,
+      user_id:            user_id  ?? null,
+      cohort:             cohort   ?? null,
+      logged_at:          new Date().toISOString(),
+    }),
+  }).catch(() => {}); // swallow — logging must never crash the stream
+}
+
 // ─── Rolling compression ──────────────────────────────────────────────────────
 //
 // When a conversation exceeds COMPRESSION_THRESHOLD messages, compress the
@@ -82,19 +139,21 @@ async function logEvent({ function_name, event_type, severity, payload, user_id,
 //   { compressed: true,  messages: [...summaryPair, ...recentMessages] }  — compression happened
 //   { compressed: false, messages: originalMessages }                      — no compression needed
 
-async function compressOldMessages(messages, apiKey) {
+async function compressOldMessages(messages, apiKey, user_id, cohort) {
   if (messages.length <= COMPRESSION_THRESHOLD) {
     return { compressed: false, messages };
   }
 
-  const splitAt      = messages.length - KEEP_RECENT;
-  const toCompress   = messages.slice(0, splitAt);
+  const splitAt        = messages.length - KEEP_RECENT;
+  const toCompress     = messages.slice(0, splitAt);
   const recentMessages = messages.slice(splitAt);
 
   // Build a compact transcript of the messages to compress
   const transcript = toCompress
     .map(m => `[${m.role.toUpperCase()}]: ${(m.content || '').slice(0, 800)}`)
     .join('\n');
+
+  const compressionModel = 'claude-haiku-4-5-20251001';
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -105,8 +164,8 @@ async function compressOldMessages(messages, apiKey) {
         'content-type':      'application/json',
       },
       body: JSON.stringify({
-        model:      'claude-haiku-4-5-20251001',
-        max_tokens: 600,
+        model:       compressionModel,
+        max_tokens:  600,
         temperature: 0.1,
         system: 'You are a conversation summariser. Write a concise factual summary of a chat history for use as context in an ongoing conversation. Include: key topics discussed, decisions made, important facts the user shared, and any code or artifacts produced. Write in third person. Be specific and dense — this replaces the full history.',
         messages: [{
@@ -122,10 +181,23 @@ async function compressOldMessages(messages, apiKey) {
       return { compressed: false, messages };
     }
 
-    const data   = await res.json();
+    const data    = await res.json();
     const summary = data.content?.[0]?.text ?? '';
 
     if (!summary) return { compressed: false, messages };
+
+    // ── Log Haiku compression cost ─────────────────────────────────────────
+    // data.usage is present on non-streaming calls
+    if (data.usage) {
+      logCost({
+        model:       compressionModel,
+        action:      'compress',
+        inputTokens:  data.usage.input_tokens  ?? 0,
+        outputTokens: data.usage.output_tokens ?? 0,
+        user_id,
+        cohort,
+      });
+    }
 
     // Inject as a synthetic user/assistant pair that looks natural in history
     const summaryPair = [
@@ -214,7 +286,8 @@ export default async function handler(req) {
   // ── Rolling compression ────────────────────────────────────────────────────
   // If the conversation is long, compress old messages before sending to Anthropic.
   // The frontend receives compressedMessages in the done event and updates Supabase.
-  const { compressed, messages: messagesForApi } = await compressOldMessages(messages, apiKey);
+  // user_id and cohort are forwarded so compression cost is attributed correctly.
+  const { compressed, messages: messagesForApi } = await compressOldMessages(messages, apiKey, user_id, cohort);
 
   const upstream = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -290,6 +363,12 @@ export default async function handler(req) {
     let parseErrors = 0;
     let streamError = null;
 
+    // ── Token accumulators (populated from SSE usage events) ────────────────
+    let inputTokens      = 0;
+    let outputTokens     = 0;
+    let cacheHitTokens   = 0;
+    let cacheWriteTokens = 0;
+
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -306,31 +385,44 @@ export default async function handler(req) {
 
           try {
             const evt = JSON.parse(raw);
+
             if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
               const chunk = evt.delta.text;
               fullText += chunk;
               chunkCount++;
               await writer.write(encoder.encode(`data: ${JSON.stringify({ chunk })}\n\n`));
             }
-            // TRIAGE: catch max_tokens at the stream level
+
+            // Capture input token counts (including cache) from message_start
+            if (evt.type === 'message_start' && evt.message?.usage) {
+              inputTokens      = evt.message.usage.input_tokens                ?? 0;
+              cacheHitTokens   = evt.message.usage.cache_read_input_tokens     ?? 0;
+              cacheWriteTokens = evt.message.usage.cache_creation_input_tokens ?? 0;
+            }
+
+            // Capture output token count + TRIAGE max_tokens warning
             if (evt.type === 'message_delta' && evt.usage) {
+              outputTokens = evt.usage.output_tokens ?? 0;
+
+              // TRIAGE: catch max_tokens at the stream level
               if (evt.delta?.stop_reason === 'max_tokens') {
                 logEvent({                           // fire-and-forget
                   function_name: 'chat-stream',
                   event_type:    'max_tokens_hit',
                   severity:      'warning',
                   payload: {
-                    stop_reason:   'max_tokens',
-                    output_tokens: evt.usage.output_tokens,
+                    stop_reason:          'max_tokens',
+                    output_tokens:        outputTokens,
                     model,
                     max_tokens_requested: max_tokens,
-                    full_text_length: fullText.length,
+                    full_text_length:     fullText.length,
                     note: 'Stream ended early — learner saw truncated response',
                   },
                   user_id, cohort,
                 });
               }
             }
+
           } catch (parseErr) {
             // TRIAGE: count parse errors; log if excessive
             parseErrors++;
@@ -355,7 +447,7 @@ export default async function handler(req) {
         event_type:    'stream_read_error',
         severity:      'error',
         payload: {
-          message:    err.message,
+          message:          err.message,
           chunkCount,
           full_text_length: fullText.length,
           model,
@@ -364,7 +456,20 @@ export default async function handler(req) {
         user_id, cohort,
       });
     } finally {
-      // Always close cleanly — send what we have
+      // ── Log main stream cost (Sonnet or Haiku) ─────────────────────────────
+      // Always fires — even on partial streams, partial cost is real cost.
+      logCost({
+        model,
+        action:           'generate',
+        inputTokens,
+        outputTokens,
+        cacheHitTokens,
+        cacheWriteTokens,
+        user_id,
+        cohort,
+      });
+
+      // Always close cleanly — send what we have.
       // If compression happened, include the new compressed history so the
       // frontend can update its local state and write it back to Supabase.
       await writer.write(
@@ -372,8 +477,8 @@ export default async function handler(req) {
           `data: ${JSON.stringify({
             done: true,
             fullText,
-            ...(streamError        ? { error: 'Stream interrupted' }          : {}),
-            ...(compressed        ? { compressedMessages: messagesForApi }    : {}),
+            ...(streamError ? { error: 'Stream interrupted' }       : {}),
+            ...(compressed  ? { compressedMessages: messagesForApi } : {}),
           })}\n\n`
         )
       );
