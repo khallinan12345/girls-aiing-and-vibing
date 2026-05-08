@@ -895,7 +895,7 @@ const CostOverviewPanel: React.FC<CostOverviewProps> = ({
         {/* Time frame */}
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
           {([1, 7, 30, 90] as const).map(d => (
-            <button key={d} onClick={() => setDays(d)}
+            <button key={d} onClick={() => { console.log(`[CostOverview] setDays(${d}) called`); setDays(d); }}
               className={classNames('px-3 py-1.5 rounded text-xs font-semibold transition-colors',
                 days === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
               {d === 1 ? '1d' : d === 7 ? 'Week' : d === 30 ? 'Month' : '3 Month'}
@@ -1154,7 +1154,7 @@ const ModelOverviewPanel: React.FC<{
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
           {([1, 7, 30, 90] as const).map(d => (
-            <button key={d} onClick={() => setDays(d)}
+            <button key={d} onClick={() => { console.log(`[ModelOverview] setDays(${d}) called`); setDays(d); }}
               className={classNames('px-3 py-1.5 rounded text-xs font-semibold transition-colors',
                 days === d ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
               {d === 1 ? '1d' : d === 7 ? 'Week' : d === 30 ? 'Month' : '3 Month'}
@@ -2121,6 +2121,7 @@ const AdminStudentDashboard: React.FC = () => {
         .limit(5000);
       console.log(`[fetchCostData] result: ${data?.length ?? 0} rows, error: ${error?.message ?? 'none'}`);
       if (error) throw error;
+      console.log(`[fetchCostData] setCostRows(${(data || []).length} rows)`);
       setCostRows(data || []);
     } catch (err: any) {
       setCostError(err.message || 'Failed to load cost data');
@@ -2449,7 +2450,7 @@ const AdminStudentDashboard: React.FC = () => {
         {activeTab === 'model-overview' && (
           <ModelOverviewPanel
             rows={costRows} loading={loadingCost} error={costError}
-            days={costDays} setDays={(d) => { setCostDays(d); fetchCostData(d); }}
+            days={costDays} setDays={(d) => { console.log(`[parent] model setDays(${d}), costRows=${costRows.length}`); setCostDays(d); fetchCostData(d); }}
             onRefresh={() => fetchCostData(costDays)}
           />
         )}
@@ -2457,7 +2458,7 @@ const AdminStudentDashboard: React.FC = () => {
         {activeTab === 'cost-overview' && (
           <CostOverviewPanel
             rows={costRows} loading={loadingCost} error={costError}
-            days={costDays} setDays={(d) => { setCostDays(d); fetchCostData(d); }}
+            days={costDays} setDays={(d) => { console.log(`[parent] cost setDays(${d}), costRows=${costRows.length}`); setCostDays(d); fetchCostData(d); }}
             groupBy={costGroupBy} setGroupBy={setCostGroupBy}
             onRefresh={() => fetchCostData(costDays)}
           />
@@ -2472,7 +2473,7 @@ const AdminStudentDashboard: React.FC = () => {
             onRefresh={() => selectedId ? fetchLearnerCost(selectedId) : fetchCostData(costDays)}
             isPlatformAdmin={isPlatformAdmin} allOrgs={allOrgs}
             costOrgId={costOrgId} setCostOrgId={setCostOrgId} loadingOrgs={loadingOrgs}
-            days={costDays} setDays={(d) => { setCostDays(d); fetchCostData(d); }}
+            days={costDays} setDays={(d) => { console.log(`[parent] learner setDays(${d}), costRows=${costRows.length}`); setCostDays(d); fetchCostData(d); }}
           />
         )}
 
