@@ -2113,16 +2113,36 @@ const AdminStudentDashboard: React.FC = () => {
     try {
       const since = new Date(Date.now() - days * 86400000).toISOString();
       console.log(`[fetchCostData] fetching ${days} days since ${since}`);
-      const { data, error } = await supabase
-        .from('api_cost_log')
-        .select('*')
-        .gte('logged_at', since)
-        .order('logged_at', { ascending: false })
-        .limit(5000);
-      console.log(`[fetchCostData] result: ${data?.length ?? 0} rows, error: ${error?.message ?? 'none'}`);
-      if (error) throw error;
-      console.log(`[fetchCostData] setCostRows(${(data || []).length} rows)`);
-      setCostRows(data || []);
+
+      // Supabase server caps at 1000 rows per request — paginate to get all rows
+      const PAGE = 1000;
+      let allRows: CostRow[] = [];
+      let from = 0;
+      let keepGoing = true;
+
+      while (keepGoing) {
+        const { data, error } = await supabase
+          .from('api_cost_log')
+          .select('id, logged_at, page, provider, model, input_tokens, output_tokens, cache_hit_tokens, cache_write_tokens, estimated_cost_usd, user_id, city')
+          .gte('logged_at', since)
+          .order('logged_at', { ascending: false })
+          .range(from, from + PAGE - 1);
+
+        if (error) throw error;
+        const batch = data || [];
+        allRows = allRows.concat(batch);
+        console.log(`[fetchCostData] page from=${from} got ${batch.length} rows, total=${allRows.length}`);
+        if (batch.length < PAGE) {
+          keepGoing = false;
+        } else {
+          from += PAGE;
+          // Safety cap: don't fetch more than 10k rows for the admin dashboard
+          if (allRows.length >= 10000) keepGoing = false;
+        }
+      }
+
+      console.log(`[fetchCostData] final: ${allRows.length} rows for ${days}d window`);
+      setCostRows(allRows);
     } catch (err: any) {
       setCostError(err.message || 'Failed to load cost data');
     } finally {
