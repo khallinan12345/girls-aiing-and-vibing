@@ -60,6 +60,7 @@ export function logApiCost(params: LogApiCostParams): void {
     },
     body: JSON.stringify({
       page:          params.source,
+      provider:      'anthropic',
       action:        params.action,
       model:         params.model,
       input_tokens:  inputTokens,
