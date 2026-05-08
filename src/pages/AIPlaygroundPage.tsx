@@ -518,7 +518,7 @@ async function* streamPlayground(
   const res = await fetch('/api/chat-stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, system, model, max_tokens: maxTokens, temperature, userId }),
+    body: JSON.stringify({ messages, system, model, max_tokens: maxTokens, temperature, user_id: userId }),
   });
 
   if (!res.ok) {
