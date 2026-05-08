@@ -2016,7 +2016,9 @@ const AdminStudentDashboard: React.FC = () => {
     finally { setLoadingLearnerCost(false); }
   }, []);
 
-  useEffect(() => { fetchCostData(costDays); }, [costDays, fetchCostData]);
+  // Initial load on mount — buttons now call fetchCostData(d) directly so this
+  // only needs to run once on mount, not on every costDays change.
+  useEffect(() => { fetchCostData(costDays); }, []);
 
   useEffect(() => {
     if (selectedId && activeTab === 'cost-learner') fetchLearnerCost(selectedId);
@@ -2319,7 +2321,7 @@ const AdminStudentDashboard: React.FC = () => {
         {activeTab === 'model-overview' && (
           <ModelOverviewPanel
             rows={costRows} loading={loadingCost} error={costError}
-            days={costDays} setDays={setCostDays}
+            days={costDays} setDays={(d) => { setCostDays(d); fetchCostData(d); }}
             onRefresh={() => fetchCostData(costDays)}
           />
         )}
@@ -2327,7 +2329,7 @@ const AdminStudentDashboard: React.FC = () => {
         {activeTab === 'cost-overview' && (
           <CostOverviewPanel
             rows={costRows} loading={loadingCost} error={costError}
-            days={costDays} setDays={setCostDays}
+            days={costDays} setDays={(d) => { setCostDays(d); fetchCostData(d); }}
             groupBy={costGroupBy} setGroupBy={setCostGroupBy}
             onRefresh={() => fetchCostData(costDays)}
           />
