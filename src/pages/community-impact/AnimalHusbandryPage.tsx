@@ -613,7 +613,7 @@ const AnimalHusbandryPage: React.FC = () => {
         page: 'AnimalHusbandryPage',
         messages: [{ role: 'user', content: `Start probing: ${field.label}` }],
         system: systemPrompt,
-        max_tokens: 300,
+        max_tokens: 600,
       });
       const isDone = reply.includes('✅ This topic is well characterised');
       setProbeDone(isDone);
@@ -634,7 +634,7 @@ const AnimalHusbandryPage: React.FC = () => {
         page: 'AnimalHusbandryPage',
         messages: updated.map(m => ({ role: m.role, content: m.content })),
         system: systemPrompt,
-        max_tokens: 300,
+        max_tokens: 600,
       });
       const isDone = reply.includes('✅ This topic is well characterised');
       setProbeDone(isDone);
@@ -680,7 +680,7 @@ const AnimalHusbandryPage: React.FC = () => {
         page: 'AnimalHusbandryPage',
         messages: [{ role: 'user', content: 'Please analyse this intake and provide your diagnostic recommendation.' }],
         system: systemPrompt,
-        max_tokens: 900,
+        max_tokens: 1500,
       });
       const urgency = detectUrgency(reply);
       setDiagnosisResult({ urgency, text: reply });
@@ -729,6 +729,8 @@ const AnimalHusbandryPage: React.FC = () => {
         setSavedConsultId(data.id);
         await loadFarmers();
         await loadConsultations(selectedFarmer.id);
+      } else if (error) {
+        console.error('[AnimalHusbandryPage] saveConsultation error:', error);
       }
     } finally { setSavingConsult(false); }
   };
@@ -747,7 +749,7 @@ const AnimalHusbandryPage: React.FC = () => {
         page: 'AnimalHusbandryPage',
         messages: history.map(m => ({ role: m.role, content: m.content })),
         system: systemPrompt,
-        max_tokens: 800,
+        max_tokens: 1200,
       });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       const updated = [...history, aiMsg];
