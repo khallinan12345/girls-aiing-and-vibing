@@ -811,7 +811,7 @@ const AIAmbassadorsPage: React.FC = () => {
         page: 'AIAmbassadorsPage',
         messages: withUser.map(m => ({ role: m.role, content: m.content })),
         system: selectedPersona.systemPrompt,
-        max_tokens: 300,
+        max_tokens: 600,
       });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       const finalMsgs = [...withUser, aiMsg];
@@ -884,12 +884,12 @@ Respond ONLY as valid JSON:
 }`,
         }],
         system: 'You are an expert educator evaluating community engagement skills. Be specific, fair, and constructive. Keep each evidence field to 1-2 sentences maximum.',
-        max_tokens: 2000, temperature: 0.3,
+        max_tokens: 1200,
       });
       setEvaluation(result);
       await persistChat(messages, result);
       setShowEvalModal(true);
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error('[AIAmbassadorsPage] handleEvaluate error:', err); }
     finally { setIsEvaluating(false); }
   };
 
@@ -1280,18 +1280,18 @@ Respond ONLY as valid JSON:
           )}
 
           {/* Header */}
-          <div className="bg-white/93 backdrop-blur-sm rounded-2xl shadow-lg p-5 mb-4">
+          <div className="bg-black/50 backdrop-blur-sm rounded-2xl shadow-lg p-5 mb-4">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
-                <button onClick={() => { window.speechSynthesis.cancel(); setView('prepare'); }} className="text-gray-400 hover:text-gray-700 p-1">
+                <button onClick={() => { window.speechSynthesis.cancel(); setView('prepare'); }} className="text-white/70 hover:text-white p-1">
                   <ArrowLeft size={20} />
                 </button>
                 <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${selectedPersona.colour} flex items-center justify-center text-2xl`}>
                   {selectedPersona.emoji}
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900">Teaching {selectedPersona.name}</h2>
-                  <p className="text-sm text-gray-500">{selectedPersona.occupation}</p>
+                  <h2 className="text-xl font-bold text-white drop-shadow">Teaching {selectedPersona.name}</h2>
+                  <p className="text-sm text-white/80 font-medium">{selectedPersona.occupation}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -1308,7 +1308,7 @@ Respond ONLY as valid JSON:
                   {speechOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
                 </button>
                 <button onClick={handleSave} disabled={isSaving || messages.length < 2}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg transition-colors disabled:opacity-40">
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white/80 hover:text-white border border-white/40 hover:border-white/70 rounded-lg transition-colors disabled:opacity-40">
                   {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
                 </button>
                 <button onClick={handleEvaluate} disabled={isEvaluating || userTurnCount < 3}
