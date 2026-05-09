@@ -108,6 +108,11 @@ interface AssessmentData {
   malariaSuspected: boolean;
   rdt: 'positive' | 'negative' | 'not_done';
   recentBednetUse: boolean;
+  // Physical observations
+  obs_appearance: string;
+  obs_breathing: string;
+  obs_skin: string;
+  obs_hydration: string;
   // Notes
   additionalNotes: string;
 }
@@ -125,6 +130,7 @@ const BLANK_ASSESSMENT: AssessmentData = {
   vomiting: false,
   palmarPallor: false, stiffNeck: false, eyeJaundice: false, oedema: false,
   malariaSuspected: false, rdt: 'not_done', recentBednetUse: false,
+  obs_appearance: '', obs_breathing: '', obs_skin: '', obs_hydration: '',
   additionalNotes: '',
 };
 
@@ -133,6 +139,7 @@ interface Assessment {
   patient_id: string;
   youth_user_id: string;
   assessment_data: AssessmentData;
+  probe_notes: Record<string, string>;       // keyed by symptom/observation label
   triage_level: TriageLevel;
   ai_triage_summary: string | null;
   referral_note: string | null;
@@ -289,8 +296,9 @@ YOUR ROLE:
 - Ask ONE focused clinical question at a time that the navigator can read directly to the patient or caregiver
 - Keep language very simple — the navigator may translate to Ijaw or Yoruba
 - After each answer, decide: do you need more information, or is this symptom fully characterised?
-- When the symptom is fully characterised, end your message with the exact phrase: "✅ This symptom is well characterised. You can move on."
-- Never ask more than 6 questions for any symptom
+- When the symptom is FULLY and THOROUGHLY characterised — including all clinically relevant follow-up threads — end your message with the exact phrase: "✅ This symptom is well characterised. You can move on."
+- NEVER mark a symptom as well characterised if there is a clinically significant finding that hasn't been fully explored (e.g. blood in sputum, blood in stool, high fever with neurological signs, chest pain with dyspnoea). Keep probing those threads until you have a complete clinical picture.
+- There is NO limit on probing questions — follow the clinical evidence wherever it leads
 - Draw on Bayelsa disease context: malaria, typhoid, pneumonia, cholera, malnutrition, oil-related illness
 
 FORMAT: One short question. After the navigator gives you the patient's answer, probe deeper or confirm characterisation. Be direct, be brief, speak as if coaching the navigator in real time.
@@ -325,7 +333,7 @@ const VILLAGES = ['Oloibiri', 'Ibiade', 'Otuabagi', 'Nembe', 'Ogbia', 'Yenagoa',
 
 // ─── Build AI triage system prompt ───────────────────────────────────────────
 
-function buildTriagePrompt(patient: Patient, assessment: AssessmentData): string {
+function buildTriagePrompt(patient: Patient, assessment: AssessmentData, probeNotes: Record<string, string>): string {
   const pg = PATIENT_GROUPS[patient.patient_group];
   const ageStr = patient.age_years != null
     ? `${patient.age_years} years${patient.age_months ? ` ${patient.age_months} months` : ''}`
@@ -375,6 +383,20 @@ MALARIA:
 - Recent bednet use: ${assessment.recentBednetUse ? 'Yes' : 'No'}
 
 ADDITIONAL NOTES: ${assessment.additionalNotes || 'None'}
+
+PHYSICAL OBSERVATIONS:
+- General appearance: ${assessment.obs_appearance || 'Not recorded'}
+- Breathing pattern: ${assessment.obs_breathing || 'Not recorded'}
+- Skin & eyes: ${assessment.obs_skin || 'Not recorded'}
+- Hydration signs: ${assessment.obs_hydration || 'Not recorded'}
+
+AI-COACHED CLINICAL INTERVIEW NOTES:
+${Object.keys(probeNotes).length === 0
+  ? 'No in-depth probing conducted.'
+  : Object.entries(probeNotes).map(([symptom, notes]) =>
+      `[${symptom}]\n${notes}`
+    ).join('\n\n')
+}
 
 YOUR TASK — provide a structured triage response:
 
@@ -732,7 +754,13 @@ const HealthcareNavigatorPage: React.FC = () => {
         .select('*')
         .eq('patient_id', patientId)
         .order('created_at', { ascending: false });
-      if (!error && data) setAssessments(data as Assessment[]);
+      if (!error && data) {
+        // Normalise probe_notes: pre-migration rows return null
+        setAssessments(data.map(row => ({
+          ...row,
+          probe_notes: row.probe_notes ?? {},
+        })) as Assessment[]);
+      }
     } finally { setLoadingAssessments(false); }
   }, []);
 
@@ -750,7 +778,7 @@ const HealthcareNavigatorPage: React.FC = () => {
         page: 'HealthcareNavigatorPage',
         messages: [{ role: 'user', content: `Start probing: ${symptomLabel}` }],
         system: systemPrompt,
-        max_tokens: 300,
+        max_tokens: 400,
       });
       const isDone = reply.includes('✅ This symptom is well characterised');
       setProbeDone(isDone);
@@ -772,7 +800,7 @@ const HealthcareNavigatorPage: React.FC = () => {
         page: 'HealthcareNavigatorPage',
         messages: updated.map(m => ({ role: m.role, content: m.content })),
         system: systemPrompt,
-        max_tokens: 300,
+        max_tokens: 400,
       });
       const isDone = reply.includes('✅ This symptom is well characterised');
       setProbeDone(isDone);
@@ -784,15 +812,12 @@ const HealthcareNavigatorPage: React.FC = () => {
   // ─── Close probe panel and save notes ────────────────────────────────────
   const closeProbe = useCallback(() => {
     if (probeSymptom && probeMessages.length > 0) {
-      const summary = probeMessages.slice(-10).map(m => `${m.role === 'assistant' ? 'AI' : 'Navigator'}: ${m.content.slice(0, 500)}`).join('\n');
+      // Build a clean Q&A summary keyed by symptom label
+      const summary = probeMessages
+        .map(m => `${m.role === 'assistant' ? 'AI Coach' : 'Navigator'}: ${m.content.slice(0, 600)}`)
+        .join('\n');
       setProbeNotes(prev => ({ ...prev, [probeSymptom]: summary }));
-      // Append to additionalNotes
-      setAssessment(prev => ({
-        ...prev,
-        additionalNotes: prev.additionalNotes
-          ? `${prev.additionalNotes}\n\n[${probeSymptom} probe]\n${summary}`
-          : `[${probeSymptom} probe]\n${summary}`,
-      }));
+      // No longer polluting additionalNotes — probe_notes is its own column
     }
     setProbeSymptom(null);
     setProbeMessages([]);
@@ -819,7 +844,7 @@ const HealthcareNavigatorPage: React.FC = () => {
     if (!selectedPatient || isTriaging) return;
     setIsTriaging(true);
     try {
-      const systemPrompt = buildTriagePrompt(selectedPatient, assessment);
+      const systemPrompt = buildTriagePrompt(selectedPatient, assessment, probeNotes);
       const reply = await chatText({ page: 'HealthcareNavigatorPage', messages: [{ role: 'user', content: 'Please analyse this patient assessment and provide your triage classification.' }], system: systemPrompt, max_tokens: 800 });
       const level = detectTriage(reply);
       setTriageResult({ level, summary: reply });
@@ -839,6 +864,7 @@ const HealthcareNavigatorPage: React.FC = () => {
           youth_user_id: user.id,
           patient_id: (selectedPatient as any).patient_id ?? selectedPatient.id,
           assessment_data: assessment,
+          probe_notes: probeNotes,
           triage_level: triageResult.level,
           ai_triage_summary: triageResult.summary,
           navigator_actions: navigatorActions || null,
@@ -1476,26 +1502,40 @@ const HealthcareNavigatorPage: React.FC = () => {
           {/* Physical Observation */}
           <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
             <h3 className="text-sm font-bold text-gray-800 mb-1 flex items-center gap-2">👁️ Physical Observation</h3>
-            <p className="text-xs text-gray-400 mb-3">Look at the patient carefully. These observations do not require equipment.</p>
+            <p className="text-xs text-gray-400 mb-3 flex items-center gap-1">Look at the patient carefully. <span className="text-indigo-500 font-bold ml-1">🔍 Probe</span> — tap to interview in depth.</p>
             <div className="space-y-3">
-              {[
-                { key: 'obs_appearance', label: 'General appearance', prompt: 'Does the patient look well, unwell, or very sick? Are they alert, drowsy, or difficult to wake?' },
-                { key: 'obs_breathing', label: 'Breathing pattern', prompt: 'Is breathing fast, laboured, or noisy? Can you hear wheezing or grunting? Any nasal flaring?' },
-                { key: 'obs_skin', label: 'Skin & eyes', prompt: 'Is the skin pale, yellow, or grey? Are the eyes sunken or yellow? Any rashes or wounds?' },
-                { key: 'obs_hydration', label: 'Hydration signs', prompt: 'Pinch the skin on the belly — does it spring back immediately? Are the lips dry? Is the child crying without tears?' },
-              ].map(obs => (
+              {([
+                { key: 'obs_appearance' as const, label: 'General appearance', prompt: 'Does the patient look well, unwell, or very sick? Are they alert, drowsy, or difficult to wake?' },
+                { key: 'obs_breathing' as const, label: 'Breathing pattern', prompt: 'Is breathing fast, laboured, or noisy? Can you hear wheezing or grunting? Any nasal flaring?' },
+                { key: 'obs_skin' as const, label: 'Skin & eyes', prompt: 'Is the skin pale, yellow, or grey? Are the eyes sunken or yellow? Any rashes or wounds?' },
+                { key: 'obs_hydration' as const, label: 'Hydration signs', prompt: 'Pinch the skin on the belly — does it spring back immediately? Are the lips dry? Is the child crying without tears?' },
+              ] as Array<{ key: 'obs_appearance' | 'obs_breathing' | 'obs_skin' | 'obs_hydration'; label: string; prompt: string }>).map(obs => (
                 <div key={obs.key}>
-                  <label className="text-xs font-semibold text-gray-600 flex items-center gap-1 mb-1">
-                    {obs.label}
-                    <InfoTooltip id={obs.key} text={obs.prompt} open={openTooltip === obs.key} onToggle={() => setOpenTooltip(openTooltip === obs.key ? null : obs.key)}/>
-                  </label>
-                  <input
-                    type="text"
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-gray-600 flex items-center gap-1">
+                      {obs.label}
+                      <InfoTooltip id={obs.key} text={obs.prompt} open={openTooltip === obs.key} onToggle={() => setOpenTooltip(openTooltip === obs.key ? null : obs.key)}/>
+                    </label>
+                    {assessment[obs.key] && (
+                      <button
+                        onClick={() => openProbe(obs.key, obs.label)}
+                        className={classNames('px-2 py-0.5 rounded-lg text-xs font-bold border transition-colors flex-shrink-0',
+                          probeSymptom === obs.label ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-indigo-50 text-indigo-700 border-indigo-300 hover:bg-indigo-100')}
+                      >
+                        {probeSymptom === obs.label ? '🔍 Probing…' : '🔍 Probe'}
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    rows={2}
                     placeholder={obs.prompt}
-                    value={(assessment as any)[obs.key] || ''}
-                    onChange={e => setField(obs.key as any, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    value={assessment[obs.key]}
+                    onChange={e => setField(obs.key, e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
                   />
+                  {probeNotes[obs.label] && (
+                    <p className="text-xs text-indigo-600 mt-1 italic">✓ Probed — detail captured in additional notes</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -1752,6 +1792,21 @@ const HealthcareNavigatorPage: React.FC = () => {
                   ))}
                 </div>
               </div>
+
+              {/* Probe notes — labelled clinical interview summaries */}
+              {a.probe_notes && Object.keys(a.probe_notes).length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Clinical Interview Notes</p>
+                  <div className="space-y-2">
+                    {Object.entries(a.probe_notes).map(([symptom, notes]) => (
+                      <div key={symptom} className="bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
+                        <p className="text-xs font-bold text-indigo-700 mb-1">🔍 {symptom}</p>
+                        <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{notes}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {a.ai_triage_summary && (
                 <div>
