@@ -1909,6 +1909,230 @@ async function sendEmailReport(
   else console.log("✉️  Email sent to khallinan1@udayton.edu");
 }
 
+// ─── Global Summary Rollup ────────────────────────────────────────────────────
+//
+// Reads per-user rows already written to user_monthly_assessments and rolls
+// them up into assessments_monthly_global — one row per org + one NULL-org
+// platform-wide row. Called automatically after the email sends in orchestrate
+// mode. RLS is bypassed because we run with SUPABASE_SERVICE_ROLE_KEY.
+
+async function generateGlobalSummary(
+  startDate:  Date,
+  endDate:    Date,
+  monthLabel: string
+): Promise<void> {
+  console.log(`\n📊 [globalSummary] Building summary for ${monthLabel}...`);
+
+  // 1. All assessed rows for this period
+  const { data: rows, error: rowErr } = await supabase
+    .from("user_monthly_assessments")
+    .select(`
+      user_id,
+      cognitive_score, critical_thinking_score,
+      problem_solving_score, creativity_score, pue_score,
+      pue_learner_initiated_pct,
+      pue_energy_constraint_pct, pue_market_pricing_pct,
+      pue_battery_load_pct, pue_enterprise_planning_pct,
+      pue_ai_introduced_pct, pue_multi_domain_pct, pue_local_context_pct,
+      scaffold_convergence_trend,
+      reasoning_structured_pct,
+      role_teaching_intent_count, role_community_application_count,
+      role_enterprise_orientation_count, role_intergenerational_count,
+      ai_prof_application_score, ai_prof_ethics_score,
+      ai_prof_understanding_score, ai_prof_verification_score,
+      cert_passed_count
+    `)
+    .gte("measured_at", startDate.toISOString())
+    .lte("measured_at", endDate.toISOString());
+
+  if (rowErr || !rows?.length) {
+    console.warn(`⚠️  [globalSummary] No rows for ${monthLabel} — skipping`);
+    return;
+  }
+
+  const userIds = rows.map(r => r.user_id);
+
+  // 2. Org + continent per user
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, organization_id, continent")
+    .in("id", userIds);
+
+  const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+
+  // 3. Session count for period
+  const { data: sessionRows } = await supabase
+    .from("dashboard")
+    .select("user_id", { count: "exact", head: false })
+    .in("user_id", userIds)
+    .gte("created_at", startDate.toISOString())
+    .lte("created_at", endDate.toISOString());
+
+  const totalSessions = sessionRows?.length ?? 0;
+
+  // 4. All-time certifications per user
+  // These are distinct from AI-tutored sessions — no AI scaffolding involved.
+  // cert_passed_count on user_monthly_assessments is the authoritative source
+  // (populated by the cert pipeline inside assessMonthlySkills).
+  // We sum it here rather than re-querying dashboard to avoid double-counting.
+  const certsByOrg = new Map<string | null, number>();
+  for (const r of rows) {
+    const orgId = profileMap.get(r.user_id)?.organization_id ?? null;
+    const n = r.cert_passed_count ?? 0;
+    certsByOrg.set(null,  (certsByOrg.get(null)  ?? 0) + n); // platform total
+    if (orgId) certsByOrg.set(orgId, (certsByOrg.get(orgId) ?? 0) + n);
+  }
+
+  // 5. Total enrolled learners
+  const { data: allAfrica } = await supabase
+    .from("profiles")
+    .select("id, organization_id")
+    .eq("continent", "Africa");
+
+  const enrolledByOrg = new Map<string | null, number>();
+  let totalEnrolled = 0;
+  for (const p of allAfrica || []) {
+    totalEnrolled++;
+    const orgId = p.organization_id ?? null;
+    enrolledByOrg.set(orgId, (enrolledByOrg.get(orgId) ?? 0) + 1);
+  }
+
+  // 6. Prior month avg_mean for delta
+  const priorEnd   = new Date(startDate.getTime() - 1);
+  const priorStart = new Date(priorEnd.getFullYear(), priorEnd.getMonth(), 1);
+  const { data: priorRows } = await supabase
+    .from("assessments_monthly_global")
+    .select("organization_id, avg_mean")
+    .gte("period_start", priorStart.toISOString().split("T")[0])
+    .lte("period_end",   priorEnd.toISOString().split("T")[0]);
+
+  const priorByOrg = new Map(
+    (priorRows || []).map(r => [r.organization_id ?? "null", r.avg_mean as number | null])
+  );
+
+  // 7. Group: one entry per org + NULL for platform-wide
+  type Row = typeof rows[0];
+  const groups = new Map<string | null, Row[]>();
+  groups.set(null, rows);
+  for (const r of rows) {
+    const orgId = profileMap.get(r.user_id)?.organization_id ?? null;
+    if (orgId) {
+      if (!groups.has(orgId)) groups.set(orgId, []);
+      groups.get(orgId)!.push(r);
+    }
+  }
+
+  // Helpers
+  const avg = (vals: (number | null)[]): number | null => {
+    const clean = vals.filter((v): v is number => v !== null);
+    return clean.length ? clean.reduce((a, b) => a + b, 0) / clean.length : null;
+  };
+  const fmt = (n: number | null) => n !== null ? parseFloat(n.toFixed(2)) : null;
+  const bandDist = (vals: (number | null)[]) => ({
+    needs_support: vals.filter(v => v !== null && v <  35).length,
+    emerging:      vals.filter(v => v !== null && v >= 35 && v < 55).length,
+    developing:    vals.filter(v => v !== null && v >= 55 && v < 75).length,
+    strong:        vals.filter(v => v !== null && v >= 75).length,
+  });
+
+  // 8. Upsert one row per group
+  for (const [orgId, grp] of groups.entries()) {
+    const cogMean = avg(grp.map(r => r.cognitive_score));
+    const ctMean  = avg(grp.map(r => r.critical_thinking_score));
+    const psMean  = avg(grp.map(r => r.problem_solving_score));
+    const creMean = avg(grp.map(r => r.creativity_score));
+    const pueMean = avg(grp.map(r => r.pue_score));
+    const avgMean = (cogMean !== null && ctMean !== null && psMean !== null &&
+                     creMean !== null && pueMean !== null)
+      ? (cogMean + ctMean + psMean + creMean + pueMean) / 5 : null;
+
+    const priorAvg = priorByOrg.get(orgId ?? "null") ?? null;
+    const avgDelta = (avgMean !== null && priorAvg !== null) ? avgMean - priorAvg : null;
+
+    // PUE linkage — learner touched a PUE domain this period
+    const pueLinked   = grp.filter(r => (r.pue_learner_initiated_pct ?? 0) > 0).length;
+    const pueLearnerPct = grp.length ? (pueLinked / grp.length) * 100 : 0;
+
+    // Role-readiness — any non-zero role signal
+    const roleReadyCount = grp.filter(r =>
+      (r.role_teaching_intent_count        ?? 0) > 0 ||
+      (r.role_community_application_count  ?? 0) > 0 ||
+      (r.role_enterprise_orientation_count ?? 0) > 0 ||
+      (r.role_intergenerational_count      ?? 0) > 0
+    ).length;
+
+    const continent = orgId
+      ? ([...new Set(grp.map(r => profileMap.get(r.user_id)?.continent).filter(Boolean))][0] ?? null)
+      : "Africa";
+
+    const record = {
+      period_start:    startDate.toISOString().split("T")[0],
+      period_end:      endDate.toISOString().split("T")[0],
+      period_label:    monthLabel,
+      organization_id: orgId,
+      continent,
+      learner_count:   orgId ? (enrolledByOrg.get(orgId) ?? grp.length) : totalEnrolled,
+      assessed_count:  grp.length,
+      sessions_count:  totalSessions,
+
+      cognitive_mean:           fmt(cogMean),
+      critical_thinking_mean:   fmt(ctMean),
+      problem_solving_mean:     fmt(psMean),
+      creativity_mean:          fmt(creMean),
+      pue_mean:                 fmt(pueMean),
+      avg_mean:                 fmt(avgMean),
+      avg_delta:                fmt(avgDelta),
+
+      ai_prof_application_mean:   fmt(avg(grp.map(r => r.ai_prof_application_score))),
+      ai_prof_ethics_mean:        fmt(avg(grp.map(r => r.ai_prof_ethics_score))),
+      ai_prof_understanding_mean: fmt(avg(grp.map(r => r.ai_prof_understanding_score))),
+      ai_prof_verification_mean:  fmt(avg(grp.map(r => r.ai_prof_verification_score))),
+
+      pue_learner_pct:            fmt(pueLearnerPct),
+      learner_initiated_pct:      fmt(avg(grp.map(r => r.pue_learner_initiated_pct))),
+      energy_constraint_pct:      fmt(avg(grp.map(r => r.pue_energy_constraint_pct))),
+      market_pricing_pct:         fmt(avg(grp.map(r => r.pue_market_pricing_pct))),
+      enterprise_planning_pct:    fmt(avg(grp.map(r => r.pue_enterprise_planning_pct))),
+      multi_domain_pct:           fmt(avg(grp.map(r => r.pue_multi_domain_pct))),
+      local_context_pct:          fmt(avg(grp.map(r => r.pue_local_context_pct))),
+      ai_introduced_pct:          fmt(avg(grp.map(r => r.pue_ai_introduced_pct))),
+
+      role_ready_count:   roleReadyCount,
+      converging_count:   grp.filter(r => r.scaffold_convergence_trend === "converging").length,
+      structured_l3_pct:  fmt(avg(grp.map(r => r.reasoning_structured_pct))),
+
+      // Certifications — no AI scaffolding, sourced from cert pipeline
+      certs_total: certsByOrg.get(orgId) ?? 0,
+
+      cognitive_dist:         bandDist(grp.map(r => r.cognitive_score)),
+      critical_thinking_dist: bandDist(grp.map(r => r.critical_thinking_score)),
+      problem_solving_dist:   bandDist(grp.map(r => r.problem_solving_score)),
+      creativity_dist:        bandDist(grp.map(r => r.creativity_score)),
+      pue_dist:               bandDist(grp.map(r => r.pue_score)),
+
+      assessment_model: "claude-sonnet-4-6",
+      notes: null,
+    };
+
+    const { error: upsertErr } = await supabase
+      .from("assessments_monthly_global")
+      .upsert(record, { onConflict: "period_start,organization_id" });
+
+    if (upsertErr) {
+      console.error(`❌ [globalSummary] org=${orgId ?? "ALL"}: ${upsertErr.message}`);
+    } else {
+      console.log(
+        `✅ [globalSummary] org=${orgId ?? "ALL"} | n=${grp.length} | ` +
+        `avg=${fmt(avgMean) ?? "—"} | delta=${avgDelta !== null ? (avgDelta >= 0 ? "+" : "") + avgDelta.toFixed(1) : "—"} | ` +
+        `role_ready=${roleReadyCount} | converging=${grp.filter(r => r.scaffold_convergence_trend === "converging").length} | ` +
+        `certs=${certsByOrg.get(orgId) ?? 0}`
+      );
+    }
+  }
+
+  console.log(`📊 [globalSummary] Complete — ${groups.size} group(s) written\n`);
+}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 //
 //  Five modes, controlled by query params:
@@ -2633,6 +2857,13 @@ Be encouraging and specific. Note strongest and weakest dimensions if AI Profici
         await sendEmailReport(monthLabel, reportSummaries, startDate, endDate, durationMs);
         emailSent = true;
         console.log("✉️  Email report sent automatically after orchestrate");
+
+        // Roll up into assessments_monthly_global (non-fatal if it fails)
+        try {
+          await generateGlobalSummary(startDate, endDate, monthLabel);
+        } catch (summaryErr: any) {
+          console.warn("⚠️  generateGlobalSummary failed (non-fatal):", summaryErr.message);
+        }
       }
     } catch (emailErr: any) {
       console.warn("⚠️  Auto-email failed (non-fatal):", emailErr.message);
