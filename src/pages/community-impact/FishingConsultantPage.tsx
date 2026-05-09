@@ -1,20 +1,30 @@
 // src/pages/community-impact/FishingConsultantPage.tsx
 //
 // Fishing Advisor — Community Impact Track
-// A professional casebook tool for youth fishing advisors
-// serving fishers, fish farmers, and fish traders in Oloibiri
-// (Bayelsa State) and surrounding Niger Delta communities.
+// A professional casebook tool for youth fishing advisors serving fishers,
+// fish farmers, and fish traders in Oloibiri (Bayelsa State) and surrounding
+// Niger Delta communities.
 //
-// The youth advisor registers clients, runs AI-assisted consultations
-// on catch problems, aquaculture, fish processing, market strategy,
-// and oil contamination — with the client present — and maintains
-// a case history per client.
+// MODELED ON: HealthcareNavigatorPage.tsx
+// The youth advisor sits with a client and runs a STRUCTURED intake interview,
+// guided step-by-step by AI coaching questions (Probe Panel). Once the problem
+// is fully characterised, AI generates a detailed recommendation. The advisor
+// and client can then continue in a follow-up chat mode. Every exchange is a
+// learning moment for the youth advisor.
 //
 // DB tables: fishing_clients
 //            fishing_consultations
+//            fishing_open_followups (view — UNRESTRICTED)
 //
 // Route: /community-impact/fishing
-// Activity stored as: fishing_advisor
+// Activity: fishing_advisor
+//
+// KEY PATTERNS FROM HEALTHCARE NAVIGATOR:
+// - Structured intake form with AI-powered "Probe" buttons per field
+// - ProbePanel modal: coaches youth to ask exactly the right questions one at a time
+// - AI advice generated only after intake is complete
+// - Follow-up chat mode after case is saved
+// - All conversation history persisted to DB
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '../../components/layout/AppLayout';
@@ -26,6 +36,7 @@ import {
   FileText, AlertTriangle, CheckCircle, Clock, ChevronRight,
   ClipboardList, RefreshCw, Calendar, Mic, MicOff,
   Volume2, VolumeX, X, Lightbulb, Waves, Scale, Droplets,
+  Anchor, ShieldCheck, AlertCircle,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -43,6 +54,7 @@ type AppMode =
   | 'add-client'
   | 'client-detail'
   | 'new-consultation'
+  | 'followup-chat'
   | 'case-detail';
 
 type ConsultationType =
@@ -71,7 +83,6 @@ interface Client {
   waterways: string[];
   notes: string | null;
   created_at: string;
-  // from summary view
   total_consultations?: number;
   open_cases?: number;
   last_consultation_at?: string | null;
@@ -80,6 +91,7 @@ interface Client {
 interface Consultation {
   id: string;
   client_id: string;
+  youth_user_id: string;
   consultation_type: ConsultationType;
   problem_summary: string;
   ai_advice: string | null;
@@ -93,6 +105,61 @@ interface Consultation {
   resolved_at: string | null;
   created_at: string;
 }
+
+// ─── Structured Intake Form ────────────────────────────────────────────────────
+// Each consultation type has its own intake fields, analogous to the health
+// assessment vitals/symptoms. Probe buttons let AI coach the advisor in real time.
+
+interface IntakeField {
+  key: string;
+  label: string;
+  placeholder: string;
+  tooltip: string;
+  required?: boolean;
+}
+
+const INTAKE_FIELDS: Record<ConsultationType, IntakeField[]> = {
+  'catch-problem': [
+    { key: 'target_species', label: 'Species targeted', placeholder: 'e.g. catfish, bonga, tilapia, shrimp', tooltip: 'Knowing the target species tells us if the problem is species-specific (contamination, habitat) or general (wrong technique, season change).', required: true },
+    { key: 'gear_used', label: 'Gear used', placeholder: 'e.g. gill net (3-inch mesh), cast net, long-line, drum trap', tooltip: 'Gear type and mesh size determine which fish you can catch. Wrong mesh = wrong fish. Old nets = torn mesh = escaping fish.', required: true },
+    { key: 'waterway', label: 'Waterway / fishing location', placeholder: 'e.g. Kolo Creek near the pipeline crossing, River Nun at Otuabagi bend', tooltip: 'Exact location helps identify contamination risk, seasonal fish movement patterns, and whether the area is overfished.', required: true },
+    { key: 'fishing_time', label: 'When they fish', placeholder: 'e.g. night (6pm–6am), dawn, dry season only', tooltip: 'Catfish feed at night. Mullet school at dawn. Fishing at the wrong time can explain poor catches even with good gear.', required: true },
+    { key: 'catch_change', label: 'How catches have changed', placeholder: 'e.g. dropped suddenly 3 weeks ago, gradually declining for 2 years, certain species disappeared', tooltip: 'Sudden decline = spill or seasonal event. Gradual = long-term habitat damage or overfishing. This shapes everything.', required: true },
+    { key: 'water_condition', label: 'Water appearance and smell', placeholder: 'e.g. oily sheen, petroleum smell, normal, dark/black sediment, floating dead fish', tooltip: 'Oil contamination shows as an iridescent sheen, petroleum smell, dead fish. Black sediment near pipelines = historic contamination.' },
+  ],
+  'aquaculture': [
+    { key: 'pond_status', label: 'Existing pond or planning to start?', placeholder: 'e.g. existing pond (1 year old, 100m²), or planning new pond', tooltip: 'Guides everything — existing pond = diagnose problems; new pond = site selection, construction, stocking advice.', required: true },
+    { key: 'species', label: 'Species in pond (or planned)', placeholder: 'e.g. catfish (Clarias), tilapia, or mix', tooltip: 'Catfish (Clarias gariepinus) is the best choice — tolerates low oxygen, grows fast (500–800g in 5–6 months). Tilapia is simpler to start but breeds fast — must manage males.', required: true },
+    { key: 'pond_size', label: 'Pond size and depth', placeholder: 'e.g. 10m × 10m (100m²), about 1.2m deep', tooltip: 'Minimum 100m² for viable production. 1–1.5m deep. Shallower = temperature stress; deeper = oxygen problems at bottom.' },
+    { key: 'stocking', label: 'Number of fish stocked', placeholder: 'e.g. 200 catfish fingerlings from NIOMR Yenagoa', tooltip: '100–200 catfish per 100m² is optimal. Overstocking is the #1 cause of poor growth and disease. Fingerlings from NIOMR or ADP hatcheries in Yenagoa.' },
+    { key: 'main_problem', label: 'Main problem being experienced', placeholder: 'e.g. fish gasping at surface, not eating, skin ulcers, slow growth, fish dying, pond flooding', tooltip: 'Fish gasping at surface = low oxygen → change water NOW. Ulcers/fin rot = bacterial infection from poor water quality. Slow growth = overfeeding, overcrowding, or wrong feed.', required: true },
+    { key: 'water_management', label: 'How they manage water quality', placeholder: 'e.g. change 30% weekly, never change it, add freshwater when low', tooltip: 'Water quality is the most common cause of pond problems. Change 30% of pond water weekly. Never let latrine or fertiliser runoff reach the pond.' },
+  ],
+  'processing-market': [
+    { key: 'species_volume', label: 'Species and quantity available', placeholder: 'e.g. 50kg catfish, 200kg bonga, 10kg shrimp', tooltip: 'Volume determines which markets are accessible. Shrimp must sell immediately — no storage. Catfish can be smoked for 2–6 weeks of shelf life.', required: true },
+    { key: 'current_method', label: 'Current processing and selling method', placeholder: 'e.g. selling fresh at local market, smoking with palm kernel shell kiln, sun-drying', tooltip: 'Selling fresh = lowest price, highest spoilage risk. Smoking = 40–80% higher value, 2–6 week shelf life. This gap is the biggest income lever.', required: true },
+    { key: 'current_price', label: 'Price currently getting per kg', placeholder: 'e.g. ₦1,800/kg fresh catfish from local trader', tooltip: 'Comparing to market prices reveals if the client is being underpaid. Middlemen pay 40–60% of final market value. We can calculate the gap.' },
+    { key: 'selling_to', label: 'Who they sell to and where', placeholder: 'e.g. to a middleman who comes to the village, at Yenagoa market directly', tooltip: 'Selling directly to market women or consumers adds 40–100% more income than selling to middlemen. Knowing this shapes the best strategy.' },
+    { key: 'storage_access', label: 'Storage and preservation available', placeholder: 'e.g. traditional kiln, no kiln, cold storage (rare), dried on racks', tooltip: 'Without cold storage, speed and smoking/drying are the only preservation options. A functional kiln changes the income equation completely.' },
+    { key: 'main_challenge', label: 'Biggest challenge', placeholder: 'e.g. fish spoiling before sold, getting too low price, can\'t reach Yenagoa market, no kiln', tooltip: 'The specific bottleneck tells us where to focus. Spoilage = processing method. Low price = market access or collective selling. Isolation = transport or WhatsApp trader networks.', required: true },
+  ],
+  'oil-contamination': [
+    { key: 'location', label: 'Exact location of suspected contamination', placeholder: 'e.g. Kolo Creek stretch between the pipeline crossing and the old SPDC manifold', tooltip: 'Exact location helps identify responsible pipeline operator, proximity to infrastructure, and whether this is a known spill. Be as specific as possible — it matters for legal claims.', required: true },
+    { key: 'visual_signs', label: 'What they can see on the water and fish', placeholder: 'e.g. oily rainbow sheen, dead fish floating, petroleum smell, black oily sediment on banks', tooltip: 'Rainbow/iridescent sheen = hydrocarbon contamination. Dead fish = acute toxicity event. Petroleum smell = active leak. Black sediment near pipelines = historic chronic contamination.', required: true },
+    { key: 'catch_impact', label: 'Impact on catches', placeholder: 'e.g. no fish for 2 weeks, fish have unusual taste/smell, catches dropped 80%', tooltip: 'Sudden collapse = acute spill. Gradual decline = chronic contamination. Fish with unusual smell should NOT be eaten — hydrocarbons accumulate in flesh.', required: true },
+    { key: 'health_symptoms', label: 'Any health symptoms from water contact', placeholder: 'e.g. skin rash, eye irritation, headaches after fishing in the creek', tooltip: 'Hydrocarbon exposure through skin contact causes rashes, eye irritation, and respiratory issues. This is a serious health matter — document all symptoms for the NOSDRA report.' },
+    { key: 'timeline', label: 'When this started and any known incident', placeholder: 'e.g. started 3 weeks ago, heard a pipeline burst near Otuabagi, or no known incident', tooltip: 'Timeline helps establish causation for compensation claims. Pipeline burst = operator liability. Chronic leaking = also operator liability. Document everything from the first day noticed.' },
+    { key: 'documentation', label: 'Documentation gathered so far', placeholder: 'e.g. photos with dates, GPS location saved on phone, names of witnesses', tooltip: 'Photos, dates, GPS coordinates, and witness names are the foundation of any compensation claim. Without documentation, claims fail. We can guide on what to gather.' },
+  ],
+  'climate-safety': [
+    { key: 'waterways_used', label: 'Waterways and open water they fish on', placeholder: 'e.g. Kolo Creek (narrow), River Nun (open water), coastal creeks near Brass', tooltip: 'Open wide rivers carry much higher capsize risk than narrow creeks. Risk assessment depends on where they fish.', required: true },
+    { key: 'current_season', label: 'Current season and recent weather', placeholder: 'e.g. early wet season, heavy rain yesterday, dry season ending late', tooltip: 'Traditional fishing calendars are shifting — dry season 2–4 weeks later than 20 years ago, wet season more intense. Local knowledge may be unreliable now.', required: true },
+    { key: 'changes_noticed', label: 'Changes they have noticed over recent years', placeholder: 'e.g. floods worse than before, fish harder to find in usual dry-season spots, seasons unpredictable', tooltip: 'Local observation of change is valuable data. It helps us understand what is shifting and tailor adaptation advice to their actual situation.' },
+    { key: 'safety_equipment', label: 'Safety equipment on canoe', placeholder: 'e.g. nothing, one life jacket, a rope, a bailing container', tooltip: 'A plastic container tied to rope as a flotation aid is better than nothing. Life jackets are rare but critical. Knowing current safety equipment shapes the safety advice.', required: true },
+    { key: 'flood_risk', label: 'Fish pond location and flood exposure (if applicable)', placeholder: 'e.g. pond on low ground near creek, flooded in 2022, on higher ground', tooltip: 'The 2022 floods submerged 300+ Bayelsa communities and destroyed thousands of fish ponds. Elevated bunds (50–80cm above flood level) are the critical mitigation.' },
+    { key: 'main_concern', label: 'Main concern or question', placeholder: 'e.g. worried about fishing in rainy season, pond keeps flooding, catches very unpredictable', tooltip: 'The most urgent concern shapes where we start. Safety first — if they describe dangerous conditions, we address that before anything else.', required: true },
+  ],
+};
 
 // ─── Niger Delta Fishing Knowledge Base ───────────────────────────────────────
 
@@ -117,25 +184,20 @@ FRESHWATER — rivers and creeks like Kolo Creek:
   ideal for pond farming; prefers shallow warm water
 - Chrysichthys (bagrid catfish / "Oporo") — Chrysichthys nigrodigitatus: bottom-dwelling;
   premium eating quality; highest wild market value; declining due to oil contamination
-- Synodontis (upside-down catfish): caught in traps in creeks
-- Labeo (African carp / "Eja funfun") — Labeo coubie: large; caught in gill nets; good value
 - Bonga / "Shawa" — Ethmalosa fimbriata: most abundant estuarine species; very affordable protein;
   important for smoking/drying; sells well dried in markets up to Lagos
 
 ESTUARINE & COASTAL — lower creeks, mangroves:
 - Croaker / "Eja dudu" — Pseudotolithus spp.: high-value white fish; popular in city markets
 - Mullet — Mugil cephalus: schooling fish; cast nets at dawn; good fresh price
-- Snapper / Grunter — Pomadadasys peroteti: good table fish; commands premium price
+- Shrimp / "Ẹja okun kekere": highest value per kg (₦4,000–8,000/kg); seasonal; hand-gathered
 
 SHELLFISH & INVERTEBRATES — important women's livelihoods:
-- Shrimp / "Ẹja okun kekere": highest value per kg (₦4,000–8,000/kg); seasonal; hand-gathered
-  or fine-mesh traps; sells immediately — no storage needed
-- Crabs — mangrove and mud crabs; caught in traps; good local demand
-- Oysters: attached to mangrove roots; hand-gathered; important for women's income
 - Periwinkle / "Isawuru" — Tympanotonus fuscatus: common in mangrove mudflats; women and children
   gather by hand; ₦1,000–2,500/kg in Yenagoa/Port Harcourt markets
 - Clams / "Isami" — Egeria radiata: freshwater clam; important food and income;
   found in creek beds; WARNING — heavy metal contamination risk near oil infrastructure
+- Oysters: attached to mangrove roots; hand-gathered; important for women's income
 
 FISHING GEAR (what local fishers actually use):
 - Cast nets: used from canoe or bank; good for mullet, tilapia, small bonga
@@ -144,9 +206,6 @@ FISHING GEAR (what local fishers actually use):
 - Dugout canoes: primary vessel; paddle or small outboard motor
 - Round/drum traps: passive; set overnight in channels for catfish and Chrysichthys
 - Long-lines with hooks: set overnight; large catfish and Labeo
-- Hook and line: from canoe or bank; bait — worms, small fish, bread
-- Atalla (lift nets): used at night with light attraction; effective for bonga and tilapia
-- Basket traps: for shallow creeks and flooded areas
 
 OIL CONTAMINATION — CRITICAL FOR OLOIBIRI:
 - Oloibiri was Nigeria's first oil field (1956); decades of spills have contaminated waterways
@@ -159,7 +218,6 @@ OIL CONTAMINATION — CRITICAL FOR OLOIBIRI:
 - LEGAL RIGHTS: Report spills to NOSDRA (0800-NOSDRA-9); document with photos, dates,
   GPS location, and catch records for compensation claims
 - Recovery timeline: after a spill is cleaned, 18–36 months before fish populations return significantly
-- Clams and periwinkle: particularly dangerous near oil infrastructure — absorb heavy metals
 
 AQUACULTURE — KEY OPPORTUNITY:
 - Pond catfish farming (Clarias gariepinus) is the highest-income aquaculture option
@@ -167,95 +225,168 @@ AQUACULTURE — KEY OPPORTUNITY:
 - Fingerlings: available from hatcheries in Yenagoa (NIOMR, ADP) — cost ~₦50–80 each
 - Feed: commercial catfish pellets (₦8,000–15,000/bag) supplemented with kitchen waste/worms
 - 100m² pond: produces 300–500kg per harvest cycle (5–6 months) — significant income
-- Tilapia ponds: simpler; breeds fast — must manage population (remove males or separate)
 - CRITICAL RISK: flooding destroys ponds — locate on higher ground; build raised earthen bunds
-- Pond disease signs: fish gasping at surface, loss of appetite, unusual swimming behaviour,
-  ulcers on skin, fin/tail rot; most common causes are poor water quality and overcrowding
 - Water quality: change 30% of pond water weekly; avoid runoff from latrines; test for ammonia
-- MARKET: live catfish ₦2,500–4,500/kg; smoked catfish ₦3,500–6,000/kg
-- Tilapia: ₦1,800–3,500/kg live; smoking adds 50–80% value
 
 FISH PROCESSING & MARKET:
-- SMOKING: Traditional kiln smoking preserves fish 2–6 weeks; dramatically extends market reach;
-  smoked catfish from Bayelsa sold in markets from Yenagoa to Lagos; adds 40–80% value
-- DRYING: Sun-dried bonga/small fish; simple; reduces weight; good for transport to distant markets
-- FERMENTATION: Some communities ferment small fish into condiments — underexplored income
-- MARKET PRICES (approximate, Bayelsa 2024):
-  • Live catfish: ₦2,500–4,500/kg (₦4,000+ in city markets, dry-season scarcity)
-  • Smoked catfish: ₦3,500–6,000/kg
-  • Live tilapia: ₦1,800–3,500/kg
-  • Smoked bonga: ₦800–2,000/kg (varies by size and quality)
-  • Fresh shrimp: ₦4,000–8,000/kg (highest value per kg; sells immediately)
-  • Periwinkle: ₦1,000–2,500/kg in Yenagoa/PH markets
-  • Clams: ₦600–1,500/kg
+- SMOKING: Traditional kiln smoking preserves fish 2–6 weeks; adds 40–80% value
+- MARKET PRICES (approximate, Bayelsa 2024–2025):
+  • Live catfish: ₦2,500–4,500/kg | Smoked catfish: ₦3,500–6,000/kg
+  • Live tilapia: ₦1,800–3,500/kg | Smoked bonga: ₦800–2,000/kg
+  • Fresh shrimp: ₦4,000–8,000/kg | Periwinkle: ₦1,000–2,500/kg
   • Fresh croaker: ₦3,000–6,000/kg
-- Key selling points: Yenagoa market, Nembe market, Brass port
 - Women fish traders: operate transport-and-resale networks; critical economic actors
-- Cold chain almost non-existent: speed and smoking/drying are the only preservation tools
-- Cooperative selling: fishers together command better bulk prices from traders
 
-CLIMATE CHANGE IMPACTS ON FISHING:
-- More intense wet-season floods (2022: 300+ Bayelsa communities submerged) displace fish from
-  usual habitats; destroy fish ponds; damage/lose gear; make canoe access dangerous
+CLIMATE CHANGE IMPACTS:
+- More intense wet-season floods (2022: 300+ Bayelsa communities submerged)
 - Irregular seasons: dry season later and shorter; traditional fish-concentration knowledge unreliable
-- Sea level rise: saltwater intrusion advancing up creeks; affects freshwater species; shifts shellfish habitat
-- Temperature rise: warmer water = lower dissolved oxygen = fish stress; breeding cycles disrupted
+- Sea level rise: saltwater intrusion advancing up creeks; affects freshwater species
 
 SAFETY — NON-NEGOTIABLE:
 - Fishing on open water during heavy rains or storms = canoe capsize risk; do NOT go out
-- Waterborne disease: exposure to contaminated water causes skin rashes, eye infections,
-  respiratory problems — protect skin; wash after contact with creek water
-- Personal flotation devices (life jackets): rarely used but critical — advocate for them
 - Never eat fish or shellfish from areas with visible oil contamination signs
+- Personal flotation devices: rarely used but critical — advocate for them
 
 RESOURCES FOR REFERRAL:
 - NIOMR Yenagoa office: fingerlings, aquaculture technical support
 - ADP (Agricultural Development Programme): fingerlings, extension support
 - NOSDRA: oil spill reporting and compensation
 - WhatsApp trader groups: Yenagoa and Port Harcourt daily market prices
-
-COMMUNICATION PRINCIPLES:
-- Use plain language; no jargon (say "how much air is in the water" not "dissolved oxygen")
-- Acknowledge the deep cultural connection to Kolo Creek and the waterways in Ijaw/Ogbia culture
-- Be honest about contamination risks — fishers already know something is wrong
-- Acknowledge the real loss when a traditional fishing ground is destroyed — it is cultural, not just economic
-- Connect every recommendation to tools the fisher already has (canoe, existing gear, phone)
-- Always give at least one action the client can take TODAY at zero cost
 `;
+
+// ─── Probe prompt builder ─────────────────────────────────────────────────────
+
+function buildProbePrompt(field: IntakeField, consultType: ConsultationType, client: Client, currentIntake: Record<string, string>): string {
+  const ct = CONSULT_TYPES[consultType];
+  const activityList = client.activities.map(a => ACTIVITY_OPTIONS.find(o => o.value === a)?.label ?? a).join(', ') || 'fishing';
+  const filledSoFar = Object.entries(currentIntake)
+    .filter(([, v]) => v?.trim())
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n') || 'nothing yet';
+
+  return `You are coaching a youth fishing advisor in Oloibiri, Bayelsa State, Nigeria. They are sitting with a client RIGHT NOW and need you to guide an in-depth interview about one specific topic.
+
+CLIENT: ${client.client_name}, ${client.village}
+CLIENT ACTIVITIES: ${activityList}
+CONSULTATION TYPE: ${ct.emoji} ${ct.label}
+TOPIC BEING EXPLORED: "${field.label}"
+WHAT IT MEANS: ${field.tooltip}
+
+INTAKE INFORMATION GATHERED SO FAR:
+${filledSoFar}
+
+${NIGER_DELTA_FISHING_CONTEXT}
+
+YOUR ROLE:
+- Ask ONE focused question at a time that the advisor can read directly to the client
+- Keep language very simple — the advisor may translate to Ijaw or Yoruba
+- Build a complete picture of this specific topic before moving on
+- When you have enough information, end with the exact phrase: "✅ This topic is well characterised. You can move on."
+- Never ask more than 6 questions on this one topic
+- Draw on Niger Delta context: oil contamination, Kolo Creek, seasonal patterns, local fish species
+
+FORMAT: One short question. After the advisor gives you the client's answer, probe deeper or confirm you have enough. Be direct, be brief, speak as if coaching in real time.
+
+Start now with your FIRST question about: "${field.label}"`;
+}
+
+// ─── AI advice prompt ─────────────────────────────────────────────────────────
+
+function buildAdvicePrompt(consultType: ConsultationType, client: Client, intake: Record<string, string>): string {
+  const ct = CONSULT_TYPES[consultType];
+  const activityList = client.activities.map(a => ACTIVITY_OPTIONS.find(o => o.value === a)?.label ?? a).join(', ') || 'fishing';
+  const waterwayList = client.waterways.join(', ') || 'local creeks';
+  const intakeSummary = INTAKE_FIELDS[consultType]
+    .map(f => `${f.label}: ${intake[f.key]?.trim() || 'not provided'}`)
+    .join('\n');
+
+  const urgencyInstructions = consultType === 'oil-contamination'
+    ? '\n🚨 If contamination is confirmed: open with URGENT. State clearly what to STOP immediately (eating contaminated fish, fishing contaminated area). Food safety before economics.'
+    : consultType === 'climate-safety'
+    ? '\n⛵ If dangerous conditions described: prioritise safety absolutely. State clearly if it is NOT safe to go on water right now.'
+    : '';
+
+  return `You are an expert fisheries and aquaculture advisor supporting a youth advisor working directly with fishing communities in Oloibiri (Bayelsa State) and surrounding Niger Delta communities, Nigeria.
+
+${NIGER_DELTA_FISHING_CONTEXT}
+
+CONSULTATION: ${ct.emoji} ${ct.label}
+CLIENT: ${client.client_name}, ${client.village}
+CLIENT ACTIVITIES: ${activityList}
+WATERWAYS: ${waterwayList}
+
+STRUCTURED INTAKE COMPLETED BY YOUTH ADVISOR:
+${intakeSummary}
+
+YOUR TASK: Provide a complete, actionable advisory response based on this intake data.
+
+STRUCTURE YOUR RESPONSE:
+1. **URGENCY LEVEL**: State LOW / MEDIUM / HIGH / URGENT — and the single most important reason
+2. **DIAGNOSIS / KEY FINDINGS**: What are the 2–4 most important things you see in this data?
+3. **IMMEDIATE ACTIONS**: What should the client do RIGHT NOW (step by step, prioritise free/low-cost actions first)
+4. **MEDIUM-TERM PLAN**: What to do in the next 1–4 weeks
+5. **REFERRAL** (if needed): Who to contact — NIOMR, ADP, NOSDRA, WhatsApp trader groups — and exactly what to say
+6. **WHAT NOT TO DO**: 1–2 common mistakes to avoid in this situation
+7. **INCOME ESTIMATE** (where relevant): Give a specific Naira calculation if this is processing-market or aquaculture
+8. **ONE ACTION TODAY**: End with one sentence — the single most important thing the client can do today, at zero cost
+
+FORMAT:
+- Short paragraphs and bullet points
+- Specific and local — species names, Naira amounts, waterway names, local references
+- Plain language the advisor can read aloud to the client
+${urgencyInstructions}
+
+⚠️ DISCLAIMER: This is advisory support only. For aquaculture disease, always recommend contacting NIOMR. For oil contamination, recommend NOSDRA. The youth advisor must use their own judgement and training.`;
+}
+
+// ─── Follow-up chat prompt ─────────────────────────────────────────────────────
+
+function buildFollowupPrompt(client: Client, consultation: Consultation): string {
+  const ct = CONSULT_TYPES[consultation.consultation_type];
+  const uc = consultation.urgency_level ? URGENCY_CONFIG[consultation.urgency_level] : null;
+  return `You are a fisheries and aquaculture expert advisor supporting a youth fishing advisor in Oloibiri, Bayelsa State, Nigeria. The advisor has completed a structured consultation and has follow-up questions.
+
+${NIGER_DELTA_FISHING_CONTEXT}
+
+CLIENT ON FILE: ${client.client_name}, ${client.village}
+CONSULTATION TYPE: ${ct.emoji} ${ct.label}
+URGENCY: ${uc ? uc.label : 'not assessed'}
+PROBLEM SUMMARY: ${consultation.problem_summary}
+AI ADVICE GIVEN: ${consultation.ai_advice ?? 'see consultation record'}
+
+The advisor may ask follow-up questions about the advice, how to explain something to the client, referral logistics, or any practical fishing/aquaculture question related to this case.
+
+Respond with practical, specific advice appropriate to this community context. Keep answers concise and actionable. Reference specific species names, Naira amounts, and local waterways where relevant. Remind the advisor to contact NIOMR, ADP, or NOSDRA for anything outside your advisory scope.`;
+}
 
 // ─── Consultation type config ─────────────────────────────────────────────────
 
 const CONSULT_TYPES: Record<ConsultationType, {
-  label: string;
-  emoji: string;
-  colour: string;
-  bgLight: string;
-  border: string;
-  textColour: string;
-  description: string;
+  label: string; emoji: string; colour: string;
+  bgLight: string; border: string; textColour: string; description: string;
 }> = {
-  'catch-problem':      { label: 'Catch Problem',         emoji: '🎣', colour: 'from-blue-600 to-cyan-600',    bgLight: 'bg-blue-50',   border: 'border-blue-300',   textColour: 'text-blue-700',   description: 'Declining catches, gear problems, wrong fishing spots or times' },
-  'aquaculture':        { label: 'Fish Pond / Aquaculture',emoji: '🐟', colour: 'from-teal-600 to-green-600',  bgLight: 'bg-teal-50',   border: 'border-teal-300',   textColour: 'text-teal-700',   description: 'Starting or fixing a catfish or tilapia pond, disease, feed, water quality' },
-  'processing-market':  { label: 'Processing & Market',   emoji: '💰', colour: 'from-amber-600 to-orange-500', bgLight: 'bg-amber-50',  border: 'border-amber-300',  textColour: 'text-amber-700',  description: 'Smoking, drying, pricing, when and where to sell' },
-  'oil-contamination':  { label: 'Oil Contamination',     emoji: '⚠️', colour: 'from-red-700 to-orange-700',  bgLight: 'bg-red-50',    border: 'border-red-300',    textColour: 'text-red-700',    description: 'Identifying pollution, food safety, legal rights, compensation' },
-  'climate-safety':     { label: 'Climate & Safety',      emoji: '🌊', colour: 'from-indigo-600 to-blue-600', bgLight: 'bg-indigo-50', border: 'border-indigo-300', textColour: 'text-indigo-700', description: 'Flood risk, safe fishing seasons, weather, adapting to change' },
+  'catch-problem':     { label: 'Catch Problem',          emoji: '🎣', colour: 'from-blue-600 to-cyan-600',    bgLight: 'bg-blue-50',   border: 'border-blue-300',   textColour: 'text-blue-700',   description: 'Declining catches, gear problems, wrong fishing spots or times' },
+  'aquaculture':       { label: 'Fish Pond / Aquaculture', emoji: '🐟', colour: 'from-teal-600 to-green-600',  bgLight: 'bg-teal-50',   border: 'border-teal-300',   textColour: 'text-teal-700',   description: 'Starting or fixing a catfish or tilapia pond, disease, feed, water quality' },
+  'processing-market': { label: 'Processing & Market',    emoji: '💰', colour: 'from-amber-600 to-orange-500', bgLight: 'bg-amber-50',  border: 'border-amber-300',  textColour: 'text-amber-700',  description: 'Smoking, drying, pricing, when and where to sell for more income' },
+  'oil-contamination': { label: 'Oil Contamination',      emoji: '⚠️', colour: 'from-red-700 to-orange-700',  bgLight: 'bg-red-50',    border: 'border-red-300',    textColour: 'text-red-700',    description: 'Identifying pollution, food safety, legal rights, compensation claims' },
+  'climate-safety':    { label: 'Climate & Safety',       emoji: '🌊', colour: 'from-indigo-600 to-blue-600', bgLight: 'bg-indigo-50', border: 'border-indigo-300', textColour: 'text-indigo-700', description: 'Flood risk, safe fishing seasons, weather, adapting to climate change' },
 };
 
 const URGENCY_CONFIG: Record<UrgencyLevel, {
-  label: string; colour: string; bg: string; border: string; icon: React.ReactNode;
+  label: string; colour: string; bg: string; border: string; textDark: string; icon: React.ReactNode; description: string;
 }> = {
-  low:    { label: 'Low',    colour: 'text-green-700',  bg: 'bg-green-50',  border: 'border-green-300',  icon: <CheckCircle size={13}/> },
-  medium: { label: 'Medium', colour: 'text-yellow-700', bg: 'bg-yellow-50', border: 'border-yellow-300', icon: <Clock size={13}/> },
-  high:   { label: 'High',   colour: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-300', icon: <AlertTriangle size={13}/> },
-  urgent: { label: 'URGENT', colour: 'text-red-700',    bg: 'bg-red-50',    border: 'border-red-400',    icon: <AlertTriangle size={13}/> },
+  low:    { label: 'Low',    colour: 'text-green-700',  bg: 'bg-green-50',  border: 'border-green-300',  textDark: 'text-green-800',  icon: <CheckCircle size={13}/>, description: 'No immediate risk — plan medium-term improvements.' },
+  medium: { label: 'Medium', colour: 'text-yellow-700', bg: 'bg-yellow-50', border: 'border-yellow-400', textDark: 'text-yellow-800', icon: <Clock size={13}/>,        description: 'Act this week — monitor and follow up in 2–7 days.' },
+  high:   { label: 'High',   colour: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-400', textDark: 'text-orange-800', icon: <AlertTriangle size={13}/>, description: 'Act today — losses or health risks are escalating.' },
+  urgent: { label: 'URGENT', colour: 'text-red-700',    bg: 'bg-red-50',    border: 'border-red-400',    textDark: 'text-red-800',    icon: <AlertTriangle size={13}/>, description: 'Stop harmful activity immediately and act now.' },
 };
 
 const ACTIVITY_OPTIONS: { value: ActivityType; label: string; emoji: string }[] = [
-  { value: 'wild-fishing',       label: 'Wild fishing (creek/river)',     emoji: '🎣' },
-  { value: 'aquaculture',        label: 'Fish pond / aquaculture',        emoji: '🐟' },
-  { value: 'fish-trading',       label: 'Fish trading / selling',         emoji: '🛒' },
-  { value: 'fish-processing',    label: 'Fish processing / smoking',      emoji: '🔥' },
-  { value: 'shellfish-gathering',label: 'Shellfish gathering (periwinkle/clam/oyster)', emoji: '🦪' },
+  { value: 'wild-fishing',        label: 'Wild fishing (creek/river)',              emoji: '🎣' },
+  { value: 'aquaculture',         label: 'Fish pond / aquaculture',                 emoji: '🐟' },
+  { value: 'fish-trading',        label: 'Fish trading / selling',                  emoji: '🛒' },
+  { value: 'fish-processing',     label: 'Fish processing / smoking',               emoji: '🔥' },
+  { value: 'shellfish-gathering', label: 'Shellfish gathering (periwinkle/clam/oyster)', emoji: '🦪' },
 ];
 
 const WATERWAY_OPTIONS = [
@@ -265,228 +396,7 @@ const WATERWAY_OPTIONS = [
 
 const VILLAGES = ['Oloibiri', 'Otuabagi', 'Nembe', 'Brass', 'Ogbia', 'Yenagoa', 'Ikebiri', 'Other'];
 
-// ─── Build system prompt per consultation type ────────────────────────────────
-
-function buildSystemPrompt(type: ConsultationType, client: Client): string {
-  const ct = CONSULT_TYPES[type];
-  const activityList = client.activities.map(a => ACTIVITY_OPTIONS.find(o => o.value === a)?.label ?? a).join(', ') || 'not specified';
-  const waterwayList = client.waterways.join(', ') || 'local creeks';
-
-  const typeInstructions: Record<ConsultationType, string> = {
-    'catch-problem': `
-CONSULTATION TYPE: Catch Problem Diagnosis
-Help the youth advisor identify why catches are declining or disappointing, and give a practical action plan.
-
-DIAGNOSTIC FLOW:
-Step 1 — Establish baseline: what species, what gear, which waterway, what time of day/season
-Step 2 — Identify the change: when did catches decline? Gradually or suddenly? Which species affected most?
-Step 3 — Investigate causes: oil contamination nearby? Seasonal change? Gear issue? Wrong fishing location or time? Overfishing of a small area? Water level changes?
-Step 4 — Recommend specific improvements: gear adjustment, timing, location change, species shift
-
-KEY DIAGNOSTIC QUESTIONS:
-- Is the decline in a specific species or all fish? (Species-specific decline often = contamination or habitat loss)
-- Is it recent and sudden or gradual over years? (Sudden = spill or seasonal event; gradual = long-term habitat damage)
-- What does the water look like/smell like? (Contamination indicators)
-- What mesh size on gill nets? (Wrong mesh = wrong species or undersized fish)
-- What time of day/night are they fishing? (Catfish most active at night; mullet at dawn)
-- Dry season vs. wet season techniques differ — is the fisher adapting to the season?
-
-ALWAYS:
-- Mention at least one gear or technique adjustment the fisher can try TODAY for free
-- If contamination is suspected, flag it and move to oil contamination triage
-- Be honest if the fishing ground has been permanently damaged
-`,
-    'aquaculture': `
-CONSULTATION TYPE: Aquaculture / Fish Pond Advisory
-Help the youth advisor guide the client on starting, improving, or troubleshooting a fish pond.
-
-ADVISORY FLOW:
-Step 1 — Understand current situation: existing pond or planning to start? What species? What size? What problems?
-Step 2 — For existing ponds: diagnose problems (fish deaths, slow growth, disease signs, water quality, feed issues)
-Step 3 — For new ponds: guide through site selection, construction, stocking, feeding, and market planning
-Step 4 — Give a specific improvement or action plan with cost estimates where possible
-
-KEY AQUACULTURE PRINCIPLES:
-POND SETUP:
-- Catfish (Clarias gariepinus): best choice; tolerates low oxygen; grows 500–800g in 5–6 months
-- Tilapia: easier to start; breeds fast (manage males); good for beginners
-- Pond size: 10m × 10m minimum (100m²); 1–1.5m deep; freshwater only
-- Location: AWAY from flood zones; higher ground; build earthen bunds (raised walls)
-- Stocking density: 100–200 catfish fingerlings per 100m² for good growth rate
-- Fingerlings: from NIOMR or ADP hatcheries in Yenagoa (₦50–80 each)
-
-FEEDING:
-- Commercial catfish pellets (₦8,000–15,000/bag) + kitchen waste + worms
-- Feed 5% of body weight daily; 2× per day (morning and evening)
-- Do NOT overfeed — excess feed rots and pollutes water
-
-WATER QUALITY (most common problem source):
-- Change 30% of pond water weekly or when fish gasp at surface
-- Fish gasping at surface = low oxygen = change water urgently
-- Avoid any runoff from latrines, fertiliser, or oil into pond
-- Algae (green water) is normal and good; dark or smelly water = problem
-
-DISEASE SIGNS AND RESPONSES:
-- Gasping at surface: low oxygen → change water NOW
-- Not eating: check water quality first; reduce feed; observe for 48 hours
-- Ulcers / open sores on body: bacterial infection; isolate affected fish; reduce stocking density; improve water flow
-- Fin/tail rot: bacterial; caused by stress and poor water quality; isolate; improve water
-- Belly-up or erratic swimming: serious; reduce stocking density; change water; call NIOMR
-- Prevention is always cheaper than treatment — maintain water quality consistently
-
-ECONOMICS:
-- 100m² pond × 300kg harvest × ₦2,500/kg live = ₦750,000 per cycle (5–6 months)
-- Smoked catfish: ₦3,500–6,000/kg → smoking doubles income potential
-- Start small (100–200 fingerlings) to learn before scaling
-`,
-    'processing-market': `
-CONSULTATION TYPE: Fish Processing & Market Strategy
-Help the youth advisor give the client a concrete plan to get more income from their catch or produce.
-
-ADVISORY FLOW:
-Step 1 — Understand current practice: what species, how do they currently sell (fresh/smoked/dried), to whom, at what price
-Step 2 — Identify the biggest income leakage: post-harvest loss? Selling too cheap? Wrong market? No processing?
-Step 3 — Give specific, actionable strategy to improve income received or reduce losses
-Step 4 — Connect to local market intelligence and timing
-
-KEY MARKET PRINCIPLES:
-SMOKING AND PROCESSING:
-- Traditional kiln smoking: preserves catfish 2–6 weeks; extends market reach from local to Yenagoa/Lagos
-- Smoking adds 40–80% value to fresh fish — this is the single most powerful income lever
-- Good smoked catfish: properly dried (not soft in middle), clean (no burning), golden-brown colour
-- Bonga drying: simple sun drying on elevated racks; reduces weight by 70% for easy transport
-- Quality matters: buyers in city markets pay 30–50% premium for consistent quality smoking
-
-TIMING AND PRICING:
-- Dry season (Dec–March): fish scarce → prices highest; smoked fish stored from wet season sells at peak
-- Wet season: fish plentiful → prices lowest; best time to buy cheaply for smoking/drying and storage
-- Never sell when everyone else sells — store smoked fish and sell 4–8 weeks later for better price
-- Shrimp and croaker: sell immediately (fresh); do NOT attempt to store without cold chain
-
-MARKETS AND BUYERS:
-- Yenagoa market, Nembe market, Brass port: key selling points
-- WhatsApp trader groups (Yenagoa, Port Harcourt): share daily prices; join or form one
-- Middlemen pay only 40–60% of final market value — direct selling to consumers or market women improves income significantly
-- Cooperative selling: fishers pooling catch get better bulk prices and can access larger buyers
-- Periwinkle and oysters: sell to female traders who transport to Yenagoa/PH — these networks are established
-
-SPECIFIC INCOME CALCULATIONS:
-- 100kg fresh catfish at ₦2,500/kg = ₦250,000
-- Same fish smoked (loses 60% weight = 40kg smoked) at ₦4,500/kg smoked = ₦180,000
-  WAIT: factor in fuel cost for smoking — if fuel costs ₦20,000, net gain from smoking = ₦180,000 - ₦20,000 - ₦250,000 = still better if selling price is ₦5,000+
-- Always calculate net income, not gross — fuel, transport, and time all cost money
-`,
-    'oil-contamination': `
-CONSULTATION TYPE: Oil Contamination Assessment & Response
-Help the youth advisor assess suspected oil contamination and give the client a clear safety and legal response plan.
-
-⚠️ THIS IS A SERIOUS SITUATION — address it with honesty and urgency.
-
-ASSESSMENT FLOW:
-Step 1 — Gather evidence: water appearance/smell, dead fish signs, proximity to pipeline infrastructure, skin/health symptoms
-Step 2 — Assess contamination likelihood (definite / probable / possible / unlikely)
-Step 3 — Immediate safety actions: what to stop doing, food safety, health protection
-Step 4 — Rights and documentation: NOSDRA report, photo evidence, compensation claim process
-Step 5 — Alternative income while avoiding contaminated areas
-
-KEY PRINCIPLES:
-IDENTIFYING CONTAMINATION:
-- Definite signs: oily sheen on water, petroleum smell, dead fish floating, dark/black sediment near pipelines
-- Probable signs: fish with unusual taste/smell, skin rashes after water contact, stunted shellfish near pipelines
-- Possible signs: declining catches in specific creek stretches near oil infrastructure (could also be other causes)
-
-FOOD SAFETY RULES — NON-NEGOTIABLE:
-- Do NOT eat fish or shellfish from areas with visible contamination signs — hydrocarbons accumulate in flesh
-- Clams and periwinkle near oil infrastructure: highest risk — absorb heavy metals from sediment
-- If uncertain about a fishing ground's safety, err on the side of caution — illness from contaminated fish is real
-
-LEGAL RIGHTS:
-- NOSDRA (0800-NOSDRA-9): receives spill reports; required to investigate
-- Documentation needed: photos with dates, GPS location if possible, descriptions of dead fish/damage, catch records showing decline before and after spill
-- Compensation claims: oil companies are legally required to remediate and compensate; community documentation is essential evidence
-- Community unity: compensation claims made by groups of affected fishers are harder to dismiss than individual claims
-
-ALTERNATIVE INCOME DURING CONTAMINATION:
-- Shift to uncontaminated waterways (identify nearest clean creek)
-- Aquaculture pond (on land) is not affected by waterway contamination
-- Shellfish gathering: move to mangrove areas away from pipeline routes
-- Fish trading: buy from uncontaminated areas and sell in local markets
-
-RECOVERY TIMELINE — BE HONEST:
-- After active spill cleaned: 18–36 months before fish populations return significantly
-- Clam and periwinkle populations: 2–5 years for full recovery
-- Heavily contaminated sediment: contamination persists in creek beds for decades even after surface appears clean
-`,
-    'climate-safety': `
-CONSULTATION TYPE: Climate Change & Safety Advisory
-Help the youth advisor build the client's awareness of changing conditions and give practical adaptation advice.
-
-ADVISORY FLOW:
-Step 1 — Understand current exposure: which waterways, what season, what changes they have noticed
-Step 2 — Identify the main risks: flood danger, irregular seasons, waterway changes, health exposure
-Step 3 — Give a practical adaptation plan: when to fish, when not to, what to change
-Step 4 — Update their seasonal fishing calendar for changed conditions
-
-KEY CLIMATE MESSAGES:
-SEASONAL CHANGES:
-- Traditional dry-season fishing calendars (when fish concentrate in pools) are shifting — fish concentration timing is 2–4 weeks later than 20 years ago
-- Wet season (April–November) is becoming more intense: heavier rain events, more sudden floods
-- Dry season (December–March) now shorter — fewer weeks of concentrated-fish conditions
-- Best adaptation: fish more frequently in early dry season (December–January) before conditions change
-
-FLOOD SAFETY — CRITICAL:
-- Do NOT fish on open water during heavy rain or approaching storm — canoe capsize risk is real and fatal
-- If water rises 30cm+ overnight: do not cross open stretches; stick to creek edges with trees
-- Warning signs of dangerous conditions: sudden wind increase, darkening sky, rapid current increase
-- Life jackets/personal flotation: advocate strongly — a plastic container tied to a rope is better than nothing
-- Leave gear rather than risk life in a storm — gear can be replaced, lives cannot
-
-FISH POND AND FLOOD RISK:
-- Ponds on low ground: will flood in 2022-level events; losses can be total
-- Mitigation: build earthen bunds 50–80cm above normal flood level; locate ponds on elevated ground
-- Wet-season pond management: reduce stocking density before wet season; have drain pipes ready
-
-ADAPTING GEAR AND TECHNIQUE:
-- In flood conditions: fish the edges of flooded land (fish move into newly flooded vegetation to feed)
-- In high water: fish use different movement patterns — long-lines and traps work better than cast nets
-- In dry season: concentrate effort at deeper channel bends where fish aggregate
-
-HEALTH RISKS FROM CONTAMINATED WATER:
-- Creek water contact with contaminated areas: skin rashes, eye infections, respiratory issues
-- Protect skin: wear covering clothing in contaminated areas; wash thoroughly after contact
-- Do not drink or cook with creek water near oil infrastructure
-`,
-  };
-
-  return `You are an expert fisheries and aquaculture advisor supporting a youth advisor working directly with fishing communities in Oloibiri (Bayelsa State) and surrounding Niger Delta communities, Nigeria. The youth advisor is conducting a real consultation with a client who is present.
-
-${NIGER_DELTA_FISHING_CONTEXT}
-
-CURRENT CONSULTATION:
-- Client: ${client.client_name}, ${client.village}
-- Client's activities: ${activityList}
-- Waterways used: ${waterwayList}
-${typeInstructions[type]}
-
-YOUR ROLE IN THIS CONSULTATION:
-You are the AI knowledge engine behind the youth advisor. The youth types what the client describes. You respond with:
-1. Targeted clarifying questions (1–2 at a time; build a clear picture before advising)
-2. Clear diagnosis or recommendation with your reasoning shown
-3. Urgency level where relevant: LOW / MEDIUM / HIGH / URGENT
-4. Specific actions — always prioritise free and low-cost actions first
-5. When to refer to NIOMR, ADP, NOSDRA, or other support
-
-FORMAT YOUR RESPONSES:
-- Short paragraphs and bullet points
-- Specific and local — species names, Naira amounts, waterway names, local references
-- Plain language the client can understand when the youth reads it aloud
-- End every response with at least one concrete action the client can take TODAY
-
-${type === 'oil-contamination' ? '🚨 If contamination is confirmed or highly probable: lead with URGENT and state clearly what the client should STOP doing immediately (eating contaminated fish, fishing contaminated area).' : ''}
-${type === 'climate-safety' ? '⛵ If dangerous weather conditions are described: prioritise safety above all other advice. State clearly if it is NOT safe to go out on the water.' : ''}`;
-}
-
-// ─── Fishing background (preserved from original) ─────────────────────────────
+// ─── Fishing Background ───────────────────────────────────────────────────────
 
 const FishingBackground: React.FC = () => {
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
@@ -527,17 +437,147 @@ const FishingBackground: React.FC = () => {
   );
 };
 
-// ─── Markdown renderer (preserved from original) ──────────────────────────────
+// ─── Markdown renderer ────────────────────────────────────────────────────────
 
 const MarkdownText: React.FC<{ text: string }> = ({ text }) => (
   <div className="space-y-1.5">
     {text.split('\n').map((line, i) => {
       if (!line.trim()) return <div key={i} className="h-1.5" />;
-      const html = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>');
+      const html = line
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>');
       return <p key={i} className="leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />;
     })}
   </div>
 );
+
+// ─── Info Tooltip ─────────────────────────────────────────────────────────────
+
+const InfoTooltip: React.FC<{ id: string; text: string; open: boolean; onToggle: () => void }> = ({ id, text, open, onToggle }) => (
+  <div className="relative inline-block">
+    <button onClick={onToggle} className="ml-1.5 text-cyan-500 hover:text-cyan-700 focus:outline-none" aria-label="More info">
+      <Lightbulb size={13}/>
+    </button>
+    {open && (
+      <div className="absolute z-50 left-0 top-6 w-64 bg-teal-900 text-teal-50 text-xs rounded-xl px-3 py-2.5 shadow-xl leading-relaxed">
+        {text}
+        <button onClick={onToggle} className="absolute top-1.5 right-2 text-teal-300 hover:text-white"><X size={11}/></button>
+      </div>
+    )}
+  </div>
+);
+
+// ─── Urgency badge ────────────────────────────────────────────────────────────
+
+const UrgencyBadge: React.FC<{ level: UrgencyLevel }> = ({ level }) => {
+  const cfg = URGENCY_CONFIG[level];
+  return (
+    <span className={classNames('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border', cfg.colour, cfg.bg, cfg.border)}>
+      {cfg.icon} {cfg.label}
+    </span>
+  );
+};
+
+// ─── Probe Panel ──────────────────────────────────────────────────────────────
+// The core learning mechanism: AI coaches the youth advisor to ask the right
+// questions one at a time, exactly like the HealthcareNavigator ProbePanel.
+
+interface ProbePanelProps {
+  field: IntakeField;
+  consultType: ConsultationType;
+  messages: ChatMessage[];
+  loading: boolean;
+  done: boolean;
+  input: string;
+  onInputChange: (v: string) => void;
+  onSend: () => void;
+  onClose: () => void;
+  chatEndRef: React.RefObject<HTMLDivElement>;
+}
+
+const ProbePanel: React.FC<ProbePanelProps> = ({
+  field, consultType, messages, loading, done, input, onInputChange, onSend, onClose, chatEndRef
+}) => {
+  const ct = CONSULT_TYPES[consultType];
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm px-2 pb-2">
+      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: '85vh' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b bg-teal-50 rounded-t-2xl">
+          <div>
+            <p className="text-xs font-bold text-teal-500 uppercase tracking-wide">Field Interview Coach</p>
+            <p className="text-sm font-bold text-teal-900">Exploring: {field.label}</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl text-teal-400 hover:text-teal-700 hover:bg-teal-100">
+            <X size={18}/>
+          </button>
+        </div>
+
+        {/* Instruction bar */}
+        <div className="px-4 py-2 bg-teal-900 text-teal-100 text-xs flex items-start gap-2">
+          <span className="text-base">💬</span>
+          <span>Read each question aloud to the client. Type or speak their answer, then tap Send. The AI will ask follow-up questions until this topic is fully understood.</span>
+        </div>
+
+        {/* Chat messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          {messages.map(msg => (
+            <div key={msg.id} className={classNames('flex items-start gap-2', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+              {msg.role === 'assistant' && (
+                <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${ct.colour} flex items-center justify-center text-xs flex-shrink-0`}>{ct.emoji}</div>
+              )}
+              <div className={classNames('max-w-[85%] rounded-2xl px-3 py-2.5 text-sm leading-relaxed',
+                msg.role === 'user' ? 'bg-cyan-600 text-white rounded-tr-sm' : 'bg-teal-50 text-teal-900 rounded-tl-sm border border-teal-100')}>
+                {msg.role === 'assistant' && <p className="text-xs font-bold text-teal-400 mb-1">AI Interview Coach</p>}
+                {msg.role === 'user' && <p className="text-xs font-bold text-cyan-200 mb-1">Client's answer</p>}
+                <MarkdownText text={msg.content}/>
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="flex items-start gap-2">
+              <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${ct.colour} flex items-center justify-center text-xs`}>{ct.emoji}</div>
+              <div className="bg-teal-50 rounded-2xl rounded-tl-sm px-3 py-2.5">
+                <div className="flex gap-1 items-center h-4">{[0,150,300].map(d => <div key={d} className="w-2 h-2 rounded-full bg-teal-400 animate-bounce" style={{ animationDelay: `${d}ms` }}/>)}</div>
+              </div>
+            </div>
+          )}
+          <div ref={chatEndRef}/>
+        </div>
+
+        {/* Done banner */}
+        {done && (
+          <div className="mx-4 mb-2 bg-green-50 border border-green-300 rounded-xl px-3 py-2.5 flex items-center gap-2 text-green-800 text-sm font-semibold">
+            <CheckCircle size={16} className="text-green-600 flex-shrink-0"/>
+            Topic fully explored. Tap "Move On" when ready.
+          </div>
+        )}
+
+        {/* Input */}
+        <div className="border-t px-3 py-3 rounded-b-2xl">
+          <div className="flex gap-2">
+            <input
+              value={input}
+              onChange={e => onInputChange(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onSend(); } }}
+              placeholder="Type client's answer…"
+              disabled={loading}
+              className="flex-1 px-3 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-400 disabled:opacity-50"
+            />
+            <button onClick={onSend} disabled={!input.trim() || loading}
+              className="px-3 py-2.5 rounded-xl bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-40">
+              <Send size={15}/>
+            </button>
+            <button onClick={onClose}
+              className="px-4 py-2.5 rounded-xl bg-green-600 text-white text-sm font-bold hover:bg-green-700 whitespace-nowrap">
+              Move On ✓
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Component
@@ -567,31 +607,43 @@ const FishingConsultantPage: React.FC = () => {
   const [newNotes, setNewNotes] = useState('');
   const [savingClient, setSavingClient] = useState(false);
 
-  // ── Chat
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [isSending, setIsSending] = useState(false);
-  const [savingConsult, setSavingConsult] = useState(false);
-  const [consultSaved, setConsultSaved] = useState(false);
-  const [detectedUrgency, setDetectedUrgency] = useState<UrgencyLevel | null>(null);
-
-  // ── Post-chat fields
-  const [youthActions, setYouthActions] = useState('');
+  // ── Structured intake (the key new pattern)
+  const [intake, setIntake] = useState<Record<string, string>>({});
+  const [isGeneratingAdvice, setIsGeneratingAdvice] = useState(false);
+  const [adviceResult, setAdviceResult] = useState<{ urgency: UrgencyLevel; text: string } | null>(null);
+  const [advisorNotes, setAdvisorNotes] = useState('');
   const [followUpNeeded, setFollowUpNeeded] = useState(false);
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpNotes, setFollowUpNotes] = useState('');
+  const [savingConsult, setSavingConsult] = useState(false);
+  const [consultSaved, setConsultSaved] = useState(false);
+  const [savedConsultId, setSavedConsultId] = useState<string | null>(null);
 
-  // ── Voice
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin');
+  // ── Probe Panel (field interview coach)
+  const [probeField, setProbeField] = useState<IntakeField | null>(null);
+  const [probeMessages, setProbeMessages] = useState<ChatMessage[]>([]);
+  const [probeInput, setProbeInput] = useState('');
+  const [probeLoading, setProbeLoading] = useState(false);
+  const [probeDone, setProbeDone] = useState(false);
+  const probeChatEndRef = useRef<HTMLDivElement>(null);
+
+  // ── Tooltip visibility
+  const [openTooltip, setOpenTooltip] = useState<string | null>(null);
+
+  // ── Follow-up chat
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const [speechOn, setSpeechOn] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [voiceMode, setVoiceMode] = useState<'english' | 'pidgin'>('pidgin');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // ─── Voice setup ─────────────────────────────────────────────────────────
+  // ─── Voice setup ──────────────────────────────────────────────────────────
   useEffect(() => {
     const load = () => setVoices(window.speechSynthesis.getVoices());
     load();
@@ -612,6 +664,7 @@ const FishingConsultantPage: React.FC = () => {
   }, [speechOn, voices, voiceMode]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isSending]);
+  useEffect(() => { probeChatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [probeMessages, probeLoading]);
 
   // ─── Load clients ─────────────────────────────────────────────────────────
   const loadClients = useCallback(async () => {
@@ -642,39 +695,172 @@ const FishingConsultantPage: React.FC = () => {
     } finally { setLoadingConsults(false); }
   }, []);
 
-  // ─── Urgency detection ────────────────────────────────────────────────────
-  const extractUrgency = (text: string): UrgencyLevel | null => {
-    const lower = text.toLowerCase();
-    if (lower.includes('🚨') || lower.includes('urgent')) return 'urgent';
-    if (lower.includes('urgency: high') || lower.includes('**high**')) return 'high';
-    if (lower.includes('urgency: medium') || lower.includes('**medium**')) return 'medium';
-    if (lower.includes('urgency: low') || lower.includes('**low**')) return 'low';
-    return null;
+  // ─── Open Probe Panel ─────────────────────────────────────────────────────
+  const openProbe = useCallback(async (field: IntakeField) => {
+    if (!selectedClient || !consultationType) return;
+    setProbeField(field);
+    setProbeMessages([]);
+    setProbeInput('');
+    setProbeDone(false);
+    setProbeLoading(true);
+    try {
+      const systemPrompt = buildProbePrompt(field, consultationType, selectedClient, intake);
+      const reply = await chatText({
+        page: 'FishingConsultantPage',
+        messages: [{ role: 'user', content: `Start probing: ${field.label}` }],
+        system: systemPrompt,
+        max_tokens: 300,
+      });
+      const isDone = reply.includes('✅ This topic is well characterised');
+      setProbeDone(isDone);
+      setProbeMessages([{ id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() }]);
+    } finally { setProbeLoading(false); }
+  }, [selectedClient, consultationType, intake]);
+
+  // ─── Send probe reply ─────────────────────────────────────────────────────
+  const sendProbeMessage = useCallback(async () => {
+    if (!probeInput.trim() || probeLoading || !selectedClient || !probeField || !consultationType) return;
+    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: probeInput.trim(), timestamp: new Date() };
+    const updated = [...probeMessages, userMsg];
+    setProbeMessages(updated);
+    setProbeInput('');
+    setProbeLoading(true);
+    try {
+      const systemPrompt = buildProbePrompt(probeField, consultationType, selectedClient, intake);
+      const reply = await chatText({
+        page: 'FishingConsultantPage',
+        messages: updated.map(m => ({ role: m.role, content: m.content })),
+        system: systemPrompt,
+        max_tokens: 300,
+      });
+      const isDone = reply.includes('✅ This topic is well characterised');
+      setProbeDone(isDone);
+      const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
+      setProbeMessages(prev => [...prev, aiMsg]);
+    } finally { setProbeLoading(false); }
+  }, [probeInput, probeLoading, probeMessages, selectedClient, probeField, consultationType, intake]);
+
+  // ─── Close probe and save notes to intake field ───────────────────────────
+  const closeProbe = useCallback(() => {
+    if (probeField && probeMessages.length > 0) {
+      const summary = probeMessages
+        .slice(-8)
+        .map(m => `${m.role === 'assistant' ? 'AI' : 'Client'}: ${m.content.slice(0, 400)}`)
+        .join('\n');
+      // Append probe summary to the field's intake value
+      setIntake(prev => ({
+        ...prev,
+        [probeField.key]: prev[probeField.key]
+          ? `${prev[probeField.key]}\n\n[Probe notes]\n${summary}`
+          : `[Probe notes]\n${summary}`,
+      }));
+    }
+    setProbeField(null);
+    setProbeMessages([]);
+    setProbeDone(false);
+  }, [probeField, probeMessages]);
+
+  // ─── Detect urgency from AI text ──────────────────────────────────────────
+  const detectUrgency = (text: string): UrgencyLevel => {
+    const upper = text.toUpperCase();
+    if (upper.includes('URGENT')) return 'urgent';
+    if (upper.includes('**HIGH**') || upper.includes('URGENCY: HIGH') || upper.includes('URGENCY LEVEL: HIGH')) return 'high';
+    if (upper.includes('**MEDIUM**') || upper.includes('URGENCY: MEDIUM')) return 'medium';
+    if (upper.includes('**LOW**') || upper.includes('URGENCY: LOW')) return 'low';
+    return 'medium'; // default to caution
   };
 
-  // ─── Send message ─────────────────────────────────────────────────────────
+  // ─── Generate AI advice ───────────────────────────────────────────────────
+  const runAdvice = async () => {
+    if (!selectedClient || !consultationType || isGeneratingAdvice) return;
+    setIsGeneratingAdvice(true);
+    try {
+      const systemPrompt = buildAdvicePrompt(consultationType, selectedClient, intake);
+      const reply = await chatText({
+        page: 'FishingConsultantPage',
+        messages: [{ role: 'user', content: 'Please analyse this intake and provide your advisory recommendation.' }],
+        system: systemPrompt,
+        max_tokens: 900,
+      });
+      const urgency = detectUrgency(reply);
+      setAdviceResult({ urgency, text: reply });
+      speak(reply.slice(0, 300));
+    } catch {
+      setAdviceResult({ urgency: 'medium', text: 'Unable to generate advice. Please check the intake data and try again.' });
+    } finally { setIsGeneratingAdvice(false); }
+  };
+
+  // ─── Save consultation ────────────────────────────────────────────────────
+  const saveConsultation = async () => {
+    if (!user || !selectedClient || !consultationType || !adviceResult) return;
+    setSavingConsult(true);
+    try {
+      const fields = INTAKE_FIELDS[consultationType];
+      const problemSummary = fields
+        .filter(f => intake[f.key]?.trim())
+        .map(f => `${f.label}: ${intake[f.key].trim()}`)
+        .join(' | ');
+
+      // Create a simple conversation_history array from the intake probe sessions
+      const conversationHistory: ChatMessage[] = [];
+
+      const { data, error } = await supabase
+        .from('fishing_consultations')
+        .insert({
+          youth_user_id: user.id,
+          client_id: selectedClient.id,
+          consultation_type: consultationType,
+          problem_summary: problemSummary || 'Structured intake consultation',
+          ai_advice: adviceResult.text,
+          urgency_level: adviceResult.urgency,
+          youth_actions_taken: advisorNotes || null,
+          conversation_history: conversationHistory,
+          follow_up_needed: followUpNeeded,
+          follow_up_date: followUpDate || null,
+          follow_up_notes: followUpNotes || null,
+          resolved: false,
+        })
+        .select('id')
+        .single();
+
+      if (!error && data) {
+        setConsultSaved(true);
+        setSavedConsultId(data.id);
+        await loadClients();
+        await loadConsultations(selectedClient.id);
+      }
+    } finally { setSavingConsult(false); }
+  };
+
+  // ─── Send follow-up message ───────────────────────────────────────────────
   const sendMessage = useCallback(async () => {
-    if (!inputText.trim() || isSending || !selectedClient || !consultationType) return;
+    if (!inputText.trim() || isSending || !selectedClient || !selectedConsultation) return;
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: inputText.trim(), timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
     setIsSending(true);
     try {
       const history = [...messages, userMsg];
-      const systemPrompt = buildSystemPrompt(consultationType, selectedClient);
-      const apiMessages = history.map(m => ({ role: m.role, content: m.content }));
-      const reply = await chatText({ page: 'FishingConsultantPage', messages: apiMessages, system: systemPrompt, max_tokens: 800 });
+      const systemPrompt = buildFollowupPrompt(selectedClient, selectedConsultation);
+      const reply = await chatText({
+        page: 'FishingConsultantPage',
+        messages: history.map(m => ({ role: m.role, content: m.content })),
+        system: systemPrompt,
+        max_tokens: 800,
+      });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
-      setMessages(prev => [...prev, aiMsg]);
+      const updated = [...history, aiMsg];
+      setMessages(updated);
       speak(reply);
-      const urgency = extractUrgency(reply);
-      const urgencyOrder: UrgencyLevel[] = ['low', 'medium', 'high', 'urgent'];
-      if (urgency && (!detectedUrgency || urgencyOrder.indexOf(urgency) > urgencyOrder.indexOf(detectedUrgency))) {
-        setDetectedUrgency(urgency);
-      }
-    } catch { setMessages(p => [...p, { id: crypto.randomUUID(), role: 'assistant', content: 'Technical issue — please try again.', timestamp: new Date() }]); }
-    finally { setIsSending(false); setTimeout(() => inputRef.current?.focus(), 100); }
-  }, [inputText, isSending, messages, selectedClient, consultationType, speak, detectedUrgency]);
+      // Persist conversation history
+      await supabase
+        .from('fishing_consultations')
+        .update({ conversation_history: updated })
+        .eq('id', selectedConsultation.id);
+    } catch {
+      setMessages(p => [...p, { id: crypto.randomUUID(), role: 'assistant', content: 'Technical issue — please try again.', timestamp: new Date() }]);
+    } finally { setIsSending(false); setTimeout(() => inputRef.current?.focus(), 100); }
+  }, [inputText, isSending, messages, selectedClient, selectedConsultation, speak]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -696,51 +882,34 @@ const FishingConsultantPage: React.FC = () => {
   const startConsultation = (client: Client, type: ConsultationType) => {
     setSelectedClient(client);
     setConsultationType(type);
-    setMessages([]);
-    setInputText('');
-    setDetectedUrgency(null);
-    setYouthActions('');
+    setIntake({});
+    setAdviceResult(null);
+    setAdvisorNotes('');
     setFollowUpNeeded(false);
     setFollowUpDate('');
     setFollowUpNotes('');
     setConsultSaved(false);
+    setSavedConsultId(null);
     setMode('new-consultation');
-    const ct = CONSULT_TYPES[type];
-    const activityList = client.activities.map(a => ACTIVITY_OPTIONS.find(o => o.value === a)?.label ?? a).join(', ') || 'fishing';
-    const opener: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: `Ready to assist with **${ct.emoji} ${ct.label}** for **${client.client_name}** (${client.village} · ${activityList}).\n\n${ct.description}.\n\nDescribe what you and ${client.client_name} are experiencing — I will ask the right questions and guide you to a clear recommendation.`,
-      timestamp: new Date(),
-    };
-    setMessages([opener]);
   };
 
-  // ─── Save consultation ────────────────────────────────────────────────────
-  const saveConsultation = async () => {
-    if (!user || !selectedClient || !consultationType || messages.length < 2) return;
-    setSavingConsult(true);
-    const lastAI = [...messages].reverse().find(m => m.role === 'assistant');
-    const problemSummary = messages.find(m => m.role === 'user')?.content ?? '';
-    try {
-      const { error } = await supabase
-        .from('fishing_consultations')
-        .insert({
-          youth_user_id: user.id,
-          client_id: selectedClient.id,
-          consultation_type: consultationType,
-          problem_summary: problemSummary,
-          ai_advice: lastAI?.content ?? null,
-          urgency_level: detectedUrgency,
-          youth_actions_taken: youthActions || null,
-          conversation_history: messages,
-          follow_up_needed: followUpNeeded,
-          follow_up_date: followUpDate || null,
-          follow_up_notes: followUpNotes || null,
-          resolved: false,
-        });
-      if (!error) { setConsultSaved(true); await loadClients(); }
-    } finally { setSavingConsult(false); }
+  // ─── Open follow-up chat ──────────────────────────────────────────────────
+  const openFollowupChat = (client: Client, consultation: Consultation) => {
+    setSelectedClient(client);
+    setSelectedConsultation(consultation);
+    setMessages(consultation.conversation_history || []);
+    setInputText('');
+    setMode('followup-chat');
+    if ((consultation.conversation_history || []).length === 0) {
+      const ct = CONSULT_TYPES[consultation.consultation_type];
+      const uc = consultation.urgency_level ? URGENCY_CONFIG[consultation.urgency_level] : null;
+      const opener: ChatMessage = {
+        id: crypto.randomUUID(), role: 'assistant',
+        content: `Ready to help with follow-up questions for **${client.client_name}** (${ct.emoji} ${ct.label}${uc ? ` · **${uc.label}** urgency` : ''}).\n\nYou can ask me to explain the advice further, how to communicate it to the client in plain language, referral logistics, or any practical fishing question related to this case.`,
+        timestamp: new Date(),
+      };
+      setMessages([opener]);
+    }
   };
 
   // ─── Save client ──────────────────────────────────────────────────────────
@@ -748,14 +917,23 @@ const FishingConsultantPage: React.FC = () => {
     if (!user || !newName.trim() || !newVillage) return;
     setSavingClient(true);
     try {
-      const { error } = await supabase
-        .from('fishing_clients')
-        .insert({ youth_user_id: user.id, client_name: newName.trim(), village: newVillage, phone: newPhone || null, activities: newActivities, waterways: newWaterways, notes: newNotes || null });
+      const { error } = await supabase.from('fishing_clients').insert({
+        youth_user_id: user.id,
+        client_name: newName.trim(),
+        village: newVillage,
+        phone: newPhone || null,
+        activities: newActivities,
+        waterways: newWaterways,
+        notes: newNotes || null,
+      });
       if (!error) { await loadClients(); resetAddClient(); setMode('dashboard'); }
     } finally { setSavingClient(false); }
   };
 
-  const resetAddClient = () => { setNewName(''); setNewVillage(''); setNewPhone(''); setNewActivities([]); setNewWaterways([]); setNewNotes(''); };
+  const resetAddClient = () => {
+    setNewName(''); setNewVillage(''); setNewPhone('');
+    setNewActivities([]); setNewWaterways([]); setNewNotes('');
+  };
 
   const toggleActivity = (a: ActivityType) =>
     setNewActivities(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]);
@@ -763,25 +941,19 @@ const FishingConsultantPage: React.FC = () => {
   const toggleWaterway = (w: string) =>
     setNewWaterways(prev => prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]);
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────
-  const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
-
-  const urgencyBadge = (level: UrgencyLevel | null) => {
-    if (!level) return null;
-    const cfg = URGENCY_CONFIG[level];
-    return (
-      <span className={classNames('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border', cfg.colour, cfg.bg, cfg.border)}>
-        {cfg.icon} {cfg.label}
-      </span>
-    );
-  };
-
   const markResolved = async (consultId: string) => {
     await supabase.from('fishing_consultations').update({ resolved: true }).eq('id', consultId);
     if (selectedClient) loadConsultations(selectedClient.id);
     await loadClients();
   };
+
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  // Check if required intake fields are filled
+  const intakeComplete = consultationType
+    ? INTAKE_FIELDS[consultationType].filter(f => f.required).every(f => intake[f.key]?.trim())
+    : false;
 
   // ════════════════════════════════════════════════════════════════════════════
   // RENDER: DASHBOARD
@@ -792,7 +964,6 @@ const FishingConsultantPage: React.FC = () => {
       <AppLayout>
         <FishingBackground />
         <div className="relative z-10 max-w-2xl mx-auto px-4 py-6">
-
           <div className="bg-black/40 backdrop-blur-sm rounded-2xl p-5 mb-5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -802,10 +973,8 @@ const FishingConsultantPage: React.FC = () => {
                   <p className="text-sm text-cyan-200">Your client casebook · Oloibiri & Niger Delta</p>
                 </div>
               </div>
-              <button
-                onClick={() => { resetAddClient(); setMode('add-client'); }}
-                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-teal-600 text-white rounded-xl font-semibold text-sm hover:opacity-90"
-              >
+              <button onClick={() => { resetAddClient(); setMode('add-client'); }}
+                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-teal-600 text-white rounded-xl font-semibold text-sm hover:opacity-90">
                 <Plus size={16}/> Add Client
               </button>
             </div>
@@ -833,7 +1002,7 @@ const FishingConsultantPage: React.FC = () => {
             <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-10 text-center">
               <div className="text-5xl mb-4">🎣</div>
               <h2 className="text-lg font-bold text-gray-800 mb-2">No clients registered yet</h2>
-              <p className="text-sm text-gray-500 mb-5">Add your first fishing client to start building your casebook.</p>
+              <p className="text-sm text-gray-500 mb-5">Add your first fishing client to start your casebook.</p>
               <button onClick={() => { resetAddClient(); setMode('add-client'); }}
                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 text-white rounded-xl font-semibold hover:opacity-90">
                 <Plus size={16}/> Register First Client
@@ -896,15 +1065,12 @@ const FishingConsultantPage: React.FC = () => {
           <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
             <div className="flex items-center gap-3 mb-5">
               <button onClick={() => setMode('dashboard')} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">Register Client</h2>
-                <p className="text-sm text-gray-500">Add to your casebook</p>
-              </div>
+              <div><h2 className="text-xl font-bold text-gray-900">Register Client</h2><p className="text-sm text-gray-500">Add to your casebook</p></div>
             </div>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Client Name *</label>
-                <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Papa Charles"
+                <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Papa Charles Amabebe"
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-400 text-base"/>
               </div>
               <div>
@@ -920,8 +1086,6 @@ const FishingConsultantPage: React.FC = () => {
                 <input value={newPhone} onChange={e => setNewPhone(e.target.value)} placeholder="+234 801 234 5678"
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-400 text-base"/>
               </div>
-
-              {/* Activities */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Activities (select all that apply)</label>
                 <div className="space-y-2">
@@ -935,8 +1099,6 @@ const FishingConsultantPage: React.FC = () => {
                   ))}
                 </div>
               </div>
-
-              {/* Waterways */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Waterways used (select all that apply)</label>
                 <div className="flex flex-wrap gap-2">
@@ -944,19 +1106,17 @@ const FishingConsultantPage: React.FC = () => {
                     <button key={w} onClick={() => toggleWaterway(w)}
                       className={classNames('px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors',
                         newWaterways.includes(w) ? 'bg-cyan-600 text-white border-cyan-600' : 'bg-white text-gray-600 border-gray-300 hover:border-cyan-400')}>
-                      {w}
+                      🌊 {w}
                     </button>
                   ))}
                 </div>
               </div>
-
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Notes (optional)</label>
                 <textarea value={newNotes} onChange={e => setNewNotes(e.target.value)} rows={2}
-                  placeholder="Past problems, specific concerns, gear owned…"
+                  placeholder="Past problems, specific concerns, gear owned, pond size…"
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-400 text-sm resize-none"/>
               </div>
-
               <button onClick={saveClient} disabled={!newName.trim() || !newVillage || savingClient}
                 className={classNames('w-full py-3.5 rounded-xl font-bold text-white text-base transition-opacity',
                   newName.trim() && newVillage && !savingClient ? 'bg-gradient-to-r from-cyan-600 to-teal-600 hover:opacity-90' : 'bg-gray-300 cursor-not-allowed')}>
@@ -1003,7 +1163,7 @@ const FishingConsultantPage: React.FC = () => {
             )}
 
             {client.waterways.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-3">
+              <div className="flex flex-wrap gap-1.5 mb-4">
                 {client.waterways.map(w => (
                   <span key={w} className="text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2.5 py-1 font-medium">🌊 {w}</span>
                 ))}
@@ -1044,8 +1204,7 @@ const FishingConsultantPage: React.FC = () => {
                 {consultations.map(c => {
                   const ct = CONSULT_TYPES[c.consultation_type];
                   return (
-                    <div key={c.id} onClick={() => { setSelectedConsultation(c); setMode('case-detail'); }}
-                      className="border border-gray-200 rounded-xl p-4 hover:border-cyan-300 transition-colors cursor-pointer">
+                    <div key={c.id} className="border border-gray-200 rounded-xl p-4 hover:border-cyan-300 transition-colors">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <span className="text-xl">{ct.emoji}</span>
@@ -1055,7 +1214,7 @@ const FishingConsultantPage: React.FC = () => {
                           </div>
                         </div>
                         <div className="flex flex-col items-end gap-1">
-                          {c.urgency_level && urgencyBadge(c.urgency_level)}
+                          {c.urgency_level && <UrgencyBadge level={c.urgency_level}/>}
                           {c.resolved
                             ? <span className="text-xs text-green-600 font-semibold flex items-center gap-1"><CheckCircle size={11}/> Resolved</span>
                             : <span className="text-xs text-orange-600 font-semibold">Open</span>}
@@ -1067,6 +1226,16 @@ const FishingConsultantPage: React.FC = () => {
                           <Calendar size={11}/> Follow-up: {formatDate(c.follow_up_date)}
                         </p>
                       )}
+                      <div className="flex gap-2 mt-3">
+                        <button onClick={() => { setSelectedConsultation(c); setMode('case-detail'); }}
+                          className="flex-1 py-2 text-xs font-semibold rounded-lg border border-gray-200 text-gray-700 hover:border-cyan-300 hover:text-cyan-700">
+                          View Case
+                        </button>
+                        <button onClick={() => openFollowupChat(client, c)}
+                          className="flex-1 py-2 text-xs font-semibold rounded-lg bg-cyan-50 text-cyan-700 hover:bg-cyan-100">
+                          Ask AI Follow-up
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1079,32 +1248,253 @@ const FishingConsultantPage: React.FC = () => {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // RENDER: NEW CONSULTATION (AI CHAT)
+  // RENDER: NEW CONSULTATION — STRUCTURED INTAKE + AI ADVICE
+  // This is the core new pattern: structured form + probe buttons → AI advice
   // ════════════════════════════════════════════════════════════════════════════
 
   if (mode === 'new-consultation' && selectedClient && consultationType) {
     const ct = CONSULT_TYPES[consultationType];
+    const fields = INTAKE_FIELDS[consultationType];
+    const isOilContam = consultationType === 'oil-contamination';
+    const isClimateSafety = consultationType === 'climate-safety';
+
+    return (
+      <AppLayout>
+        <FishingBackground />
+
+        {/* Probe Panel Modal */}
+        {probeField && (
+          <ProbePanel
+            field={probeField}
+            consultType={consultationType}
+            messages={probeMessages}
+            loading={probeLoading}
+            done={probeDone}
+            input={probeInput}
+            onInputChange={setProbeInput}
+            onSend={sendProbeMessage}
+            onClose={closeProbe}
+            chatEndRef={probeChatEndRef}
+          />
+        )}
+
+        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6 space-y-4">
+
+          {/* Header */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setMode('client-detail')} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
+              <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${ct.colour} flex items-center justify-center text-xl`}>{ct.emoji}</div>
+              <div>
+                <h2 className="text-base font-bold text-gray-900">{ct.label}</h2>
+                <p className="text-xs text-gray-500">{selectedClient.client_name} · {selectedClient.village}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Urgent warning for oil contamination */}
+          {isOilContam && (
+            <div className="bg-red-600 text-white rounded-xl p-4 flex items-start gap-3">
+              <AlertTriangle size={20} className="flex-shrink-0 mt-0.5"/>
+              <div>
+                <p className="font-bold">⚠️ OIL CONTAMINATION — FOOD SAFETY FIRST</p>
+                <p className="text-sm opacity-90">Do not eat fish from visibly contaminated areas while completing this assessment. Document everything for the NOSDRA report.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Intake instructions */}
+          <div className="bg-white/80 backdrop-blur-sm rounded-xl px-4 py-3 flex items-start gap-2">
+            <Lightbulb size={14} className="text-cyan-700 flex-shrink-0 mt-0.5"/>
+            <p className="text-xs text-gray-700">
+              Fill in each field with what the client tells you. Tap <strong>🔍 Probe</strong> to get AI-guided interview questions for that topic — the AI will coach you to ask exactly the right follow-up questions, one at a time. When done, run AI Advice.
+            </p>
+          </div>
+
+          {/* Structured intake fields */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+            <h3 className="text-sm font-bold text-gray-800 mb-1 flex items-center gap-2">
+              <FileText size={15} className="text-cyan-600"/> Intake — {ct.label}
+            </h3>
+            <p className="text-xs text-gray-400 mb-4 flex items-center gap-1">
+              <span className="text-teal-600 font-bold">🔍 Probe</span> — tap after filling a field to go deeper with AI interview coaching
+            </p>
+            <div className="space-y-4">
+              {fields.map(field => (
+                <div key={field.key}>
+                  <label className="text-xs font-semibold text-gray-600 flex items-center mb-1">
+                    {field.label}{field.required && <span className="text-red-500 ml-1">*</span>}
+                    <InfoTooltip
+                      id={field.key}
+                      text={field.tooltip}
+                      open={openTooltip === field.key}
+                      onToggle={() => setOpenTooltip(openTooltip === field.key ? null : field.key)}
+                    />
+                  </label>
+                  <div className="flex gap-2">
+                    <textarea
+                      value={intake[field.key] || ''}
+                      onChange={e => setIntake(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      rows={2}
+                      placeholder={field.placeholder}
+                      className="flex-1 px-3 py-2.5 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                    />
+                    <button
+                      onClick={() => openProbe(field)}
+                      className={classNames(
+                        'px-3 py-2 rounded-xl text-xs font-bold border transition-colors flex-shrink-0 self-start mt-0.5',
+                        probeField?.key === field.key
+                          ? 'bg-teal-600 text-white border-teal-600'
+                          : 'bg-teal-50 text-teal-700 border-teal-300 hover:bg-teal-100'
+                      )}
+                    >
+                      {probeField?.key === field.key ? '🔍 Probing…' : '🔍 Probe'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* AI Advice section */}
+          {!adviceResult ? (
+            <button
+              onClick={runAdvice}
+              disabled={isGeneratingAdvice || !intakeComplete}
+              className={classNames(
+                'w-full py-4 rounded-xl font-bold text-white text-base transition-opacity flex items-center justify-center gap-2',
+                !isGeneratingAdvice && intakeComplete
+                  ? `bg-gradient-to-r ${ct.colour} hover:opacity-90`
+                  : 'bg-gray-300 cursor-not-allowed'
+              )}
+            >
+              {isGeneratingAdvice
+                ? <><Loader2 size={18} className="animate-spin"/>Generating AI Advice…</>
+                : <><Fish size={18}/>Generate AI Advice{!intakeComplete && ' (fill required fields first)'}</>}
+            </button>
+          ) : (
+            <div className={classNames('bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5 border-2', URGENCY_CONFIG[adviceResult.urgency].border)}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">AI Advisory Result</p>
+                  <div className="text-2xl font-black"><UrgencyBadge level={adviceResult.urgency}/></div>
+                  <p className="text-xs text-gray-500 mt-1">{URGENCY_CONFIG[adviceResult.urgency].description}</p>
+                </div>
+                <button onClick={() => { setAdviceResult(null); runAdvice(); }}
+                  className="text-xs text-cyan-600 hover:underline flex items-center gap-1">
+                  <RefreshCw size={12}/> Re-run
+                </button>
+              </div>
+              <div className="text-sm text-gray-800 bg-gray-50 rounded-xl px-4 py-3 max-h-72 overflow-y-auto">
+                <MarkdownText text={adviceResult.text}/>
+              </div>
+
+              {/* Save section */}
+              <div className="mt-4 space-y-3 border-t pt-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">What did you advise / do on the ground?</label>
+                  <textarea value={advisorNotes} onChange={e => setAdvisorNotes(e.target.value)} rows={2}
+                    placeholder="e.g. Advised client to avoid fishing near the pipeline. Showed how to document spill for NOSDRA. Referred to NIOMR for fingerlings."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-cyan-400"/>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input type="checkbox" id="followup" checked={followUpNeeded} onChange={e => setFollowUpNeeded(e.target.checked)} className="w-4 h-4 accent-cyan-600"/>
+                  <label htmlFor="followup" className="text-sm font-semibold text-gray-700">Follow-up visit needed</label>
+                </div>
+                {followUpNeeded && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Follow-up date</label>
+                      <input type="date" value={followUpDate} onChange={e => setFollowUpDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"/>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">What to check</label>
+                      <input value={followUpNotes} onChange={e => setFollowUpNotes(e.target.value)} placeholder="e.g. Check pond water quality"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"/>
+                    </div>
+                  </div>
+                )}
+
+                {consultSaved ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-cyan-700 font-semibold text-sm bg-cyan-50 rounded-xl px-4 py-3">
+                      <CheckCircle size={16}/> Case saved to {selectedClient.client_name}'s record.
+                    </div>
+                    {savedConsultId && (
+                      <button
+                        onClick={() => {
+                          const saved = consultations.find(c => c.id === savedConsultId) ?? {
+                            id: savedConsultId,
+                            client_id: selectedClient.id,
+                            youth_user_id: user?.id ?? '',
+                            consultation_type: consultationType,
+                            problem_summary: '',
+                            ai_advice: adviceResult.text,
+                            urgency_level: adviceResult.urgency,
+                            youth_actions_taken: advisorNotes || null,
+                            conversation_history: [],
+                            follow_up_needed: followUpNeeded,
+                            follow_up_date: followUpDate || null,
+                            follow_up_notes: followUpNotes || null,
+                            resolved: false,
+                            resolved_at: null,
+                            created_at: new Date().toISOString(),
+                          } as Consultation;
+                          openFollowupChat(selectedClient, saved);
+                        }}
+                        className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-teal-600 to-cyan-600 hover:opacity-90 flex items-center justify-center gap-2"
+                      >
+                        <Send size={16}/> Continue with AI Follow-up Chat
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <button onClick={saveConsultation} disabled={savingConsult}
+                    className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-cyan-600 to-teal-600 hover:opacity-90 disabled:opacity-50">
+                    {savingConsult ? <span className="flex items-center justify-center gap-2"><Loader2 size={15} className="animate-spin"/>Saving…</span> : 'Save Case Record'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Disclaimer */}
+          <div className="bg-white/70 backdrop-blur-sm rounded-xl px-4 py-3 flex items-start gap-2">
+            <ShieldCheck size={14} className="text-cyan-700 flex-shrink-0 mt-0.5"/>
+            <p className="text-xs text-gray-600">This AI advice is <strong>support only</strong>. For aquaculture disease: contact NIOMR. For oil contamination: contact NOSDRA (0800-NOSDRA-9). For life-threatening situations on water: prioritise safety above all else.</p>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: FOLLOW-UP CHAT
+  // Modeled exactly on HealthcareNavigator's followup-chat mode
+  // ════════════════════════════════════════════════════════════════════════════
+
+  if (mode === 'followup-chat' && selectedClient && selectedConsultation) {
+    const client = selectedClient;
+    const consult = selectedConsultation;
+    const ct = CONSULT_TYPES[consult.consultation_type];
     const userTurns = messages.filter(m => m.role === 'user').length;
 
     return (
       <AppLayout>
         <FishingBackground />
         <div className="relative z-10 max-w-2xl mx-auto px-4 py-6">
-
           <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4 mb-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-3">
-                <button onClick={() => { window.speechSynthesis.cancel(); setMode('client-detail'); loadConsultations(selectedClient.id); }} className="text-gray-400 hover:text-gray-700 p-1">
-                  <ArrowLeft size={20}/>
-                </button>
-                <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${ct.colour} flex items-center justify-center text-2xl`}>{ct.emoji}</div>
+                <button onClick={() => { window.speechSynthesis.cancel(); setMode('client-detail'); }} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
+                <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${ct.colour} flex items-center justify-center text-lg`}>{ct.emoji}</div>
                 <div>
-                  <h2 className="text-base font-bold text-gray-900">{ct.label}</h2>
-                  <p className="text-xs text-gray-500">{selectedClient.client_name} · {selectedClient.village}</p>
+                  <h2 className="text-base font-bold text-gray-900">Follow-up Questions</h2>
+                  <p className="text-xs text-gray-500">{client.client_name} · {ct.label}{consult.urgency_level ? ` · ` : ''}{consult.urgency_level && <UrgencyBadge level={consult.urgency_level}/>}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {detectedUrgency && urgencyBadge(detectedUrgency)}
                 <div className="flex rounded-lg overflow-hidden border border-gray-300">
                   {(['pidgin', 'english'] as const).map(m => (
                     <button key={m} onClick={() => setVoiceMode(m)}
@@ -1121,44 +1511,29 @@ const FishingConsultantPage: React.FC = () => {
             </div>
           </div>
 
-          {detectedUrgency === 'urgent' && (
-            <div className="bg-red-600 text-white rounded-xl p-4 mb-4 flex items-start gap-3 animate-pulse">
-              <AlertTriangle size={20} className="flex-shrink-0 mt-0.5"/>
-              <div>
-                <p className="font-bold">URGENT SITUATION</p>
-                <p className="text-sm opacity-90">
-                  {consultationType === 'oil-contamination'
-                    ? 'Stop eating fish from this area immediately. Follow the AI instructions carefully.'
-                    : 'Follow the AI\'s immediate safety instructions without delay.'}
-                </p>
-              </div>
-            </div>
-          )}
-
           <div className="bg-white/80 backdrop-blur-sm rounded-xl px-4 py-2.5 mb-4 flex items-center gap-2">
             <Lightbulb size={14} className="text-cyan-700 flex-shrink-0"/>
-            <p className="text-xs text-gray-700">Describe what you and {selectedClient.client_name} are experiencing. The AI will guide you to a clear recommendation.</p>
+            <p className="text-xs text-gray-700">Ask about the advice, how to explain it to the client in plain language, referral logistics, or any practical fishing question related to this case.</p>
           </div>
 
           <div className="bg-white rounded-2xl shadow-lg mb-4 flex flex-col" style={{ height: '460px' }}>
             <div className="flex items-center justify-between px-5 py-3 border-b bg-gray-50 rounded-t-2xl text-xs text-gray-500">
-              <span className="font-semibold text-gray-700 flex items-center gap-1.5">🎣 Fishing AI Advisor</span>
+              <span className="font-semibold text-gray-700 flex items-center gap-1.5">{ct.emoji} Fishing AI Advisor</span>
               <span>{userTurns} exchange{userTurns !== 1 ? 's' : ''}</span>
             </div>
-
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {messages.map(msg => (
-                <div key={msg.id} className={classNames('flex items-start gap-3', msg.role==='user'?'justify-end':'justify-start')}>
-                  {msg.role==='assistant' && (
+                <div key={msg.id} className={classNames('flex items-start gap-3', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                  {msg.role === 'assistant' && (
                     <div className={`flex-shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br ${ct.colour} flex items-center justify-center text-lg`}>{ct.emoji}</div>
                   )}
                   <div className={classNames('max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
-                    msg.role==='user'?'bg-cyan-600 text-white rounded-tr-sm':'bg-gray-100 text-gray-900 rounded-tl-sm')}>
-                    {msg.role==='assistant' && <p className="text-xs font-bold mb-1 opacity-50">AI Advisor</p>}
-                    {msg.role==='user' && <p className="text-xs font-bold mb-1 opacity-75">You (Advisor)</p>}
+                    msg.role === 'user' ? 'bg-cyan-600 text-white rounded-tr-sm' : 'bg-gray-100 text-gray-900 rounded-tl-sm')}>
+                    {msg.role === 'assistant' && <p className="text-xs font-bold mb-1 opacity-50">AI Fishing Advisor</p>}
+                    {msg.role === 'user' && <p className="text-xs font-bold mb-1 opacity-75">You (Advisor)</p>}
                     <MarkdownText text={msg.content}/>
                   </div>
-                  {msg.role==='user' && (
+                  {msg.role === 'user' && (
                     <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-cyan-600 flex items-center justify-center">
                       <User size={15} className="text-white"/>
                     </div>
@@ -1169,75 +1544,32 @@ const FishingConsultantPage: React.FC = () => {
                 <div className="flex items-start gap-3">
                   <div className={`flex-shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br ${ct.colour} flex items-center justify-center text-lg`}>{ct.emoji}</div>
                   <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
-                    <div className="flex gap-1.5 items-center h-4">{[0,150,300].map(d=><div key={d} className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{animationDelay:`${d}ms`}}/>)}</div>
+                    <div className="flex gap-1.5 items-center h-4">{[0,150,300].map(d => <div key={d} className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: `${d}ms` }}/>)}</div>
                   </div>
                 </div>
               )}
               <div ref={chatEndRef}/>
             </div>
-
             <div className="border-t p-4 rounded-b-2xl">
               <div className="flex items-end gap-2">
-                <textarea ref={inputRef} value={inputText} onChange={e=>setInputText(e.target.value)} onKeyDown={handleKeyDown} rows={2}
-                  placeholder="Describe what the client is experiencing — catches, pond, contamination, market…"
-                  disabled={isSending || consultSaved}
+                <textarea ref={inputRef} value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={handleKeyDown} rows={2}
+                  placeholder="Ask a follow-up question about this case…"
+                  disabled={isSending}
                   className="flex-1 px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-400 resize-none leading-relaxed disabled:opacity-50"/>
                 <div className="flex flex-col gap-2">
-                  <button onClick={toggleListening} disabled={consultSaved}
-                    className={classNames('p-2.5 rounded-xl transition-all', isListening?'bg-red-500 text-white animate-pulse':'bg-gray-100 text-gray-500 hover:bg-gray-200')}>
-                    {isListening?<MicOff size={16}/>:<Mic size={16}/>}
+                  <button onClick={toggleListening}
+                    className={classNames('p-2.5 rounded-xl transition-all', isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 text-gray-500 hover:bg-gray-200')}>
+                    {isListening ? <MicOff size={16}/> : <Mic size={16}/>}
                   </button>
-                  <button onClick={sendMessage} disabled={!inputText.trim()||isSending||consultSaved}
+                  <button onClick={sendMessage} disabled={!inputText.trim() || isSending}
                     className={classNames('p-2.5 rounded-xl transition-all',
-                      inputText.trim()&&!isSending&&!consultSaved?`bg-gradient-to-br ${ct.colour} text-white hover:opacity-90`:'bg-gray-100 text-gray-400 cursor-not-allowed')}>
+                      inputText.trim() && !isSending ? `bg-gradient-to-br ${ct.colour} text-white hover:opacity-90` : 'bg-gray-100 text-gray-400 cursor-not-allowed')}>
                     <Send size={16}/>
                   </button>
                 </div>
               </div>
             </div>
           </div>
-
-          {userTurns >= 1 && (
-            <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5 space-y-4">
-              <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                <Save size={14} className="text-cyan-600"/> Save Case Record
-              </h3>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">What did you advise / do on the ground?</label>
-                <textarea value={youthActions} onChange={e => setYouthActions(e.target.value)} rows={2}
-                  placeholder="e.g. Advised client to avoid fishing near the pipeline crossing. Referred to NOSDRA."
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-cyan-400"/>
-              </div>
-              <div className="flex items-center gap-3">
-                <input type="checkbox" id="followup" checked={followUpNeeded} onChange={e => setFollowUpNeeded(e.target.checked)} className="w-4 h-4 accent-cyan-600"/>
-                <label htmlFor="followup" className="text-sm font-semibold text-gray-700">Follow-up visit needed</label>
-              </div>
-              {followUpNeeded && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">Follow-up date</label>
-                    <input type="date" value={followUpDate} onChange={e => setFollowUpDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"/>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">What to check</label>
-                    <input value={followUpNotes} onChange={e => setFollowUpNotes(e.target.value)} placeholder="e.g. Check pond water quality"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"/>
-                  </div>
-                </div>
-              )}
-              {consultSaved ? (
-                <div className="flex items-center gap-2 text-cyan-700 font-semibold text-sm bg-cyan-50 rounded-xl px-4 py-3">
-                  <CheckCircle size={16}/> Case saved to {selectedClient.client_name}'s record.
-                </div>
-              ) : (
-                <button onClick={saveConsultation} disabled={savingConsult}
-                  className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-cyan-600 to-teal-600 hover:opacity-90 disabled:opacity-50">
-                  {savingConsult ? <span className="flex items-center justify-center gap-2"><Loader2 size={15} className="animate-spin"/>Saving…</span> : 'Save Case Record'}
-                </button>
-              )}
-            </div>
-          )}
         </div>
       </AppLayout>
     );
@@ -1263,7 +1595,7 @@ const FishingConsultantPage: React.FC = () => {
                 <p className="text-xs text-gray-500">{formatDate(c.created_at)}</p>
               </div>
               <div className="flex flex-col items-end gap-1">
-                {c.urgency_level && urgencyBadge(c.urgency_level)}
+                {c.urgency_level && <UrgencyBadge level={c.urgency_level}/>}
                 {c.resolved
                   ? <span className="text-xs text-green-600 font-semibold flex items-center gap-1"><CheckCircle size={11}/> Resolved</span>
                   : <span className="text-xs text-orange-600 font-semibold">Open</span>}
@@ -1271,18 +1603,22 @@ const FishingConsultantPage: React.FC = () => {
             </div>
             <div className="space-y-4">
               <div>
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Problem Described</p>
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Problem Summary</p>
                 <p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{c.problem_summary}</p>
               </div>
               {c.ai_advice && (
                 <div>
                   <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">AI Recommendation</p>
-                  <div className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2"><MarkdownText text={c.ai_advice}/></div>
+                  <div className={classNames('text-sm text-gray-800 rounded-lg px-3 py-2 max-h-48 overflow-y-auto border',
+                    c.urgency_level ? URGENCY_CONFIG[c.urgency_level].bg : 'bg-gray-50',
+                    c.urgency_level ? URGENCY_CONFIG[c.urgency_level].border : 'border-gray-200')}>
+                    <MarkdownText text={c.ai_advice}/>
+                  </div>
                 </div>
               )}
               {c.youth_actions_taken && (
                 <div>
-                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Actions Taken</p>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Actions Taken by Advisor</p>
                   <p className="text-sm text-gray-800 bg-cyan-50 rounded-lg px-3 py-2">{c.youth_actions_taken}</p>
                 </div>
               )}
@@ -1295,28 +1631,34 @@ const FishingConsultantPage: React.FC = () => {
                   </div>
                 </div>
               )}
-              {!c.resolved && (
-                <button onClick={async () => { await markResolved(c.id); setSelectedConsultation({...c, resolved: true}); }}
-                  className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-cyan-600 to-teal-600 hover:opacity-90">
-                  Mark as Resolved ✓
+              <div className="flex gap-2">
+                <button onClick={() => openFollowupChat(selectedClient, c)}
+                  className="flex-1 py-2.5 text-sm font-bold rounded-xl bg-cyan-50 text-cyan-700 hover:bg-cyan-100">
+                  Ask AI Follow-up
                 </button>
-              )}
+                {!c.resolved && (
+                  <button onClick={async () => { await markResolved(c.id); setSelectedConsultation({ ...c, resolved: true }); }}
+                    className="flex-1 py-2.5 text-sm font-bold rounded-xl text-white bg-gradient-to-r from-cyan-600 to-teal-600 hover:opacity-90">
+                    Mark Resolved ✓
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
           {c.conversation_history?.length > 0 && (
             <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
               <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
-                <FileText size={14} className="text-cyan-600"/> Full Consultation Transcript
+                <FileText size={14} className="text-cyan-600"/> Follow-up Chat Transcript
               </h3>
               <div className="space-y-3 max-h-80 overflow-y-auto">
                 {c.conversation_history.map((msg, i) => (
-                  <div key={i} className={classNames('flex items-start gap-2', msg.role==='user'?'justify-end':'justify-start')}>
-                    {msg.role==='assistant' && (
+                  <div key={i} className={classNames('flex items-start gap-2', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                    {msg.role === 'assistant' && (
                       <div className={`flex-shrink-0 w-7 h-7 rounded-lg bg-gradient-to-br ${ct.colour} flex items-center justify-center text-sm`}>{ct.emoji}</div>
                     )}
                     <div className={classNames('max-w-[80%] rounded-xl px-3 py-2 text-xs leading-relaxed',
-                      msg.role==='user'?'bg-cyan-600 text-white':'bg-gray-100 text-gray-800')}>
+                      msg.role === 'user' ? 'bg-cyan-600 text-white' : 'bg-gray-100 text-gray-800')}>
                       <MarkdownText text={msg.content}/>
                     </div>
                   </div>
@@ -1331,5 +1673,13 @@ const FishingConsultantPage: React.FC = () => {
 
   return null;
 };
+
+// RefreshCw alias
+const RefreshCw: React.FC<{ size?: number; className?: string }> = ({ size = 16, className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+  </svg>
+);
 
 export default FishingConsultantPage;
