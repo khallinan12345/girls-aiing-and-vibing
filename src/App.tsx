@@ -25,6 +25,7 @@ import AuthCallback from './pages/auth/AuthCallback';
 import EmailConfirmationSuccess from './pages/auth/EmailConfirmationSuccess';
 
 // Main Pages
+import PublicLandingPage from './pages/PublicLandingPage';
 import HomePage from './pages/HomePage';
 import DashboardPage from './pages/DashboardPage';
 import AboutPage from './pages/AboutPage';
@@ -256,8 +257,8 @@ const AppContent: React.FC = () => {
         <Route path="/admin/student-dashboard" element={<AdminStudentDashboard />} />
 
         {/* Fallback */}
-        <Route path="/" element={<Navigate to="/home" replace />} />
-        <Route path="*" element={<Navigate to="/home" replace />} />
+        <Route path="/" element={<PublicLandingPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
       {showPopup && (

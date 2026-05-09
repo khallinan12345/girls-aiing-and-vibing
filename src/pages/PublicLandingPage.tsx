@@ -1,0 +1,827 @@
+// src/pages/PublicLandingPage.tsx
+//
+// Public-facing landing page — no auth required.
+// Pulls live cohort data from assessments_monthly_global.
+//
+// Add to App.tsx:
+//   import PublicLandingPage from './pages/PublicLandingPage';
+//   <Route path="/" element={<PublicLandingPage />} />
+//   (remove or keep the existing Navigate to="/home" fallback as preferred)
+
+import React, { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
+import {
+  ArrowRight, Mail, Linkedin, MessageCircle, Sparkles,
+  Globe, ChevronDown, Brain, Code, ImagePlus, Briefcase, Heart,
+} from "lucide-react";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface GlobalRow {
+  period_label:           string;
+  organization_name:      string | null;
+  learner_count:          number;
+  assessed_count:         number;
+  sessions_count:         number;
+  avg_mean:               number | null;
+  avg_delta:              number | null;
+  role_ready_count:       number | null;
+  converging_count:       number | null;
+  pue_learner_pct:        number | null;
+  certs_total:            number | null;
+  cognitive_mean:         number | null;
+  critical_thinking_mean: number | null;
+  problem_solving_mean:   number | null;
+  creativity_mean:        number | null;
+  pue_mean:               number | null;
+}
+
+// ─── Animated counter hook ────────────────────────────────────────────────────
+
+function useCountUp(target: number, duration = 1600) {
+  const [count, setCount] = useState(0);
+  const started = useRef(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !started.current) {
+          started.current = true;
+          const t0 = performance.now();
+          const tick = (now: number) => {
+            const p = Math.min((now - t0) / duration, 1);
+            const e = 1 - Math.pow(1 - p, 3);
+            setCount(Math.floor(e * target));
+            if (p < 1) requestAnimationFrame(tick);
+            else setCount(target);
+          };
+          requestAnimationFrame(tick);
+        }
+      },
+      { threshold: 0.3 }
+    );
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [target, duration]);
+
+  return { count, ref };
+}
+
+// ─── Stat card ────────────────────────────────────────────────────────────────
+
+const StatCard: React.FC<{
+  value: number; suffix?: string; label: string; sub?: string; accent: string;
+}> = ({ value, suffix = "", label, sub, accent }) => {
+  const { count, ref } = useCountUp(value);
+  return (
+    <div ref={ref} style={{
+      background: "rgba(255,255,255,0.06)",
+      border: "1px solid rgba(255,255,255,0.11)",
+      borderRadius: 14, padding: "1.75rem 1.25rem",
+      textAlign: "center", backdropFilter: "blur(8px)",
+      position: "relative", overflow: "hidden",
+    }}>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: accent }} />
+      <div style={{
+        fontFamily: "'Playfair Display', serif",
+        fontSize: "clamp(2.2rem,5vw,3.2rem)",
+        fontWeight: 900, color: "#fff", lineHeight: 1, marginBottom: "0.4rem",
+      }}>
+        {count.toLocaleString()}{suffix}
+      </div>
+      <div style={{ fontSize: "0.75rem", fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+        {label}
+      </div>
+      {sub && <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.38)", marginTop: "0.2rem" }}>{sub}</div>}
+    </div>
+  );
+};
+
+// ─── Score bar ────────────────────────────────────────────────────────────────
+
+const ScoreBar: React.FC<{ label: string; value: number | null; color: string }> = ({ label, value, color }) => (
+  <div style={{ marginBottom: "0.8rem" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.28rem" }}>
+      <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "rgba(255,255,255,0.65)" }}>{label}</span>
+      <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#fff" }}>{value?.toFixed(0) ?? "—"}</span>
+    </div>
+    <div style={{ height: 5, background: "rgba(255,255,255,0.09)", borderRadius: 99, overflow: "hidden" }}>
+      <div style={{
+        height: "100%", width: `${value ?? 0}%`,
+        background: color, borderRadius: 99,
+        transition: "width 1.4s cubic-bezier(0.16,1,0.3,1)",
+      }} />
+    </div>
+  </div>
+);
+
+// ─── Programme card ───────────────────────────────────────────────────────────
+
+const ProgramCard: React.FC<{
+  icon: React.ReactNode; title: string; desc: string;
+  items: string[]; accent: string; bg: string;
+}> = ({ icon, title, desc, items, accent, bg }) => (
+  <div style={{
+    background: bg, borderRadius: 16,
+    border: `1px solid ${accent}28`,
+    padding: "1.75rem", position: "relative", overflow: "hidden",
+    transition: "transform 0.2s, box-shadow 0.2s",
+  }}
+    onMouseEnter={e => {
+      (e.currentTarget as HTMLDivElement).style.transform = "translateY(-4px)";
+      (e.currentTarget as HTMLDivElement).style.boxShadow = `0 16px 40px ${accent}22`;
+    }}
+    onMouseLeave={e => {
+      (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
+      (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
+    }}
+  >
+    <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: accent }} />
+    <div style={{
+      width: 44, height: 44, borderRadius: 12, background: `${accent}18`,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      color: accent, marginBottom: "1rem",
+    }}>{icon}</div>
+    <h3 style={{
+      fontFamily: "'Playfair Display', serif", fontSize: "1.1rem",
+      fontWeight: 700, color: "#1a1208", margin: "0 0 0.5rem",
+    }}>{title}</h3>
+    <p style={{ fontSize: "0.87rem", color: "rgba(26,18,8,0.63)", lineHeight: 1.65, margin: "0 0 1rem" }}>{desc}</p>
+    <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+      {items.map(item => (
+        <li key={item} style={{
+          fontSize: "0.79rem", color: "rgba(26,18,8,0.68)",
+          display: "flex", alignItems: "flex-start", gap: "0.4rem", marginBottom: "0.32rem",
+        }}>
+          <span style={{ color: accent, fontWeight: 700, flexShrink: 0 }}>→</span> {item}
+        </li>
+      ))}
+    </ul>
+  </div>
+);
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+const PublicLandingPage: React.FC = () => {
+  const [latestRow, setLatestRow] = useState<GlobalRow | null>(null);
+  const [allRows, setAllRows]     = useState<GlobalRow[]>([]);
+  const [loading, setLoading]     = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("assessments_monthly_global")
+        .select(`
+          period_label, organization_name, learner_count, assessed_count,
+          sessions_count, avg_mean, avg_delta, role_ready_count,
+          converging_count, pue_learner_pct, certs_total,
+          cognitive_mean, critical_thinking_mean, problem_solving_mean,
+          creativity_mean, pue_mean
+        `)
+        .is("organization_id", null)
+        .order("period_start", { ascending: false });
+
+      if (data?.length) {
+        setLatestRow(data[0] as GlobalRow);
+        setAllRows(data as GlobalRow[]);
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const latest = latestRow;
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@400;500;600;700&display=swap');
+        .lp *, .lp *::before, .lp *::after { box-sizing: border-box; }
+        .lp { font-family: 'DM Sans', sans-serif; color: #1a1208; overflow-x: hidden; }
+        .lp a { text-decoration: none; }
+
+        .pub-btn {
+          display: inline-flex; align-items: center; gap: 0.4rem;
+          padding: 0.7rem 1.5rem; border-radius: 8px;
+          font-size: 0.9rem; font-weight: 700; cursor: pointer;
+          border: none; transition: transform 0.15s, opacity 0.15s;
+          text-decoration: none;
+        }
+        .pub-btn:hover { transform: translateY(-2px); opacity: 0.9; }
+        .btn-amber { background: #d97706; color: #fff; }
+        .btn-outline { background: transparent; color: #fff; border: 2px solid rgba(255,255,255,0.38); }
+        .btn-outline:hover { border-color: #fff; }
+
+        .nav-lnk {
+          font-size: 0.85rem; font-weight: 600;
+          color: rgba(255,255,255,0.8); text-decoration: none;
+          border-bottom: 2px solid transparent;
+          padding-bottom: 2px;
+          transition: color 0.15s, border-color 0.15s;
+        }
+        .nav-lnk:hover { color: #fff; border-color: #d97706; }
+
+        .prog-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+          gap: 1.25rem;
+        }
+
+        .contact-card {
+          background: #fff; border-radius: 14px;
+          border: 1px solid rgba(26,18,8,0.08);
+          padding: 1.75rem;
+          box-shadow: 0 2px 14px rgba(26,18,8,0.05);
+          display: flex; flex-direction: column; gap: 0.6rem;
+        }
+
+        .long-table { width: 100%; border-collapse: collapse; font-size: 0.81rem; }
+        .long-table th {
+          padding: 0.55rem 1rem; text-align: left;
+          font-size: 0.69rem; font-weight: 700; text-transform: uppercase;
+          letter-spacing: 0.08em; color: rgba(255,255,255,0.38);
+          border-bottom: 1px solid rgba(255,255,255,0.07);
+        }
+        .long-table td {
+          padding: 0.65rem 1rem;
+          color: rgba(255,255,255,0.72);
+          border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .long-table tbody tr:first-child td { color: #fff; font-weight: 600; }
+        .long-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
+
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(22px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .fu  { animation: fadeUp 0.7s ease both; }
+        .fu1 { animation-delay: 0.08s; }
+        .fu2 { animation-delay: 0.2s; }
+        .fu3 { animation-delay: 0.32s; }
+
+        @keyframes bob {
+          0%,100% { transform: translateX(-50%) translateY(0); }
+          50%      { transform: translateX(-50%) translateY(8px); }
+        }
+
+        @media (max-width: 640px) {
+          .hide-sm { display: none !important; }
+          .stat-g  { grid-template-columns: 1fr 1fr !important; }
+          .score-g { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
+
+      <div className="lp">
+
+        {/* ── Navbar ──────────────────────────────────────────────────────── */}
+        <nav style={{
+          position: "sticky", top: 0, zIndex: 50,
+          background: "rgba(12,18,10,0.9)", backdropFilter: "blur(14px)",
+          borderBottom: "1px solid rgba(255,255,255,0.07)",
+          padding: "0 2rem", height: 60,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
+            <Sparkles size={17} color="#d97706" />
+            <span style={{
+              fontFamily: "'Playfair Display', serif",
+              fontWeight: 700, fontSize: "0.98rem", color: "#fff",
+            }}>
+              vAI · Girls AIing &amp; Vibing
+            </span>
+          </div>
+          <div className="hide-sm" style={{ display: "flex", alignItems: "center", gap: "1.5rem" }}>
+            <a href="#impact"     className="nav-lnk">Impact</a>
+            <a href="#programmes" className="nav-lnk">Programmes</a>
+            <a href="#community"  className="nav-lnk">Join Us</a>
+            <a href="#support"    className="nav-lnk">Support</a>
+            <Link to="/login" className="pub-btn btn-amber" style={{ padding: "0.42rem 1.1rem", fontSize: "0.82rem" }}>
+              Learner Login
+            </Link>
+          </div>
+        </nav>
+
+        {/* ── Hero ────────────────────────────────────────────────────────── */}
+        <div style={{
+          position: "relative", minHeight: "100vh",
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          textAlign: "center", padding: "6rem 2rem 4rem",
+          overflow: "hidden",
+        }}>
+          <div style={{
+            position: "absolute", inset: 0, zIndex: 0,
+            backgroundImage: "url('/home_page_africa.png')",
+            backgroundSize: "cover", backgroundPosition: "center 30%",
+            filter: "brightness(0.35)",
+          }} />
+          <div style={{
+            position: "absolute", inset: 0, zIndex: 1,
+            background: "linear-gradient(180deg,rgba(8,14,6,0.25) 0%,rgba(8,14,6,0.1) 45%,rgba(8,14,6,0.72) 100%)",
+          }} />
+
+          <div style={{ position: "relative", zIndex: 2, maxWidth: 840 }}>
+            <div className="fu" style={{
+              display: "inline-flex", alignItems: "center", gap: "0.45rem",
+              background: "rgba(217,119,6,0.16)", border: "1px solid rgba(217,119,6,0.38)",
+              borderRadius: 999, padding: "0.32rem 0.9rem",
+              fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.1em",
+              color: "#fbbf24", textTransform: "uppercase", marginBottom: "1.5rem",
+            }}>
+              <Globe size={11} /> Nigeria · Ohio · Sub-Saharan Africa &amp; Beyond
+            </div>
+
+            <h1 className="fu fu1" style={{
+              fontFamily: "'Playfair Display', serif",
+              fontSize: "clamp(2.4rem,6.5vw,4.8rem)",
+              fontWeight: 900, lineHeight: 1.07, color: "#fff",
+              marginBottom: "1.2rem", marginTop: 0,
+            }}>
+              vAI AIing and Vibing<br />
+              <span style={{
+                background: "linear-gradient(135deg,#d97706,#fbbf24)",
+                WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
+              }}>
+                Learning &amp; Certification
+              </span>
+            </h1>
+
+            <p className="fu fu2" style={{
+              fontSize: "clamp(0.95rem,2vw,1.15rem)",
+              color: "rgba(255,255,255,0.7)", lineHeight: 1.78,
+              maxWidth: 660, margin: "0 auto 2.5rem",
+            }}>
+              AI-scaffolded learning in English skills, artificial intelligence, and tech skills —
+              coding, web development, AI agents, image, voice &amp; video creation — plus
+              community-impact AI support for farming, fishing, healthcare, animal husbandry,
+              and entrepreneurship across Sub-Saharan Africa and beyond.
+            </p>
+
+            <div className="fu fu3" style={{ display: "flex", gap: "0.9rem", justifyContent: "center", flexWrap: "wrap" }}>
+              <a href="#impact" className="pub-btn btn-amber" style={{ fontSize: "1rem", padding: "0.8rem 1.9rem" }}>
+                See Our Impact <ArrowRight size={15} />
+              </a>
+              <a href="#support" className="pub-btn btn-outline" style={{ fontSize: "1rem", padding: "0.8rem 1.9rem" }}>
+                Support the Mission
+              </a>
+            </div>
+          </div>
+
+          <div style={{
+            position: "absolute", bottom: "2rem", left: "50%",
+            zIndex: 2, color: "rgba(255,255,255,0.28)",
+            animation: "bob 2s infinite",
+          }}>
+            <ChevronDown size={22} />
+          </div>
+        </div>
+
+        {/* ── Impact Stats ─────────────────────────────────────────────────── */}
+        <div id="impact" style={{
+          background: "linear-gradient(135deg,#0c160a 0%,#162612 50%,#0c160a 100%)",
+          padding: "5rem 2rem", position: "relative", overflow: "hidden",
+        }}>
+          <div style={{
+            position: "absolute", top: -80, right: -80,
+            width: 340, height: 340, borderRadius: "50%",
+            border: "1px solid rgba(217,119,6,0.08)", pointerEvents: "none",
+          }} />
+
+          <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+            <div style={{ textAlign: "center", marginBottom: "2.75rem" }}>
+              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#fbbf24", marginBottom: "0.6rem" }}>
+                Platform Impact · {latest?.period_label ?? "Live Data"}
+              </div>
+              <h2 style={{
+                fontFamily: "'Playfair Display', serif",
+                fontSize: "clamp(1.7rem,4vw,2.7rem)",
+                fontWeight: 700, color: "#fff",
+                marginBottom: "0.6rem", marginTop: 0,
+              }}>
+                Real learners. Real communities. Real change.
+              </h2>
+              {latest?.avg_delta != null && (
+                <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.88rem", margin: 0 }}>
+                  Cohort average{" "}
+                  <span style={{ color: latest.avg_delta >= 0 ? "#4ade80" : "#f87171", fontWeight: 700 }}>
+                    {latest.avg_delta >= 0 ? "▲" : "▼"}{Math.abs(latest.avg_delta).toFixed(1)} pts
+                  </span>{" "}
+                  vs prior month
+                </p>
+              )}
+            </div>
+
+            {loading ? (
+              <p style={{ color: "rgba(255,255,255,0.35)", textAlign: "center" }}>Loading data…</p>
+            ) : (
+              <>
+                {/* Primary stat grid */}
+                <div className="stat-g" style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))",
+                  gap: "1rem", marginBottom: "2rem",
+                }}>
+                  <StatCard value={latest?.learner_count  ?? 0} label="Learners Enrolled"    accent="#d97706" />
+                  <StatCard value={latest?.assessed_count ?? 0} label="Assessed This Month"  accent="#0d9488" />
+                  <StatCard value={latest?.sessions_count ?? 0} label="Learning Sessions"    accent="#7c3aed" />
+                  <StatCard value={latest?.certs_total    ?? 0} label="Certifications"       sub="all-time" accent="#fbbf24" />
+                  <StatCard value={latest?.role_ready_count ?? 0} label="Role-Ready"         accent="#4ade80" />
+                  <StatCard value={Math.round(latest?.pue_learner_pct ?? 0)} suffix="%" label="PUE Linked" sub="productive energy use" accent="#f472b6" />
+                </div>
+
+                {/* Score breakdown */}
+                <div className="score-g" style={{
+                  display: "grid", gridTemplateColumns: "1fr 1fr",
+                  gap: "1.5rem",
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                  borderRadius: 16, padding: "2rem",
+                }}>
+                  <div>
+                    <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#d97706", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "1.1rem" }}>
+                      Skill Dimensions (0–100)
+                    </div>
+                    <ScoreBar label="Cognitive"         value={latest?.cognitive_mean}         color="#d97706" />
+                    <ScoreBar label="Critical Thinking" value={latest?.critical_thinking_mean}  color="#0d9488" />
+                    <ScoreBar label="Problem Solving"   value={latest?.problem_solving_mean}    color="#7c3aed" />
+                    <ScoreBar label="Creativity"        value={latest?.creativity_mean}         color="#f472b6" />
+                    <ScoreBar label="Productive Use"    value={latest?.pue_mean}                color="#4ade80" />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+                    <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#0d9488", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.75rem" }}>
+                      Cohort Overall Average
+                    </div>
+                    <div style={{
+                      fontFamily: "'Playfair Display', serif",
+                      fontSize: "clamp(3rem,8vw,5rem)",
+                      fontWeight: 900, color: "#fff", lineHeight: 1,
+                    }}>
+                      {latest?.avg_mean?.toFixed(1) ?? "—"}
+                    </div>
+                    <div style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.38)", marginTop: "0.4rem", marginBottom: "1rem" }}>out of 100</div>
+                    <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.48)", lineHeight: 1.68, margin: 0, maxWidth: 260 }}>
+                      AI-assessed monthly across all engaged learners — cognitive reasoning, problem solving, creativity, and productive energy application.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Longitudinal table */}
+                {allRows.length > 1 && (
+                  <div style={{ marginTop: "2rem" }}>
+                    <div style={{ fontSize: "0.69rem", fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.7rem" }}>
+                      Month-over-Month Progress
+                    </div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table className="long-table">
+                        <thead>
+                          <tr>
+                            <th>Period</th>
+                            <th>Learners</th>
+                            <th>Assessed</th>
+                            <th>Sessions</th>
+                            <th>Avg Score</th>
+                            <th>Δ</th>
+                            <th>Role-Ready</th>
+                            <th>Certs</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {allRows.map((row, i) => (
+                            <tr key={i}>
+                              <td>{row.period_label}</td>
+                              <td>{row.learner_count}</td>
+                              <td>{row.assessed_count}</td>
+                              <td>{row.sessions_count?.toLocaleString()}</td>
+                              <td>{row.avg_mean?.toFixed(1) ?? "—"}</td>
+                              <td style={{
+                                color: row.avg_delta == null ? "rgba(255,255,255,0.25)"
+                                  : row.avg_delta >= 0 ? "#4ade80" : "#f87171",
+                                fontWeight: 700,
+                              }}>
+                                {row.avg_delta == null ? "—"
+                                  : `${row.avg_delta >= 0 ? "+" : ""}${row.avg_delta.toFixed(1)}`}
+                              </td>
+                              <td>{row.role_ready_count ?? "—"}</td>
+                              <td>{row.certs_total ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Learner Voices ───────────────────────────────────────────────── */}
+        <section style={{ background: "#faf7f2", padding: "5rem 2rem" }}>
+          <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+            <div style={{ textAlign: "center", marginBottom: "2.5rem" }}>
+              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#d97706", marginBottom: "0.6rem" }}>
+                Learner Voices
+              </div>
+              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.7rem,4vw,2.6rem)", fontWeight: 700, color: "#1a1208", margin: "0 0 0.75rem" }}>
+                From the community
+              </h2>
+              <p style={{ color: "rgba(26,18,8,0.58)", maxWidth: 520, margin: "0 auto", lineHeight: 1.72 }}>
+                First-generation digital learners from Oloibiri and Ibiade, Nigeria share their experience with the platform.
+              </p>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: "1.5rem" }}>
+              {[
+                { name: "Silas Clergy",    location: "Oloibiri, Bayelsa State",  role: "Platform Learner & vAI Community Member", color: "#0d9488" },
+                { name: "Gabriel Possible", location: "Oloibiri, Bayelsa State", role: "Platform Learner & vAI Community Member", color: "#7c3aed" },
+              ].map(p => (
+                <div key={p.name} style={{
+                  background: "#fff", borderRadius: 16,
+                  border: "1px solid rgba(26,18,8,0.07)",
+                  overflow: "hidden",
+                  boxShadow: "0 4px 24px rgba(26,18,8,0.05)",
+                }}>
+                  <div style={{
+                    aspectRatio: "16/9",
+                    background: "linear-gradient(135deg,#0c160a,#162612)",
+                    display: "flex", flexDirection: "column",
+                    alignItems: "center", justifyContent: "center", gap: "0.7rem",
+                  }}>
+                    <div style={{
+                      width: 60, height: 60, borderRadius: "50%",
+                      background: p.color,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontFamily: "'Playfair Display', serif",
+                      fontSize: "1.3rem", fontWeight: 700, color: "#fff",
+                    }}>
+                      {p.name.split(" ").map(n => n[0]).join("")}
+                    </div>
+                    <div style={{
+                      background: "rgba(255,255,255,0.09)",
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      borderRadius: 999, padding: "0.28rem 0.8rem",
+                      fontSize: "0.7rem", fontWeight: 600,
+                      color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em",
+                    }}>
+                      📹 Video coming soon
+                    </div>
+                  </div>
+                  <div style={{ padding: "1.2rem 1.4rem" }}>
+                    <div style={{ fontWeight: 700, color: "#1a1208", marginBottom: "0.18rem" }}>{p.name}</div>
+                    <div style={{ fontSize: "0.76rem", color: p.color, fontWeight: 600 }}>{p.role}</div>
+                    <div style={{ fontSize: "0.72rem", color: "rgba(26,18,8,0.38)", marginTop: "0.18rem" }}>📍 {p.location}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Programmes ──────────────────────────────────────────────────── */}
+        <section id="programmes" style={{ background: "#fff", padding: "5rem 2rem" }}>
+          <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+            <div style={{ marginBottom: "2.5rem" }}>
+              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#d97706", marginBottom: "0.6rem" }}>
+                What We Teach
+              </div>
+              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.7rem,4vw,2.6rem)", fontWeight: 700, color: "#1a1208", margin: "0 0 0.75rem" }}>
+                Four pathways to capability
+              </h2>
+              <p style={{ color: "rgba(26,18,8,0.58)", maxWidth: 580, lineHeight: 1.72, margin: 0 }}>
+                Every pathway is AI-scaffolded, locally grounded, and designed to meet learners
+                exactly where they are — from zero digital experience to job-ready skills.
+              </p>
+            </div>
+            <div className="prog-grid">
+              <ProgramCard
+                icon={<Brain size={22} />}
+                title="English Skills & AI Learning"
+                accent="#0d9488" bg="#f0fdfa"
+                desc="Foundation-first learning that builds English fluency alongside AI literacy — starting from zero, adapted to each learner's communication level."
+                items={[
+                  "Adaptive English reading and writing",
+                  "AI concepts, ethics, and responsible use",
+                  "AI-900 and AI Ready Skills certification prep",
+                  "Socratic tutoring that meets you at your level",
+                ]}
+              />
+              <ProgramCard
+                icon={<Code size={22} />}
+                title="Tech Skills Workshop"
+                accent="#7c3aed" bg="#faf5ff"
+                desc="Hands-on technical training in the tools that open doors to remote work, freelancing, and entrepreneurship."
+                items={[
+                  "Vibe coding and web development",
+                  "Full-stack app development",
+                  "AI workflow and agent development",
+                  "AI for business — strategy and operations",
+                  "Microsoft AI-900, AB-730, GitHub GH-300",
+                ]}
+              />
+              <ProgramCard
+                icon={<ImagePlus size={22} />}
+                title="AI Creative Studio"
+                accent="#d97706" bg="#fffbeb"
+                desc="Creative AI tools that unlock new income streams and community storytelling capabilities."
+                items={[
+                  "AI image generation and editing",
+                  "AI voice creation and narration",
+                  "AI video production and studio",
+                  "AI content creation for business",
+                ]}
+              />
+              <ProgramCard
+                icon={<Globe size={22} />}
+                title="Community Impact AI"
+                accent="#16a34a" bg="#f0fdf4"
+                desc="AI-assisted consulting grounded in the real economic and ecological contexts of Oloibiri, Ibiade, and similar communities."
+                items={[
+                  "Agriculture and cassava farming consultant",
+                  "Fishing and creek ecology advisor",
+                  "Healthcare navigator",
+                  "Entrepreneurship and enterprise planning",
+                  "Animal husbandry advisor",
+                ]}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* ── New Communities ──────────────────────────────────────────────── */}
+        <div id="community" style={{ position: "relative" }}>
+          <div style={{
+            position: "absolute", inset: 0, zIndex: 0,
+            backgroundImage: "url('/home_page_africa.png')",
+            backgroundSize: "cover", backgroundPosition: "center 55%",
+            filter: "brightness(0.3)",
+          }} />
+          <div style={{
+            position: "absolute", inset: 0, zIndex: 1,
+            background: "linear-gradient(135deg,rgba(8,20,6,0.88),rgba(13,148,136,0.55))",
+          }} />
+          <div style={{ position: "relative", zIndex: 2, padding: "5rem 2rem" }}>
+            <div style={{ maxWidth: 860, margin: "0 auto", textAlign: "center" }}>
+              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#5eead4", marginBottom: "0.6rem" }}>
+                For New Communities
+              </div>
+              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.7rem,4vw,2.6rem)", fontWeight: 700, color: "#fff", margin: "0 0 1rem" }}>
+                Bring vAI to your community
+              </h2>
+              <p style={{ color: "rgba(255,255,255,0.68)", lineHeight: 1.8, fontSize: "1.03rem", maxWidth: 620, margin: "0 auto 2rem" }}>
+                We partner with community leaders, NGOs, schools, and organisations
+                across Sub-Saharan Africa and beyond to establish local AI learning cohorts.
+                Each cohort is anchored by a trained on-the-ground facilitator and supported
+                by our platform's AI tutoring infrastructure.
+              </p>
+              <div style={{
+                display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))",
+                gap: "1rem", marginBottom: "2.5rem",
+              }}>
+                {[
+                  { icon: "🌍", label: "Community cohorts",  desc: "Structured groups with local facilitators" },
+                  { icon: "🔑", label: "Join codes",         desc: "Controlled access — contact us to start" },
+                  { icon: "📊", label: "Progress reports",   desc: "Monthly AI-assessed data per learner" },
+                  { icon: "🤝", label: "Human mentorship",   desc: "On-the-ground support alongside AI" },
+                ].map(item => (
+                  <div key={item.label} style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.11)",
+                    borderRadius: 12, padding: "1.2rem",
+                    backdropFilter: "blur(8px)",
+                  }}>
+                    <div style={{ fontSize: "1.4rem", marginBottom: "0.45rem" }}>{item.icon}</div>
+                    <div style={{ fontWeight: 700, color: "#fff", marginBottom: "0.28rem", fontSize: "0.88rem" }}>{item.label}</div>
+                    <div style={{ fontSize: "0.76rem", color: "rgba(255,255,255,0.52)", lineHeight: 1.6 }}>{item.desc}</div>
+                  </div>
+                ))}
+              </div>
+              <p style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.88rem", marginBottom: "1.5rem" }}>
+                Access is managed — community leaders receive join codes directly from our team.
+              </p>
+              <a href="mailto:khallinan1@udayton.edu?subject=New Community Interest — vAI Platform"
+                className="pub-btn btn-amber" style={{ fontSize: "1rem", padding: "0.82rem 1.9rem" }}>
+                Contact Us to Get Started <ArrowRight size={15} />
+              </a>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Support & Donate ─────────────────────────────────────────────── */}
+        <section id="support" style={{ background: "#faf7f2", padding: "5rem 2rem" }}>
+          <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+            <div style={{ textAlign: "center", marginBottom: "2.75rem" }}>
+              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#d97706", marginBottom: "0.6rem" }}>
+                Support the Mission
+              </div>
+              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.7rem,4vw,2.6rem)", fontWeight: 700, color: "#1a1208", margin: "0 0 0.75rem" }}>
+                Help us expand human-centred AI learning
+              </h2>
+              <p style={{ color: "rgba(26,18,8,0.58)", maxWidth: 600, margin: "0 auto", lineHeight: 1.75 }}>
+                vAI (Davidson AI Innovation Center) is building toward registered NGO status in Nigeria.
+                We welcome partnerships with donors, foundations, universities, and organisations
+                who share our conviction that AI capability should reach every community — not just the connected few.
+              </p>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(270px,1fr))", gap: "1.25rem", marginBottom: "2.5rem" }}>
+              {[
+                {
+                  icon: <Heart size={20} color="#d97706" />,
+                  bg: "#d97706",
+                  title: "Individual Donors",
+                  desc: "Support a learner's journey directly. Every contribution funds platform infrastructure, facilitator training, and on-the-ground mentorship in communities with no prior digital access.",
+                },
+                {
+                  icon: <Briefcase size={20} color="#7c3aed" />,
+                  bg: "#7c3aed",
+                  title: "Institutional Partners",
+                  desc: "Universities, foundations, and corporations can sponsor cohorts, fund certification pathways, or partner on research. We are actively pursuing Microsoft AI for Good and similar grants.",
+                },
+                {
+                  icon: <Globe size={20} color="#0d9488" />,
+                  bg: "#0d9488",
+                  title: "NGO & Field Partners",
+                  desc: "Organisations working in Sub-Saharan Africa can integrate our AI learning platform into existing community programmes. We provide the tech; you provide the trust.",
+                },
+              ].map(card => (
+                <div key={card.title} className="contact-card">
+                  <div style={{
+                    width: 42, height: 42, borderRadius: 11,
+                    background: `${card.bg}14`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {card.icon}
+                  </div>
+                  <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.05rem", fontWeight: 700, color: "#1a1208", margin: 0 }}>
+                    {card.title}
+                  </h3>
+                  <p style={{ fontSize: "0.87rem", color: "rgba(26,18,8,0.6)", lineHeight: 1.7, margin: 0 }}>
+                    {card.desc}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* Contact block */}
+            <div style={{
+              background: "#1a1208", borderRadius: 20,
+              padding: "2.5rem", textAlign: "center",
+            }}>
+              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#d97706", marginBottom: "0.6rem" }}>
+                Get In Touch
+              </div>
+              <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.55rem", color: "#fff", margin: "0 0 0.65rem" }}>
+                Let's build this together
+              </h3>
+              <p style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.88rem", maxWidth: 460, margin: "0 auto 2rem", lineHeight: 1.7 }}>
+                Whether you want to support, partner, or simply learn more about what we're building —
+                we'd love to hear from you.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.9rem", justifyContent: "center" }}>
+                <a href="mailto:khallinan1@udayton.edu" className="pub-btn btn-amber">
+                  <Mail size={15} /> khallinan1@udayton.edu
+                </a>
+                <a href="https://www.linkedin.com/in/kevinhallinanenergyinnovator123"
+                  target="_blank" rel="noopener noreferrer"
+                  className="pub-btn" style={{ background: "#0077b5", color: "#fff" }}>
+                  <Linkedin size={15} /> LinkedIn
+                </a>
+                <a href="https://wa.me/19377601499"
+                  target="_blank" rel="noopener noreferrer"
+                  className="pub-btn" style={{ background: "#25d366", color: "#fff" }}>
+                  <MessageCircle size={15} /> WhatsApp
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Footer ──────────────────────────────────────────────────────── */}
+        <footer style={{
+          background: "#080e06", padding: "2.5rem 2rem",
+          textAlign: "center",
+          borderTop: "1px solid rgba(255,255,255,0.05)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", justifyContent: "center", marginBottom: "0.65rem" }}>
+            <Sparkles size={15} color="#d97706" />
+            <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: "0.92rem", color: "rgba(255,255,255,0.5)" }}>
+              vAI · Davidson AI Innovation Center · Girls AIing &amp; Vibing
+            </span>
+          </div>
+          <p style={{ fontSize: "0.76rem", color: "rgba(255,255,255,0.22)", margin: "0 0 0.4rem" }}>
+            Oloibiri, Bayelsa State, Nigeria · Dayton, Ohio, USA
+          </p>
+          <p style={{ fontSize: "0.73rem", color: "rgba(255,255,255,0.16)", margin: 0 }}>
+            © {new Date().getFullYear()} Davidson AI Innovation Center. ·{" "}
+            <Link to="/login" style={{ color: "rgba(255,255,255,0.28)" }}>Learner Login</Link>
+          </p>
+        </footer>
+
+      </div>
+    </>
+  );
+};
+
+export default PublicLandingPage;
