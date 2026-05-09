@@ -172,16 +172,20 @@ const PublicLandingPage: React.FC = () => {
 
   useEffect(() => {
     (async () => {
+      const COLS = [
+        "period_label", "organization_name", "learner_count", "assessed_count",
+        "sessions_count", "avg_mean", "avg_delta", "role_ready_count",
+        "converging_count", "pue_learner_pct", "certs_total",
+        "cognitive_mean", "critical_thinking_mean", "problem_solving_mean",
+        "creativity_mean", "pue_mean"
+      ].join(", ");
+
+      // Fetch Davidson AI Innovation Center rows by name.
+      // When additional orgs join, this becomes a dropdown — one query per selected org.
       const { data } = await supabase
         .from("assessments_monthly_global")
-        .select(`
-          period_label, organization_name, learner_count, assessed_count,
-          sessions_count, avg_mean, avg_delta, role_ready_count,
-          converging_count, pue_learner_pct, certs_total,
-          cognitive_mean, critical_thinking_mean, problem_solving_mean,
-          creativity_mean, pue_mean
-        `)
-        .is("organization_id", null)
+        .select(COLS)
+        .ilike("organization_name", "%Davidson%")
         .order("period_start", { ascending: false });
 
       if (data?.length) {
@@ -273,11 +277,11 @@ const PublicLandingPage: React.FC = () => {
         }
       `}</style>
 
-      <div className="lp">
+      <div className="lp" style={{ paddingTop: 60 }}>
 
         {/* ── Navbar ──────────────────────────────────────────────────────── */}
         <nav style={{
-          position: "sticky", top: 0, zIndex: 50,
+          position: "fixed", top: 0, left: 0, right: 0, zIndex: 50,
           background: "rgba(12,18,10,0.9)", backdropFilter: "blur(14px)",
           borderBottom: "1px solid rgba(255,255,255,0.07)",
           padding: "0 2rem", height: 60,
@@ -298,7 +302,7 @@ const PublicLandingPage: React.FC = () => {
             <a href="#community"  className="nav-lnk">Join Us</a>
             <a href="#support"    className="nav-lnk">Support</a>
             <Link to="/login" className="pub-btn btn-amber" style={{ padding: "0.42rem 1.1rem", fontSize: "0.82rem" }}>
-              Learner Login
+              Log In / Sign Up
             </Link>
           </div>
         </nav>
@@ -392,7 +396,7 @@ const PublicLandingPage: React.FC = () => {
           <div style={{ maxWidth: 1100, margin: "0 auto" }}>
             <div style={{ textAlign: "center", marginBottom: "2.75rem" }}>
               <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#fbbf24", marginBottom: "0.6rem" }}>
-                Platform Impact · {latest?.period_label ?? "Live Data"}
+                {latest?.organization_name ?? "Davidson AI Innovation Center"} · {latest?.period_label ?? "Live Data"}
               </div>
               <h2 style={{
                 fontFamily: "'Playfair Display', serif",
@@ -815,7 +819,7 @@ const PublicLandingPage: React.FC = () => {
           </p>
           <p style={{ fontSize: "0.73rem", color: "rgba(255,255,255,0.16)", margin: 0 }}>
             © {new Date().getFullYear()} Davidson AI Innovation Center. ·{" "}
-            <Link to="/login" style={{ color: "rgba(255,255,255,0.28)" }}>Learner Login</Link>
+            <Link to="/login" style={{ color: "rgba(255,255,255,0.28)" }}>Log In / Sign Up</Link>
           </p>
         </footer>
 
