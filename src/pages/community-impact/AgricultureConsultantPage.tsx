@@ -69,7 +69,6 @@ interface Client {
   village: string;
   phone: string | null;
   crops: CropType[];
-  land_size_acres: number | null;
   notes: string | null;
   created_at: string;
   total_consultations?: number;
@@ -79,7 +78,7 @@ interface Client {
 
 interface Consultation {
   id: string;
-  client_id: string;
+  farmer_id: string;
   youth_user_id: string;
   consultation_type: ConsultationType;
   problem_summary: string;
@@ -286,7 +285,7 @@ function buildProbePrompt(field: IntakeField, consultType: ConsultationType, cli
 
 FARMER: ${client.farmer_name}, ${client.village}
 CROPS GROWN: ${cropList}
-${client.land_size_acres ? `FARM SIZE: ~${client.land_size_acres} acres` : ''}
+
 CONSULTATION TYPE: ${ct.emoji} ${ct.label}
 TOPIC BEING EXPLORED: "${field.label}"
 WHAT IT MEANS: ${field.tooltip}
@@ -336,7 +335,7 @@ ${AGRICULTURE_CONTEXT}
 CONSULTATION: ${ct.emoji} ${ct.label}
 FARMER: ${client.farmer_name}, ${client.village}
 CROPS GROWN: ${cropList}
-${client.land_size_acres ? `FARM SIZE: ~${client.land_size_acres} acres` : ''}
+
 
 STRUCTURED INTAKE COMPLETED BY YOUTH ADVISOR:
 ${intakeSummary}
@@ -628,7 +627,6 @@ const AgricultureConsultantPage: React.FC = () => {
   const [newVillage, setNewVillage] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newCrops, setNewCrops] = useState<CropType[]>([]);
-  const [newLandSize, setNewLandSize] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [savingClient, setSavingClient] = useState(false);
 
@@ -697,7 +695,7 @@ const AgricultureConsultantPage: React.FC = () => {
     setLoadingClients(true);
     try {
       const { data, error } = await supabase
-        .from('agriculture_client_summary')
+        .from('agriculture_farmer_summary')
         .select('*')
         .eq('youth_user_id', user.id)
         .order('farmer_name');
@@ -714,7 +712,7 @@ const AgricultureConsultantPage: React.FC = () => {
       const { data, error } = await supabase
         .from('agriculture_consultations')
         .select('*')
-        .eq('client_id', clientId)
+        .eq('farmer_id', clientId)
         .order('created_at', { ascending: false });
       if (!error && data) setConsultations(data as Consultation[]);
     } finally { setLoadingConsults(false); }
@@ -734,7 +732,7 @@ const AgricultureConsultantPage: React.FC = () => {
         page: 'AgricultureConsultantPage',
         messages: [{ role: 'user', content: `Start probing: ${field.label}` }],
         system: systemPrompt,
-        max_tokens: 300,
+        max_tokens: 600,
       });
       const isDone = reply.includes('✅ This topic is well characterised');
       setProbeDone(isDone);
@@ -756,7 +754,7 @@ const AgricultureConsultantPage: React.FC = () => {
         page: 'AgricultureConsultantPage',
         messages: updated.map(m => ({ role: m.role, content: m.content })),
         system: systemPrompt,
-        max_tokens: 300,
+        max_tokens: 600,
       });
       const isDone = reply.includes('✅ This topic is well characterised');
       setProbeDone(isDone);
@@ -804,7 +802,7 @@ const AgricultureConsultantPage: React.FC = () => {
         page: 'AgricultureConsultantPage',
         messages: [{ role: 'user', content: 'Please analyse this intake and provide your advisory recommendation.' }],
         system: systemPrompt,
-        max_tokens: 900,
+        max_tokens: 1500,
       });
       const urgency = detectUrgency(reply);
       setAdviceResult({ urgency, text: reply });
@@ -831,7 +829,7 @@ const AgricultureConsultantPage: React.FC = () => {
         .from('agriculture_consultations')
         .insert({
           youth_user_id: user.id,
-          client_id: selectedClient.id,
+          farmer_id: selectedClient.id,
           consultation_type: consultationType,
           problem_summary: problemSummary || 'Structured intake consultation',
           ai_advice: adviceResult.text,
@@ -869,7 +867,7 @@ const AgricultureConsultantPage: React.FC = () => {
         page: 'AgricultureConsultantPage',
         messages: history.map(m => ({ role: m.role, content: m.content })),
         system: systemPrompt,
-        max_tokens: 800,
+        max_tokens: 1200,
       });
       const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
       const updated = [...history, aiMsg];
@@ -939,13 +937,12 @@ const AgricultureConsultantPage: React.FC = () => {
     if (!user || !newName.trim() || !newVillage) return;
     setSavingClient(true);
     try {
-      const { error } = await supabase.from('agriculture_clients').insert({
+      const { error } = await supabase.from('agriculture_farmers').insert({
         youth_user_id: user.id,
         farmer_name: newName.trim(),
         village: newVillage,
         phone: newPhone || null,
         crops: newCrops,
-        land_size_acres: newLandSize ? Number(newLandSize) : null,
         notes: newNotes || null,
       });
       if (!error) { await loadClients(); resetAddClient(); setMode('dashboard'); }
@@ -954,7 +951,7 @@ const AgricultureConsultantPage: React.FC = () => {
 
   const resetAddClient = () => {
     setNewName(''); setNewVillage(''); setNewPhone('');
-    setNewCrops([]); setNewLandSize(''); setNewNotes('');
+    setNewCrops([]); setNewNotes('');
   };
 
   const toggleCrop = (c: CropType) =>
@@ -1037,7 +1034,7 @@ const AgricultureConsultantPage: React.FC = () => {
                       <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center text-lg">👨🏿‍🌾</div>
                       <div>
                         <p className="font-bold text-gray-900">{client.farmer_name}</p>
-                        <p className="text-sm text-gray-500">{client.village}{client.land_size_acres ? ` · ${client.land_size_acres} acres` : ''}</p>
+                        <p className="text-sm text-gray-500">{client.village}</p>
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {(client.crops || []).map(c => {
                             const opt = CROP_OPTIONS.find(o => o.value === c);
@@ -1102,11 +1099,6 @@ const AgricultureConsultantPage: React.FC = () => {
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 text-base"/>
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Approximate farm size (acres, optional)</label>
-                <input type="number" min="0" step="0.5" value={newLandSize} onChange={e => setNewLandSize(e.target.value)} placeholder="e.g. 1.5"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-400 text-base"/>
-              </div>
-              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Crops grown (select all that apply)</label>
                 <div className="grid grid-cols-2 gap-2">
                   {CROP_OPTIONS.map(opt => (
@@ -1153,7 +1145,7 @@ const AgricultureConsultantPage: React.FC = () => {
               <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center text-2xl">👨🏿‍🌾</div>
               <div className="flex-1">
                 <h2 className="text-xl font-bold text-gray-900">{client.farmer_name}</h2>
-                <p className="text-sm text-gray-500">{client.village}{client.phone ? ` · ${client.phone}` : ''}{client.land_size_acres ? ` · ${client.land_size_acres} acres` : ''}</p>
+                <p className="text-sm text-gray-500">{client.village}{client.phone ? ` · ${client.phone}` : ''}</p>
               </div>
             </div>
 
@@ -1446,7 +1438,7 @@ const AgricultureConsultantPage: React.FC = () => {
                         onClick={() => {
                           const saved = consultations.find(c => c.id === savedConsultId) ?? {
                             id: savedConsultId,
-                            client_id: selectedClient.id,
+                            farmer_id: selectedClient.id,
                             youth_user_id: user?.id ?? '',
                             consultation_type: consultationType,
                             problem_summary: '',
