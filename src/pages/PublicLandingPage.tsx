@@ -514,6 +514,25 @@ const PublicLandingPage: React.FC = () => {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Cohort growth note */}
+                    <div style={{
+                      marginTop: "1.25rem",
+                      background: "rgba(217,119,6,0.1)",
+                      border: "1px solid rgba(217,119,6,0.25)",
+                      borderRadius: 10,
+                      padding: "1rem 1.25rem",
+                      display: "flex", alignItems: "flex-start", gap: "0.75rem",
+                    }}>
+                      <span style={{ fontSize: "1.1rem", flexShrink: 0, marginTop: "0.05rem" }}>📈</span>
+                      <p style={{ margin: 0, fontSize: "0.82rem", color: "rgba(255,255,255,0.6)", lineHeight: 1.72 }}>
+                        <strong style={{ color: "#fbbf24", fontWeight: 700 }}>We are continuously enrolling new learners.</strong>{" "}
+                        Month-over-month score changes reflect cohort composition as much as individual growth —
+                        when many new learners join at once, the cohort average naturally shifts downward even as
+                        established learners continue to progress. A growing learner count is itself a sign of
+                        expanding reach, not declining performance.
+                      </p>
+                    </div>
                   </div>
                 )}
               </>
@@ -521,64 +540,33 @@ const PublicLandingPage: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Learner Voices ───────────────────────────────────────────────── */}
-        <section style={{ background: "#faf7f2", padding: "5rem 2rem" }}>
-          <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-            <div style={{ textAlign: "center", marginBottom: "2.5rem" }}>
+        {/* ── Video ──────────────────────────────────────────────────────── */}
+        <section style={{ background: "#0c160a", padding: "4rem 2rem" }}>
+          <div style={{ maxWidth: 860, margin: "0 auto" }}>
+            <div style={{ textAlign: "center", marginBottom: "2rem" }}>
               <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#d97706", marginBottom: "0.6rem" }}>
-                Learner Voices
+                See It In Action
               </div>
-              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.7rem,4vw,2.6rem)", fontWeight: 700, color: "#1a1208", margin: "0 0 0.75rem" }}>
-                From the community
+              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.7rem,4vw,2.5rem)", fontWeight: 700, color: "#fff", margin: "0 0 0.6rem" }}>
+                AI learning, grounded in community
               </h2>
-              <p style={{ color: "rgba(26,18,8,0.58)", maxWidth: 520, margin: "0 auto", lineHeight: 1.72 }}>
-                First-generation digital learners from Oloibiri and Ibiade, Nigeria share their experience with the platform.
+              <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "0.92rem", lineHeight: 1.7, maxWidth: 560, margin: "0 auto" }}>
+                A look at the Girls AIing &amp; Vibing platform and the communities it serves.
               </p>
             </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: "1.5rem" }}>
-              {[
-                { name: "Silas Clergy",    location: "Oloibiri, Bayelsa State",  role: "Platform Learner & vAI Community Member", color: "#0d9488" },
-                { name: "Gabriel Possible", location: "Oloibiri, Bayelsa State", role: "Platform Learner & vAI Community Member", color: "#7c3aed" },
-              ].map(p => (
-                <div key={p.name} style={{
-                  background: "#fff", borderRadius: 16,
-                  border: "1px solid rgba(26,18,8,0.07)",
-                  overflow: "hidden",
-                  boxShadow: "0 4px 24px rgba(26,18,8,0.05)",
-                }}>
-                  <div style={{
-                    aspectRatio: "16/9",
-                    background: "linear-gradient(135deg,#0c160a,#162612)",
-                    display: "flex", flexDirection: "column",
-                    alignItems: "center", justifyContent: "center", gap: "0.7rem",
-                  }}>
-                    <div style={{
-                      width: 60, height: 60, borderRadius: "50%",
-                      background: p.color,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontFamily: "'Playfair Display', serif",
-                      fontSize: "1.3rem", fontWeight: 700, color: "#fff",
-                    }}>
-                      {p.name.split(" ").map(n => n[0]).join("")}
-                    </div>
-                    <div style={{
-                      background: "rgba(255,255,255,0.09)",
-                      border: "1px solid rgba(255,255,255,0.18)",
-                      borderRadius: 999, padding: "0.28rem 0.8rem",
-                      fontSize: "0.7rem", fontWeight: 600,
-                      color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em",
-                    }}>
-                      📹 Video coming soon
-                    </div>
-                  </div>
-                  <div style={{ padding: "1.2rem 1.4rem" }}>
-                    <div style={{ fontWeight: 700, color: "#1a1208", marginBottom: "0.18rem" }}>{p.name}</div>
-                    <div style={{ fontSize: "0.76rem", color: p.color, fontWeight: 600 }}>{p.role}</div>
-                    <div style={{ fontSize: "0.72rem", color: "rgba(26,18,8,0.38)", marginTop: "0.18rem" }}>📍 {p.location}</div>
-                  </div>
-                </div>
-              ))}
+            <div style={{
+              position: "relative", width: "100%", aspectRatio: "16/9",
+              borderRadius: 16, overflow: "hidden",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}>
+              <iframe
+                src="https://www.youtube.com/embed/1mFbtVEiEpY"
+                title="Girls AIing and Vibing — AI learning in community"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }}
+              />
             </div>
           </div>
         </section>
