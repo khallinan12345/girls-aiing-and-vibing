@@ -19,22 +19,23 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface GlobalRow {
-  period_label:           string;
-  organization_name:      string | null;
-  learner_count:          number;
-  assessed_count:         number;
-  sessions_count:         number;
-  avg_mean:               number | null;
-  avg_delta:              number | null;
-  role_ready_count:       number | null;
-  converging_count:       number | null;
-  pue_learner_pct:        number | null;
-  certs_total:            number | null;
-  cognitive_mean:         number | null;
-  critical_thinking_mean: number | null;
-  problem_solving_mean:   number | null;
-  creativity_mean:        number | null;
-  pue_mean:               number | null;
+  period_label:              string;
+  organization_name:         string | null;
+  learner_count:             number;
+  assessed_count:            number;
+  sessions_count:            number;
+  avg_mean:                  number | null;
+  avg_delta:                 number | null;
+  role_ready_count:          number | null;
+  converging_count:          number | null;
+  structured_l3_pct:         number | null;
+  pue_learner_pct:           number | null;
+  certs_total:               number | null;
+  cognitive_mean:            number | null;
+  critical_thinking_mean:    number | null;
+  problem_solving_mean:      number | null;
+  creativity_mean:           number | null;
+  pue_mean:                  number | null;
 }
 
 // ─── Animated counter hook ────────────────────────────────────────────────────
@@ -203,7 +204,7 @@ const PublicLandingPage: React.FC = () => {
       const COLS = [
         "period_label", "organization_name", "learner_count", "assessed_count",
         "sessions_count", "avg_mean", "avg_delta", "role_ready_count",
-        "converging_count", "pue_learner_pct", "certs_total",
+        "converging_count", "structured_l3_pct", "pue_learner_pct", "certs_total",
         "cognitive_mean", "critical_thinking_mean", "problem_solving_mean",
         "creativity_mean", "pue_mean"
       ].join(", ");
@@ -463,9 +464,9 @@ const PublicLandingPage: React.FC = () => {
                   <StatCard value={latest?.learner_count  ?? 0} label="Learners Enrolled"    accent="#d97706" />
                   <StatCard value={latest?.assessed_count ?? 0} label="Assessed This Month"  accent="#0d9488" />
                   <StatCard value={latest?.sessions_count ?? 0} label="Learning Sessions"    accent="#7c3aed" />
-                  <StatCard value={latest?.certs_total    ?? 0} label="Certifications"       sub="all-time" accent="#fbbf24" />
-                  <StatCard value={latest?.role_ready_count ?? 0} label="Role-Ready"         accent="#4ade80" />
-                  <StatCard value={Math.round(latest?.pue_learner_pct ?? 0)} suffix="%" label="PUE Linked" sub="productive energy use" accent="#f472b6" />
+                  <StatCard value={latest?.certs_total    ?? 0} label="Proficiency Sessions" sub="sessions achieving mastery" accent="#fbbf24" />
+                  <StatCard value={latest?.role_ready_count ?? 0} label="Role-Ready" sub="applying skills beyond the platform" accent="#4ade80" />
+                  <StatCard value={latest?.converging_count ?? 0} label="Reducing AI Reliance" sub="needing less scaffolding" accent="#a78bfa" />
                 </div>
 
                 {/* Score breakdown */}
@@ -498,8 +499,23 @@ const PublicLandingPage: React.FC = () => {
                       {latest?.avg_mean?.toFixed(1) ?? "—"}
                     </div>
                     <div style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.38)", marginTop: "0.4rem", marginBottom: "1rem" }}>out of 100</div>
-                    <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.48)", lineHeight: 1.68, margin: 0, maxWidth: 260 }}>
-                      AI-assessed monthly across all engaged learners — cognitive reasoning, problem solving, creativity, and productive energy application.
+
+                    {/* Scaffolding convergence bar */}
+                    {latest?.structured_l3_pct != null && (
+                      <div style={{ width: "100%", marginBottom: "1rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem" }}>
+                          <span style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.55)" }}>Independent AI Use</span>
+                          <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#a78bfa" }}>{latest.structured_l3_pct.toFixed(0)}%</span>
+                        </div>
+                        <div style={{ height: 4, background: "rgba(255,255,255,0.09)", borderRadius: 99, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${latest.structured_l3_pct}%`, background: "#a78bfa", borderRadius: 99, transition: "width 1.4s cubic-bezier(0.16,1,0.3,1)" }} />
+                        </div>
+                        <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.35)", marginTop: "0.2rem" }}>learners using AI without guided scaffolding</div>
+                      </div>
+                    )}
+
+                    <p style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.45)", lineHeight: 1.68, margin: 0, maxWidth: 260 }}>
+                      Scores are AI-assessed monthly. As learners grow, many move from structured guided modules toward independent, self-directed AI use — asking their own questions, exploring beyond the curriculum.
                     </p>
                   </div>
                 </div>
@@ -568,6 +584,60 @@ const PublicLandingPage: React.FC = () => {
                     </div>
                   </div>
                 )}
+
+                {/* What does this data mean? */}
+                <div style={{
+                  marginTop: "2.5rem",
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 14, padding: "1.75rem 2rem",
+                }}>
+                  <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#d97706", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "1rem" }}>
+                    Understanding the Data
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1.25rem" }}>
+                    {[
+                      {
+                        icon: "🧠",
+                        term: "Skill Scores (0–100)",
+                        def: "Five dimensions assessed monthly by AI from learner conversations: Cognitive (comprehension & recall), Critical Thinking (analysis & reasoning), Problem Solving, Creativity, and Productive Use of Energy (PUE — applying learning to real energy and enterprise challenges in their community)."
+                      },
+                      {
+                        icon: "🌍",
+                        term: "Role-Ready",
+                        def: "Learners showing evidence they are applying skills beyond the platform — teaching peers, advising on community problems, planning micro-enterprises, or sharing knowledge across generations. This is the platform's core mission outcome."
+                      },
+                      {
+                        icon: "🔧",
+                        term: "Reducing AI Reliance",
+                        def: "Learners whose conversations show decreasing dependence on AI scaffolding — they ask more independent questions, self-correct, and explore topics the AI didn't introduce. A sign of genuine capability formation."
+                      },
+                      {
+                        icon: "🎯",
+                        term: "Proficiency Sessions",
+                        def: "Learning sessions where a learner demonstrated mastery of a module's objectives — assessed by rubric, not just completion. Distinct from AI-tutored sessions, these require the learner to demonstrate knowledge independently."
+                      },
+                      {
+                        icon: "⚡",
+                        term: "PUE Linkage",
+                        def: "% of learners who connected their AI learning to real productive uses of energy in their community — energy access, market pricing, enterprise planning, or healthcare. This is the dissertation-level outcome this platform is designed to measure."
+                      },
+                      {
+                        icon: "📈",
+                        term: "Independent AI Use",
+                        def: "The share of learners operating at Level 3 structured reasoning — using AI as a tool they direct, rather than a guide they follow. Persistent learners increasingly move from curriculum-guided sessions to self-initiated, open-ended AI conversations."
+                      },
+                    ].map(item => (
+                      <div key={item.term} style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                          <span style={{ fontSize: "1.1rem" }}>{item.icon}</span>
+                          <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "#fff" }}>{item.term}</span>
+                        </div>
+                        <p style={{ fontSize: "0.76rem", color: "rgba(255,255,255,0.5)", lineHeight: 1.68, margin: 0 }}>{item.def}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </>
             )}
           </div>
