@@ -64,52 +64,17 @@ const HomePage: React.FC = () => {
     link_label?: string;
     emoji?: string;
     created_at: string;
-    organization_id: string | null;
   }
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsDismissed, setNewsDismissed] = useState(false);
   const [newsIndex, setNewsIndex] = useState(0);
 
   useEffect(() => {
-    // Fetch active news scoped to this user's organization + broadcast items.
-    // Falls back to broadcast-only for unauthenticated / org-less users.
-    const fetchOrgNews = async () => {
-      try {
-        let orgId: string | null = null;
-
-        if (user?.id) {
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('organization_id')
-            .eq('id', user.id)
-            .single();
-          orgId = profileData?.organization_id ?? null;
-        }
-
-        let query = supabase
-          .from('platform_news')
-          .select('id,title,body,link,link_label,emoji,created_at,organization_id')
-          .eq('active', true)
-          .order('created_at', { ascending: false })
-          .limit(10);
-
-        if (orgId) {
-          // org-specific news OR broadcast (organization_id IS NULL)
-          query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        } else {
-          // no org — only broadcast
-          query = query.is('organization_id', null);
-        }
-
-        const { data } = await query;
-        if (data) setNewsItems(data as NewsItem[]);
-      } catch {
-        // silent failure — banner is non-critical
-      }
-    };
-
-    fetchOrgNews();
-  }, [user?.id]);
+    fetch('/api/platform-news')
+      .then(r => r.ok ? r.json() : [])
+      .then((items: NewsItem[]) => setNewsItems(items))
+      .catch(() => {});
+  }, []);
 
   // Track window size for proper background positioning
   useEffect(() => {
