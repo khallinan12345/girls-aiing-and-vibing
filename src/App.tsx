@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo } from 'react';
 import EnglishSkillsPage from './pages/EnglishSkillsPage';
 import MathSkillsPage from './pages/MathSkillsPage';
-
+import ScienceSkillsPage from './pages/ScienceSkillsPage';
 import {
   BrowserRouter,
   Routes,
@@ -193,6 +193,7 @@ const AppContent: React.FC = () => {
         {/* Learning Routes */}
         <Route path="/english-skills" element={<EnglishSkillsPage />} />
         <Route path="/math-skills" element={<MathSkillsPage />} />
+        <Route path="/science-skills" element={<ScienceSkillsPage />} />
         <Route path="/learning/ai" element={<AILearningPage />} />
         <Route path="/learning/skills" element={<SkillsDevelopmentPage />} />
 
