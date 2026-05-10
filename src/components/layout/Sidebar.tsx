@@ -41,6 +41,22 @@ const Sidebar: React.FC = () => {
 
   const sections: SectionConfig[] = [
     {
+      id: 'foundations',
+      label: 'Foundations',
+      emoji: '📐',
+      fromGradient: 'from-amber-300',
+      toGradient: 'to-orange-300',
+      activeBg: 'bg-amber-100',
+      activeText: 'text-amber-700',
+      sectionBg: 'bg-amber-50/40',
+      headerText: 'text-amber-600',
+      items: [
+        { name: 'English Skills', path: '/english-skills', icon: <BookOpen size={20} /> },
+        { name: 'Math Skills',    path: '/math-skills',    icon: <BarChart size={20} /> },
+        { name: 'Science Skills', path: '/science-skills', icon: <Brain size={20} />    },
+      ],
+    },
+    {
       id: 'learning',
       label: 'Learning',
       emoji: '📚',

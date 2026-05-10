@@ -27,7 +27,15 @@ const Navbar: React.FC = () => {
 
   const navigationLinks = [
     { name: 'Home', path: '/home', shorthand: 'Home' },
-    { name: 'English Skills', path: '/english-skills', shorthand: 'English' },
+    {
+      name: 'Foundations',
+      shorthand: 'Foundations',
+      dropdown: [
+        { name: 'English Skills', path: '/english-skills' },
+        { name: 'Math Skills',    path: '/math-skills'    },
+        { name: 'Science Skills', path: '/science-skills' },
+      ],
+    },
     {
       name: 'Learning',
       shorthand: 'Learning',
