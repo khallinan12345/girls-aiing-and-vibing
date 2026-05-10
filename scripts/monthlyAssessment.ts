@@ -7,15 +7,16 @@ import OpenAI from "openai";
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const openaiKey = process.env.OPENAI_API_KEY!;
+const deepseekKey = process.env.DEEPSEEK_API_KEY!;
 
-if (!supabaseUrl || !supabaseKey || !openaiKey) {
+if (!supabaseUrl || !supabaseKey || !deepseekKey) {
   console.error("❌ Missing required environment variables");
   process.exit(1);
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
-const openai = new OpenAI({ apiKey: openaiKey });
+// DeepSeek is OpenAI API-compatible — same SDK, different baseURL + key
+const openai = new OpenAI({ apiKey: deepseekKey, baseURL: "https://api.deepseek.com" });
 
 
 
@@ -100,9 +101,9 @@ ${userMessages}
 Provide JSON with scores (0-100) and evidence arrays for: cognitive_score, cognitive_evidence, critical_thinking_score, critical_thinking_evidence, problem_solving_score, problem_solving_evidence, creativity_score, creativity_evidence, pue_score, pue_evidence`;
 
   try {
-    console.log(`   Calling OpenAI...`);
+    console.log(`   Calling DeepSeek R1...`);
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "deepseek-reasoner",  // R1 chain-of-thought, ~96% cheaper than Sonnet
       messages: [
         { role: "system", content: "Assessment expert. Respond with valid JSON only." },
         { role: "user", content: prompt },
@@ -123,7 +124,7 @@ Provide JSON with scores (0-100) and evidence arrays for: cognitive_score, cogni
         user_id: userId,
         measured_at: endDate.toISOString(),
         ...result,
-        assessment_model: "gpt-4o",
+        assessment_model: "deepseek-reasoner",
         assessment_version: "v1.0",
       });
 
@@ -276,7 +277,7 @@ async function main() {
   console.log(`\n🔍 ENVIRONMENT CHECK:`);
   console.log(`   SUPABASE_URL: ${supabaseUrl?.substring(0, 40)}...`);
   console.log(`   SUPABASE_SERVICE_ROLE_KEY: ${supabaseKey?.substring(0, 50)}...`);
-  console.log(`   OPENAI_API_KEY: ${openaiKey?.substring(0, 20)}...`);
+  console.log(`   DEEPSEEK_API_KEY: ${deepseekKey?.substring(0, 20)}...`);
   
   // Test direct Supabase connection
   console.log(`\n🔍 TESTING SUPABASE CONNECTION:`);
