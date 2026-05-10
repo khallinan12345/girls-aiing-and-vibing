@@ -3,14 +3,14 @@
 // ROUTING LOGIC:
 //   page = 'AILearningPage' | 'EnglishSkillsPage' |
 //          'SkillsDevelopmentPage' | consultant pages
-//     → Groq (primary) → Gemini → Cerebras → OpenRouter → Mistral → Anthropic Haiku (final)
+//     → Groq (primary) → Gemini → Cloudflare → OpenRouter → Mistral → DeepSeek → Anthropic Haiku (final)
 //
 //   page = 'VibeCodingPage' | 'WebDevelopmentPage' |
 //          'FullStackDevelopmentPage' | 'AIWorkflowDevPage'
 //     → taskType === 'coding'
 //         → Anthropic claude-sonnet-4-6 (best for code generation/debugging)
 //     → taskType !== 'coding' (explanations, planning, general Q&A)
-//         → Groq (primary) → Gemini → Cerebras → OpenRouter → Mistral → Anthropic Haiku (final)
+//         → Groq (primary) → Gemini → Cloudflare → OpenRouter → Mistral → DeepSeek → Anthropic Haiku (final)
 //
 //   page = 'AIPlaygroundPage'
 //     → Anthropic claude-haiku-4-5-20251001 (default)
@@ -28,7 +28,7 @@
 //   If taskType is omitted on a coding page, it defaults to 'coding' (preserves current behavior).
 //
 // FALLBACK CHAIN (for free-tier-routed pages):
-//   Groq → Gemini 2.0 Flash → Cerebras → Together AI → Cloudflare Workers AI → Hugging Face → OpenRouter (free) → Mistral → DeepSeek V3 → Anthropic Haiku
+//   Groq → Gemini 2.0 Flash → Cerebras → Cloudflare Workers AI → OpenRouter (free) → Mistral → DeepSeek V3 → Anthropic Haiku
 //
 // PROMPT CACHING: applied automatically on all Anthropic calls.
 //   The system prompt is marked with cache_control so repeated calls within
@@ -61,15 +61,13 @@ const HYBRID_CODING_PAGES = new Set([
 const ANTHROPIC_HAIKU  = 'claude-haiku-4-5-20251001';
 const ANTHROPIC_SONNET = 'claude-sonnet-4-6';
 const GROQ_MODEL       = 'llama-3.3-70b-versatile';
+const CEREBRAS_MODEL   = 'llama3.1-8b';              // Cerebras — 2000+ t/s, free tier, fastest in chain
 const DEEPSEEK_MODEL   = 'deepseek-chat';          // DeepSeek V3 — assessment pipeline + final paid fallback before Haiku
 
 // ── Fallback provider models ───────────────────────────────────────────────────
 
 const GEMINI_MODEL      = 'gemini-2.0-flash';
-const CEREBRAS_MODEL    = 'llama-3.3-70b';
-const TOGETHER_MODEL    = 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free';
 const CLOUDFLARE_MODEL  = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
-const HUGGINGFACE_MODEL = 'meta-llama/Llama-3.3-70B-Instruct';
 const OPENROUTER_MODEL  = 'meta-llama/llama-3.3-70b-instruct:free';
 const MISTRAL_MODEL     = 'mistral-small-latest';
 
@@ -80,12 +78,11 @@ const PRICING = {
   'claude-haiku-4-5-20251001':   { input: 1.00,  output: 5.00,  cacheWrite: 1.25,  cacheRead: 0.10  },
   'llama-3.3-70b-versatile':     { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  },
   'gemini-2.0-flash':            { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  },
-  'llama-3.3-70b':               { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  },
-  'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free': { input: 0.00, output: 0.00, cacheWrite: 0.00, cacheRead: 0.00 },
   '@cf/meta/llama-3.3-70b-instruct-fp8-fast': { input: 0.00, output: 0.00, cacheWrite: 0.00, cacheRead: 0.00 },
   'meta-llama/Llama-3.3-70B-Instruct': { input: 0.00, output: 0.00, cacheWrite: 0.00, cacheRead: 0.00 },
   'meta-llama/llama-3.3-70b-instruct:free': { input: 0.00, output: 0.00, cacheWrite: 0.00, cacheRead: 0.00 },
   'mistral-small-latest':        { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  },
+  'llama3.1-8b':                 { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  }, // Cerebras free tier
   'deepseek-chat':               { input: 0.28,  output: 0.42,  cacheWrite: 0.00,  cacheRead: 0.028 }, // V3.2 — ~71% cheaper than Haiku
 };
 
@@ -339,61 +336,7 @@ async function callGemini(model, messages, system, max_tokens, temperature) {
   };
 }
 
-// ── Cerebras call ──────────────────────────────────────────────────────────────
 
-async function callCerebras(model, messages, system, max_tokens, temperature) {
-  const cereMessages = [
-    ...(system ? [{ role: 'system', content: system }] : []),
-    ...messages,
-  ];
-
-  const upstream = await fetch('https://api.cerebras.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.CEREBRAS_API_KEY}`,
-      'Content-Type':  'application/json',
-    },
-    body: JSON.stringify({ model, messages: cereMessages, max_tokens, temperature }),
-  });
-
-  const data = await upstream.json();
-
-  if (!upstream.ok) {
-    const err = new Error(data.error?.message || 'Cerebras API error');
-    err.status = upstream.status;
-    throw err;
-  }
-
-  return { ...data, _route: { provider: 'cerebras', model } };
-}
-
-// ── Together AI call ───────────────────────────────────────────────────────────
-
-async function callTogether(model, messages, system, max_tokens, temperature) {
-  const togetherMessages = [
-    ...(system ? [{ role: 'system', content: system }] : []),
-    ...messages,
-  ];
-
-  const upstream = await fetch('https://api.together.xyz/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.AI_TOGETHER_API_KEY}`,
-      'Content-Type':  'application/json',
-    },
-    body: JSON.stringify({ model, messages: togetherMessages, max_tokens, temperature }),
-  });
-
-  const data = await upstream.json();
-
-  if (!upstream.ok) {
-    const err = new Error(data.error?.message || 'Together AI error');
-    err.status = upstream.status;
-    throw err;
-  }
-
-  return { ...data, _route: { provider: 'together', model } };
-}
 
 // ── Cloudflare Workers AI call ────────────────────────────────────────────────
 
@@ -427,39 +370,6 @@ async function callCloudflare(model, messages, system, max_tokens, temperature) 
   return { ...data, _route: { provider: 'cloudflare', model } };
 }
 
-// ── Hugging Face Inference call ───────────────────────────────────────────────
-// Uses the HF router with :sambanova suffix for free Llama 3.3 70B inference.
-
-async function callHuggingFace(model, messages, system, max_tokens, temperature) {
-  const hfMessages = [
-    ...(system ? [{ role: 'system', content: system }] : []),
-    ...messages,
-  ];
-
-  const upstream = await fetch('https://router.huggingface.co/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.HF_TOKEN}`,
-      'Content-Type':  'application/json',
-    },
-    body: JSON.stringify({
-      model:       `${model}:sambanova`,  // route through SambaNova free tier
-      messages:    hfMessages,
-      max_tokens,
-      temperature,
-    }),
-  });
-
-  const data = await upstream.json();
-
-  if (!upstream.ok) {
-    const err = new Error(data.error?.message || 'Hugging Face inference error');
-    err.status = upstream.status;
-    throw err;
-  }
-
-  return { ...data, _route: { provider: 'huggingface', model } };
-}
 
 // ── OpenRouter call ────────────────────────────────────────────────────────────
 
@@ -565,6 +475,52 @@ async function callDeepSeek(model, messages, system, max_tokens, temperature) {
   };
 }
 
+// ── Cerebras call (OpenAI-compatible, wafer-scale inference) ─────────────────
+// llama3.1-8b runs at 2000+ tokens/sec — fastest provider in the chain.
+// Free tier: 30 RPM, 1M tokens/day, no credit card required.
+
+async function callCerebras(model, messages, system, max_tokens, temperature) {
+  const csMessages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...messages,
+  ];
+
+  const upstream = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.CEREBRAS_API_KEY}`,
+      'Content-Type':  'application/json',
+    },
+    body: JSON.stringify({ model, messages: csMessages, max_tokens, temperature }),
+  });
+
+  const data = await upstream.json();
+
+  if (!upstream.ok) {
+    const err = new Error(data.message || data.error?.message || 'Cerebras API error');
+    err.status = upstream.status;
+    throw err;
+  }
+
+  const text = data?.choices?.[0]?.message?.content ?? '';
+  return {
+    id:     data.id || `cerebras-${Date.now()}`,
+    object: 'chat.completion',
+    model,
+    choices: [{
+      index:         0,
+      message:       { role: 'assistant', content: text },
+      finish_reason: data.choices?.[0]?.finish_reason ?? 'stop',
+    }],
+    usage: {
+      prompt_tokens:     data.usage?.prompt_tokens     ?? 0,
+      completion_tokens: data.usage?.completion_tokens ?? 0,
+      total_tokens:      data.usage?.total_tokens      ?? 0,
+    },
+    _route: { provider: 'cerebras', model },
+  };
+}
+
 // ── Free-tier fallback chain ───────────────────────────────────────────────────
 
 async function callWithFallbackChain(messages, system, max_tokens, temperature) {
@@ -588,22 +544,10 @@ async function callWithFallbackChain(messages, system, max_tokens, temperature) 
       fn:       () => callCerebras(CEREBRAS_MODEL, messages, system, max_tokens, temperature),
     },
     {
-      name:     'together',
-      model:    TOGETHER_MODEL,
-      keyEnv:   'AI_TOGETHER_API_KEY',
-      fn:       () => callTogether(TOGETHER_MODEL, messages, system, max_tokens, temperature),
-    },
-    {
       name:     'cloudflare',
       model:    CLOUDFLARE_MODEL,
       keyEnv:   'CLOUDFLARE_API_TOKEN',
       fn:       () => callCloudflare(CLOUDFLARE_MODEL, messages, system, max_tokens, temperature),
-    },
-    {
-      name:     'huggingface',
-      model:    HUGGINGFACE_MODEL,
-      keyEnv:   'HF_TOKEN',
-      fn:       () => callHuggingFace(HUGGINGFACE_MODEL, messages, system, max_tokens, temperature),
     },
     {
       name:     'openrouter',
@@ -776,10 +720,7 @@ export default async function handler(req, res) {
       providers: [
         'groq/llama-3.3-70b (primary free)',
         'gemini/2.0-flash (free fallback)',
-        'cerebras/llama-3.3-70b (free fallback)',
-        'together/llama-3.3-70b-free (free fallback)',
         'cloudflare/llama-3.3-70b-fp8 (free fallback)',
-        'huggingface/llama-3.3-70b:sambanova (free fallback)',
         'openrouter/llama-3.3-70b:free (free fallback)',
         'mistral/small (free fallback)',
         'deepseek/deepseek-chat (paid fallback, ~71% cheaper than Haiku)',
