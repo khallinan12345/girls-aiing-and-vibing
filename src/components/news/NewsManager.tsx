@@ -1,13 +1,20 @@
 // src/components/news/NewsManager.tsx
 //
-// Lightweight news poster — a single "Post News" button that opens a
-// modal. No inline list. Leaders post to their org; platform admins pick
-// any org or broadcast to all.
+// "Post News" button → modal.
+//
+// Leaders:           post to their own org only (fixed, no selector shown).
+// Platform admins:   choose any combination of orgs via checkboxes,
+//                    or "All Organizations" (broadcast).
+//
+// Schema: platform_news.organization_ids  uuid[] | null
+//   null        → broadcast to everyone
+//   [id, ...]   → scoped to listed orgs
 
 import React, { useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import {
-  Newspaper, X, CheckCircle, Loader2, AlertCircle, ChevronDown, Building2,
+  Newspaper, X, CheckCircle, Loader2, AlertCircle,
+  Building2, Globe, Search,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -30,8 +37,6 @@ const BLANK = {
   link_label: '',
   emoji: '',
   active: true,
-  organization_id: null as string | null,
-  organization_name: null as string | null,
 };
 
 const NewsManager: React.FC<NewsManagerProps> = ({
@@ -42,51 +47,76 @@ const NewsManager: React.FC<NewsManagerProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ ...BLANK });
+
+  // null = broadcast; string[] = selected org ids
+  const [selectedOrgIds, setSelectedOrgIds] = useState<string[] | null>(null);
+  const [orgSearch, setOrgSearch] = useState('');
+
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   const openModal = () => {
-    setForm({
-      ...BLANK,
-      organization_id:   isPlatformAdmin ? null : userOrgId,
-      organization_name: isPlatformAdmin ? null : userOrgName,
-    });
+    setForm({ ...BLANK });
+    // Leaders: pre-lock to their org
+    setSelectedOrgIds(isPlatformAdmin ? null : (userOrgId ? [userOrgId] : []));
+    setOrgSearch('');
     setSaveError(null);
     setSaved(false);
     setOpen(true);
   };
 
-  const handleOrgChange = (orgId: string) => {
-    if (orgId === '__all__') {
-      setForm(f => ({ ...f, organization_id: null, organization_name: null }));
-    } else {
-      const org = allOrgs.find(o => o.id === orgId);
-      setForm(f => ({
-        ...f,
-        organization_id:   orgId,
-        organization_name: org?.name ?? null,
-      }));
-    }
+  // ── Org selection helpers (platform admin only) ──────────────────────────
+
+  const isBroadcast = selectedOrgIds === null;
+
+  const toggleBroadcast = () => {
+    setSelectedOrgIds(isBroadcast ? [] : null);
   };
+
+  const toggleOrg = (id: string) => {
+    if (selectedOrgIds === null) return; // broadcast mode — shouldn't be called
+    setSelectedOrgIds(prev =>
+      prev!.includes(id) ? prev!.filter(x => x !== id) : [...prev!, id]
+    );
+  };
+
+  const filteredOrgs = allOrgs.filter(o =>
+    orgSearch === '' || o.name.toLowerCase().includes(orgSearch.toLowerCase())
+  );
+
+  // ── Save ─────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
     if (!form.title.trim() || !form.body.trim()) {
       setSaveError('Title and body are required.');
       return;
     }
+    if (!isPlatformAdmin && !userOrgId) {
+      setSaveError('No organization found for your account.');
+      return;
+    }
+    if (isPlatformAdmin && !isBroadcast && selectedOrgIds!.length === 0) {
+      setSaveError('Select at least one organization, or choose "All Organizations".');
+      return;
+    }
+
     setSaving(true);
     setSaveError(null);
+
+    const organization_ids: string[] | null = isPlatformAdmin
+      ? (isBroadcast ? null : selectedOrgIds!)
+      : (userOrgId ? [userOrgId] : null);
+
     try {
       const { error } = await supabase.from('platform_news').insert({
-        title:             form.title.trim(),
-        body:              form.body.trim(),
-        link:              form.link.trim() || null,
-        link_label:        form.link_label.trim() || null,
-        emoji:             form.emoji.trim() || null,
-        active:            form.active,
-        organization_id:   form.organization_id,
-        organization_name: form.organization_name,
+        title:            form.title.trim(),
+        body:             form.body.trim(),
+        link:             form.link.trim() || null,
+        link_label:       form.link_label.trim() || null,
+        emoji:            form.emoji.trim() || null,
+        active:           form.active,
+        organization_ids,
       });
       if (error) throw error;
       setSaved(true);
@@ -98,9 +128,22 @@ const NewsManager: React.FC<NewsManagerProps> = ({
     }
   };
 
+  // ── Audience summary label ───────────────────────────────────────────────
+
+  const audienceLabel = (() => {
+    if (!isPlatformAdmin) return userOrgName ?? 'your organization';
+    if (isBroadcast) return 'All organizations';
+    if (selectedOrgIds!.length === 0) return 'No organizations selected';
+    if (selectedOrgIds!.length === 1) {
+      return allOrgs.find(o => o.id === selectedOrgIds![0])?.name ?? '1 org';
+    }
+    return `${selectedOrgIds!.length} organizations`;
+  })();
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
   return (
     <>
-      {/* Trigger — rendered inline wherever the parent places it */}
       <button
         onClick={openModal}
         className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition-colors"
@@ -109,11 +152,11 @@ const NewsManager: React.FC<NewsManagerProps> = ({
         Post News
       </button>
 
-      {/* Modal */}
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
 
+            {/* Header */}
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
                 <Newspaper size={17} className="text-indigo-600" />
@@ -129,23 +172,70 @@ const NewsManager: React.FC<NewsManagerProps> = ({
 
             <div className="space-y-4">
 
-              {/* Org target — platform admins only */}
+              {/* ── Audience — platform admin multi-select ── */}
               {isPlatformAdmin && (
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Post to</label>
-                  <div className="relative">
-                    <select
-                      value={form.organization_id ?? '__all__'}
-                      onChange={e => handleOrgChange(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm pr-8 bg-white appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="__all__">🌐 All Organizations (broadcast)</option>
-                      {allOrgs.map(o => (
-                        <option key={o.id} value={o.id}>{o.name}</option>
-                      ))}
-                    </select>
-                    <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                  </div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-2">
+                    Post to
+                  </label>
+
+                  {/* Broadcast toggle */}
+                  <label className="flex items-center gap-2.5 mb-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={isBroadcast}
+                      onChange={toggleBroadcast}
+                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <Globe size={14} className="text-blue-500" />
+                    <span className="text-sm font-semibold text-gray-800">
+                      All Organizations (broadcast)
+                    </span>
+                  </label>
+
+                  {/* Per-org checkboxes — shown when not broadcast */}
+                  {!isBroadcast && (
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      {/* Search */}
+                      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 bg-gray-50">
+                        <Search size={13} className="text-gray-400 shrink-0" />
+                        <input
+                          type="text"
+                          placeholder="Search organizations…"
+                          value={orgSearch}
+                          onChange={e => setOrgSearch(e.target.value)}
+                          className="flex-1 text-xs bg-transparent border-none outline-none text-gray-700 placeholder-gray-400"
+                        />
+                        {selectedOrgIds!.length > 0 && (
+                          <span className="text-[10px] font-bold text-indigo-600 shrink-0">
+                            {selectedOrgIds!.length} selected
+                          </span>
+                        )}
+                      </div>
+
+                      {/* List */}
+                      <div className="max-h-44 overflow-y-auto divide-y divide-gray-50">
+                        {filteredOrgs.length === 0 && (
+                          <p className="text-xs text-gray-400 text-center py-4">No orgs match.</p>
+                        )}
+                        {filteredOrgs.map(org => (
+                          <label
+                            key={org.id}
+                            className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-indigo-50 transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedOrgIds!.includes(org.id)}
+                              onChange={() => toggleOrg(org.id)}
+                              className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <Building2 size={12} className="text-gray-400 shrink-0" />
+                            <span className="text-sm text-gray-800 truncate">{org.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -156,6 +246,15 @@ const NewsManager: React.FC<NewsManagerProps> = ({
                   Posting to: <strong className="ml-1">{userOrgName ?? 'your organization'}</strong>
                 </div>
               )}
+
+              {/* Audience summary */}
+              <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                {isBroadcast || !isPlatformAdmin
+                  ? <Globe size={12} className="text-blue-400" />
+                  : <Building2 size={12} className="text-purple-400" />
+                }
+                Audience: <span className="font-semibold text-gray-700 ml-0.5">{audienceLabel}</span>
+              </div>
 
               {/* Emoji + Title */}
               <div className="flex gap-2">
