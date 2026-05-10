@@ -28,7 +28,7 @@
 //   If taskType is omitted on a coding page, it defaults to 'coding' (preserves current behavior).
 //
 // FALLBACK CHAIN (for free-tier-routed pages):
-//   Groq → Gemini 2.0 Flash → Cerebras → Together AI → Cloudflare Workers AI → Hugging Face → OpenRouter (free) → Mistral → Anthropic Haiku
+//   Groq → Gemini 2.0 Flash → Cerebras → Together AI → Cloudflare Workers AI → Hugging Face → OpenRouter (free) → Mistral → DeepSeek V3 → Anthropic Haiku
 //
 // PROMPT CACHING: applied automatically on all Anthropic calls.
 //   The system prompt is marked with cache_control so repeated calls within
@@ -61,6 +61,7 @@ const HYBRID_CODING_PAGES = new Set([
 const ANTHROPIC_HAIKU  = 'claude-haiku-4-5-20251001';
 const ANTHROPIC_SONNET = 'claude-sonnet-4-6';
 const GROQ_MODEL       = 'llama-3.3-70b-versatile';
+const DEEPSEEK_MODEL   = 'deepseek-chat';          // DeepSeek V3 — assessment pipeline + final paid fallback before Haiku
 
 // ── Fallback provider models ───────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ const PRICING = {
   'meta-llama/Llama-3.3-70B-Instruct': { input: 0.00, output: 0.00, cacheWrite: 0.00, cacheRead: 0.00 },
   'meta-llama/llama-3.3-70b-instruct:free': { input: 0.00, output: 0.00, cacheWrite: 0.00, cacheRead: 0.00 },
   'mistral-small-latest':        { input: 0.00,  output: 0.00,  cacheWrite: 0.00,  cacheRead: 0.00  },
+  'deepseek-chat':               { input: 0.28,  output: 0.42,  cacheWrite: 0.00,  cacheRead: 0.028 }, // V3.2 — ~71% cheaper than Haiku
 };
 
 function estimateCost(model, inputTokens, outputTokens, cacheHitTokens = 0, cacheWriteTokens = 0) {
@@ -515,6 +517,54 @@ async function callMistral(model, messages, system, max_tokens, temperature) {
   return { ...data, _route: { provider: 'mistral', model } };
 }
 
+// ── DeepSeek call (OpenAI-compatible) ────────────────────────────────────────
+// Used as the assessment pipeline model and the final paid fallback
+// before Anthropic Haiku. Error code 402 = insufficient balance (free credits exhausted).
+
+async function callDeepSeek(model, messages, system, max_tokens, temperature) {
+  const dsMessages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...messages,
+  ];
+
+  const upstream = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+      'Content-Type':  'application/json',
+    },
+    body: JSON.stringify({ model, messages: dsMessages, max_tokens, temperature }),
+  });
+
+  const data = await upstream.json();
+
+  if (!upstream.ok) {
+    const err = new Error(data.error?.message || 'DeepSeek API error');
+    err.status = upstream.status;
+    // 402 = account balance exhausted — triggers fallback to Haiku
+    throw err;
+  }
+
+  const text = data?.choices?.[0]?.message?.content ?? '';
+  return {
+    id:     data.id || `deepseek-${Date.now()}`,
+    object: 'chat.completion',
+    model,
+    choices: [{
+      index:         0,
+      message:       { role: 'assistant', content: text },
+      finish_reason: data.choices?.[0]?.finish_reason ?? 'stop',
+    }],
+    usage: {
+      prompt_tokens:     data.usage?.prompt_tokens     ?? 0,
+      completion_tokens: data.usage?.completion_tokens ?? 0,
+      total_tokens:      data.usage?.total_tokens      ?? 0,
+      cache_read_input_tokens: data.usage?.prompt_cache_hit_tokens ?? 0,
+    },
+    _route: { provider: 'deepseek', model },
+  };
+}
+
 // ── Free-tier fallback chain ───────────────────────────────────────────────────
 
 async function callWithFallbackChain(messages, system, max_tokens, temperature) {
@@ -566,6 +616,12 @@ async function callWithFallbackChain(messages, system, max_tokens, temperature) 
       model:    MISTRAL_MODEL,
       keyEnv:   'MISTRAL_API_KEY',
       fn:       () => callMistral(MISTRAL_MODEL, messages, system, max_tokens, temperature),
+    },
+    {
+      name:     'deepseek',
+      model:    DEEPSEEK_MODEL,
+      keyEnv:   'DEEPSEEK_API_KEY',
+      fn:       () => callDeepSeek(DEEPSEEK_MODEL, messages, system, max_tokens, temperature),
     },
     {
       name:     'anthropic',
@@ -726,7 +782,8 @@ export default async function handler(req, res) {
         'huggingface/llama-3.3-70b:sambanova (free fallback)',
         'openrouter/llama-3.3-70b:free (free fallback)',
         'mistral/small (free fallback)',
-        'anthropic/haiku (paid fallback)',
+        'deepseek/deepseek-chat (paid fallback, ~71% cheaper than Haiku)',
+        'anthropic/haiku (final paid fallback)',
         'anthropic/sonnet (coding tasks)',
       ],
       method:    'GET',
