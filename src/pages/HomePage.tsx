@@ -64,7 +64,7 @@ const HomePage: React.FC = () => {
     link_label?: string;
     emoji?: string;
     created_at: string;
-    organization_id: string | null;
+    organization_id: string[];
   }
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsDismissed, setNewsDismissed] = useState(false);
@@ -86,23 +86,23 @@ const HomePage: React.FC = () => {
           orgId = profileData?.organization_id ?? null;
         }
 
-        let query = supabase
+        // organization_id is now a UUID[] (array) column.
+        // Broadcast items have an empty array {}; org-scoped items contain the org's UUID.
+        const { data } = await supabase
           .from('platform_news')
           .select('id,title,body,link,link_label,emoji,created_at,organization_id')
           .eq('active', true)
           .order('created_at', { ascending: false })
           .limit(10);
 
-        if (orgId) {
-          // org-specific news OR broadcast (organization_id IS NULL)
-          query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        } else {
-          // no org — only broadcast
-          query = query.is('organization_id', null);
+        if (data) {
+          // Filter client-side: include broadcast (empty array) + items containing this org's UUID
+          const filtered = data.filter((item: any) => {
+            const ids: string[] = item.organization_id ?? [];
+            return ids.length === 0 || (orgId && ids.includes(orgId));
+          });
+          setNewsItems(filtered as NewsItem[]);
         }
-
-        const { data } = await query;
-        if (data) setNewsItems(data as NewsItem[]);
       } catch {
         // silent failure — banner is non-critical
       }
