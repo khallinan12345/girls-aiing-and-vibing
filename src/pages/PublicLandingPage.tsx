@@ -674,6 +674,126 @@ const PublicLandingPage: React.FC = () => {
           </div>
         </section>
 
+        {/* ── Origin Story ─────────────────────────────────────────────────────── */}
+        <section style={{ background: "#faf7f2", padding: "5rem 2rem" }}>
+          <div style={{ maxWidth: 900, margin: "0 auto" }}>
+
+            <div style={{ textAlign: "center", marginBottom: "3rem" }}>
+              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#d97706", marginBottom: "0.6rem" }}>
+                How We Got Started
+              </div>
+              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.8rem,4vw,2.8rem)", fontWeight: 700, color: "#1a1208", margin: "0 0 1rem" }}>
+                A vacant room in Oloibiri.<br />A $5,000 bet on human potential.
+              </h2>
+              <p style={{ color: "rgba(26,18,8,0.6)", fontSize: "1.05rem", lineHeight: 1.8, maxWidth: 680, margin: "0 auto" }}>
+                In June 2025, a disused space in Oloibiri — a town of 8,000 people in Bayelsa State, Nigeria,
+                where the first oil well in West Africa once pumped and went dry — became the Davidson AI Innovation Center.
+                Four computers. Solar power. A Starlink connection. And two young men who knocked on doors
+                and told parents whose children could not afford school:{" "}
+                <em style={{ color: "#92400e" }}>"There is no cost. We want them."</em>
+              </p>
+            </div>
+
+            {/* Three story beats */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "1.5rem", marginBottom: "3rem" }}>
+              {[
+                {
+                  icon: "🤝",
+                  heading: "People before technology",
+                  body: "Bennywhite Davidson and Michael Amada had no formal training in technology education. What they had was courage and love for their community. They organised children from the poorest households, stood at the front of the room and explained why the AI asked questions — not to test the children, but to help them think. When typing was too hard, children used voice chat. Suddenly AI felt personal, accessible, and even fun.",
+                },
+                {
+                  icon: "📡",
+                  heading: "What nobody planned for",
+                  body: "Eight months in, the lab became something no one had designed it to be. A 12-year-old helped a poultry farmer write a business proposal. Market women and entrepreneurs arrived with needs and left with solutions. Two Anglican priests now come every Saturday — their only internet access — to research and compose sermons. Community elders formally encouraged all residents to learn AI. In one week, 513 people walked through the lab and registered to vote for the first time in their lives.",
+                },
+                {
+                  icon: "🌱",
+                  heading: "The model that scales",
+                  body: "The first cohort does not just find jobs — they become teachers and mentors who prime the next community. 66% of early learners volunteered intent to teach others before being asked. 41% explicitly planned to teach peers, family, or neighbours. One young man who came through the programme is now being mentored to maintain and grow the platform itself. This is what sustainability looks like: a locally owned digital asset with a local steward.",
+                },
+              ].map(beat => (
+                <div key={beat.heading} style={{
+                  background: "#fff",
+                  border: "1px solid rgba(26,18,8,0.08)",
+                  borderRadius: 14,
+                  padding: "1.75rem",
+                  boxShadow: "0 2px 14px rgba(26,18,8,0.05)",
+                }}>
+                  <div style={{ fontSize: "1.75rem", marginBottom: "0.75rem" }}>{beat.icon}</div>
+                  <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.05rem", fontWeight: 700, color: "#1a1208", margin: "0 0 0.6rem" }}>
+                    {beat.heading}
+                  </h3>
+                  <p style={{ fontSize: "0.86rem", color: "rgba(26,18,8,0.62)", lineHeight: 1.75, margin: 0 }}>
+                    {beat.body}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* Pull quote + links */}
+            <div style={{
+              background: "linear-gradient(135deg, #0c160a, #162612)",
+              borderRadius: 16,
+              padding: "2.5rem 3rem",
+              textAlign: "center",
+              position: "relative",
+              overflow: "hidden",
+            }}>
+              <div style={{
+                position: "absolute", top: -40, right: -40,
+                width: 200, height: 200, borderRadius: "50%",
+                background: "rgba(217,119,6,0.06)",
+                pointerEvents: "none",
+              }} />
+              <div style={{ fontSize: "2.5rem", lineHeight: 1, color: "#d97706", marginBottom: "0.75rem" }}>"</div>
+              <p style={{
+                fontFamily: "'Playfair Display', serif",
+                fontSize: "clamp(1.05rem,2.5vw,1.4rem)",
+                fontWeight: 700, color: "#fff",
+                lineHeight: 1.55, fontStyle: "italic",
+                maxWidth: 620, margin: "0 auto 1.25rem",
+              }}>
+                Opportunities in life versus the complete absence of opportunities — that is what Bennywhite and Michael are bringing to these kids.
+              </p>
+              <div style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.38)", fontWeight: 600, letterSpacing: "0.06em", marginBottom: "1.75rem" }}>
+                — Kevin Hallinan, University of Dayton
+              </div>
+              <div style={{ display: "flex", gap: "0.9rem", justifyContent: "center", flexWrap: "wrap" }}>
+                <a
+                  href="https://kevinhallinan.substack.com/p/the-oliobiri-nigeria-story-when-human"
+                  target="_blank" rel="noopener noreferrer"
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: "0.4rem",
+                    padding: "0.55rem 1.2rem", borderRadius: 7,
+                    background: "rgba(255,255,255,0.08)",
+                    border: "1px solid rgba(255,255,255,0.18)",
+                    fontSize: "0.8rem", fontWeight: 600,
+                    color: "rgba(255,255,255,0.8)", textDecoration: "none",
+                  }}
+                >
+                  The Oloibiri story →
+                </a>
+                <a
+                  href="https://kevinhallinan.substack.com/p/when-an-ai-learning-lab-in-rural"
+                  target="_blank" rel="noopener noreferrer"
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: "0.4rem",
+                    padding: "0.55rem 1.2rem", borderRadius: 7,
+                    background: "rgba(255,255,255,0.08)",
+                    border: "1px solid rgba(255,255,255,0.18)",
+                    fontSize: "0.8rem", fontWeight: 600,
+                    color: "rgba(255,255,255,0.8)", textDecoration: "none",
+                  }}
+                >
+                  When the lab became something more →
+                </a>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
         {/* ── Programmes ──────────────────────────────────────────────────── */}
         <section id="programmes" style={{ background: "#fff", padding: "5rem 2rem" }}>
           <div style={{ maxWidth: 1100, margin: "0 auto" }}>
