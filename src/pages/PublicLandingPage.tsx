@@ -42,13 +42,32 @@ interface GlobalRow {
 function useCountUp(target: number, duration = 1600) {
   const [count, setCount] = useState(0);
   const started = useRef(false);
+  const isVisible = useRef(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  // When target arrives (data loads), re-trigger if already visible
   useEffect(() => {
     if (!target) return;
+    started.current = false; // reset so animation can fire with real value
+    if (isVisible.current) {
+      started.current = true;
+      const t0 = performance.now();
+      const tick = (now: number) => {
+        const p = Math.min((now - t0) / duration, 1);
+        const e = 1 - Math.pow(1 - p, 3);
+        setCount(Math.floor(e * target));
+        if (p < 1) requestAnimationFrame(tick);
+        else setCount(target);
+      };
+      requestAnimationFrame(tick);
+    }
+  }, [target, duration]);
+
+  useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting && !started.current) {
+        isVisible.current = entry.isIntersecting;
+        if (entry.isIntersecting && !started.current && target > 0) {
           started.current = true;
           const t0 = performance.now();
           const tick = (now: number) => {
@@ -65,7 +84,7 @@ function useCountUp(target: number, duration = 1600) {
     );
     if (ref.current) observer.observe(ref.current);
     return () => observer.disconnect();
-  }, [target, duration]);
+  }, []); // mount/unmount only — target changes handled above
 
   return { count, ref };
 }
@@ -102,21 +121,30 @@ const StatCard: React.FC<{
 
 // ─── Score bar ────────────────────────────────────────────────────────────────
 
-const ScoreBar: React.FC<{ label: string; value: number | null; color: string }> = ({ label, value, color }) => (
-  <div style={{ marginBottom: "0.8rem" }}>
-    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.28rem" }}>
-      <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "rgba(255,255,255,0.65)" }}>{label}</span>
-      <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#fff" }}>{value?.toFixed(0) ?? "—"}</span>
+const ScoreBar: React.FC<{ label: string; value: number | null; color: string }> = ({ label, value, color }) => {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!value) return;
+    // Small delay ensures the browser paints width:0 first, then transitions to target
+    const t = setTimeout(() => setWidth(value), 120);
+    return () => clearTimeout(t);
+  }, [value]);
+  return (
+    <div style={{ marginBottom: "0.8rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.28rem" }}>
+        <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "rgba(255,255,255,0.65)" }}>{label}</span>
+        <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#fff" }}>{value?.toFixed(0) ?? "—"}</span>
+      </div>
+      <div style={{ height: 5, background: "rgba(255,255,255,0.09)", borderRadius: 99, overflow: "hidden" }}>
+        <div style={{
+          height: "100%", width: `${width}%`,
+          background: color, borderRadius: 99,
+          transition: "width 1.4s cubic-bezier(0.16,1,0.3,1)",
+        }} />
+      </div>
     </div>
-    <div style={{ height: 5, background: "rgba(255,255,255,0.09)", borderRadius: 99, overflow: "hidden" }}>
-      <div style={{
-        height: "100%", width: `${value ?? 0}%`,
-        background: color, borderRadius: 99,
-        transition: "width 1.4s cubic-bezier(0.16,1,0.3,1)",
-      }} />
-    </div>
-  </div>
-);
+  );
+};
 
 // ─── Programme card ───────────────────────────────────────────────────────────
 
@@ -182,11 +210,16 @@ const PublicLandingPage: React.FC = () => {
 
       // Fetch Davidson AI Innovation Center rows by name.
       // When additional orgs join, this becomes a dropdown — one query per selected org.
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("assessments_monthly_global")
         .select(COLS)
         .ilike("organization_name", "%Davidson%")
         .order("period_start", { ascending: false });
+
+      if (error) {
+        console.error("[PublicLandingPage] Supabase error:", error.message, error.code);
+      }
+      console.log("[PublicLandingPage] rows returned:", data?.length ?? 0, data?.[0]);
 
       if (data?.length) {
         setLatestRow(data[0] as GlobalRow);
