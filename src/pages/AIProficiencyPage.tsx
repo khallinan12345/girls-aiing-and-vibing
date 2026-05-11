@@ -1738,7 +1738,7 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
                   ? evaluationScore === 3 ? 'Excellent Work!' : 'Path to Advanced'
                   : 'Improvement Advice'}
               </h3>
-              <div className="prose prose-blue max-w-none text-gray-700 prose-p:leading-relaxed prose-p:my-2 prose-strong:text-gray-900 prose-strong:font-bold prose-ul:my-2 prose-li:my-1 prose-headings:text-gray-900 prose-headings:font-bold prose-h2:text-base prose-h3:text-base prose-hr:my-3 prose-a:text-blue-600 prose-a:underline">
+              <div className="prose prose-blue max-w-none text-gray-700 prose-p:leading-relaxed prose-p:my-3 prose-strong:text-gray-900 prose-strong:font-bold prose-ul:my-2 prose-li:my-1 prose-headings:text-gray-900 prose-headings:font-semibold prose-h1:text-sm prose-h2:text-sm prose-h3:text-sm prose-hr:my-4 prose-a:text-blue-600 prose-a:underline [&_h1]:mt-4 [&_h2]:mt-4 [&_h3]:mt-3">
                 <ReactMarkdown
                   components={{
                     a: ({ href, children }: { href?: string; children: React.ReactNode }) => (
@@ -1776,10 +1776,21 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
               <p className="text-gray-700 mb-4">
                 You still need to achieve Proficient or higher in {remaining.length} assessment{remaining.length !== 1 ? 's' : ''}:
               </p>
-              <ul className="list-disc list-inside space-y-1 text-gray-700">
-                {remaining.map(r => (
-                  <li key={r.assessment_name}>{r.assessment_name}</li>
-                ))}
+              <ul className="space-y-2 mt-2">
+                {remaining.map(r => {
+                  const fullAssessment = assessments.find(a => a.assessment_name === r.assessment_name);
+                  return (
+                    <li key={r.assessment_name}>
+                      <button
+                        onClick={() => fullAssessment && handleSelectAssessment(fullAssessment)}
+                        className="flex items-center gap-2 text-purple-700 font-semibold hover:text-purple-900 hover:underline transition-colors"
+                      >
+                        <ArrowRight className="h-4 w-4 flex-shrink-0" />
+                        {r.assessment_name}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
