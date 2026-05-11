@@ -680,20 +680,26 @@ Rubric:
 
 Evaluate the learner's response:
 1. Assign a score (0, 1, 2, or 3) based strictly on the rubric
-2. Cite specific evidence from their response that justifies the score
+2. Write structured evidence feedback in markdown format (see below)
 3. Be fair and encouraging — this is a young learner in rural Nigeria doing their best
+
+Format the "evidence" field as markdown with this structure:
+- Start with a one-sentence overall verdict that includes the score label in bold (e.g. **PROFICIENT**).
+- Then write one paragraph per rubric dimension that applies, each starting with the dimension name in bold (e.g. **Originality & Flexibility:**, **Elaboration:**, **Constraint Awareness:**, **Evidence of Iteration:**). Each paragraph should cite specific phrases or ideas from the learner's response.
+- If the score is below Advanced, add a final paragraph starting with **Limitations Preventing Higher Score:** that explains concisely what was missing.
+- End with one warm closing sentence about the learner's effort.
 
 Respond ONLY in this JSON format:
 {
   "score": <number 0-3>,
-  "evidence": "<specific evidence from the learner's response and explanation of the score>"
+  "evidence": "<markdown-formatted feedback as described above>"
 }
 `;
 
     try {
       const result = await chatJSON({ page: 'AIReadySkillsPage',
         messages: [{ role: 'user', content: evaluationPrompt }],
-        system: 'You are an expert educational assessor evaluating independent learner responses fairly. Ground every score in specific evidence from the response.',
+        system: 'You are an expert educational assessor evaluating independent learner responses fairly. Ground every score in specific evidence from the response. Return the evidence field as structured markdown with bold dimension headings and clear paragraphs — never as a single unbroken block of text.',
         max_tokens: 800,
         temperature: 0.3
       });
