@@ -64,7 +64,7 @@ const HomePage: React.FC = () => {
     link_label?: string;
     emoji?: string;
     created_at: string;
-    organization_id: string[];
+    organization_ids: string[];
   }
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsDismissed, setNewsDismissed] = useState(false);
@@ -86,19 +86,18 @@ const HomePage: React.FC = () => {
           orgId = profileData?.organization_id ?? null;
         }
 
-        // organization_id is now a UUID[] (array) column.
-        // Broadcast items have an empty array {}; org-scoped items contain the org's UUID.
+        // organization_ids is UUID[] — empty [] = broadcast, [uuid,...] = org-scoped
         const { data } = await supabase
           .from('platform_news')
-          .select('id,title,body,link,link_label,emoji,created_at,organization_id')
+          .select('id,title,body,link,link_label,emoji,created_at,organization_ids')
           .eq('active', true)
           .order('created_at', { ascending: false })
-          .limit(10);
+          .limit(20);
 
         if (data) {
-          // Filter client-side: include broadcast (empty array) + items containing this org's UUID
+          // Show broadcast items (empty array) OR items containing this user's org UUID
           const filtered = data.filter((item: any) => {
-            const ids: string[] = item.organization_id ?? [];
+            const ids: string[] = item.organization_ids ?? [];
             return ids.length === 0 || (orgId && ids.includes(orgId));
           });
           setNewsItems(filtered as NewsItem[]);
