@@ -55,15 +55,13 @@ const HomePage: React.FC = () => {
     link_label?: string;
     emoji?: string;
     created_at: string;
-    organization_id: string | null;
+    organization_ids: string[];  // UUID[] — empty [] = broadcast to all
   }
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsDismissed, setNewsDismissed] = useState(false);
   const [newsIndex, setNewsIndex] = useState(0);
 
   useEffect(() => {
-    // Fetch active news scoped to this user's organization + broadcast items.
-    // Falls back to broadcast-only for unauthenticated / org-less users.
     const fetchOrgNews = async () => {
       try {
         let orgId: string | null = null;
@@ -77,23 +75,21 @@ const HomePage: React.FC = () => {
           orgId = profileData?.organization_id ?? null;
         }
 
-        let query = supabase
+        // organization_ids is UUID[] — empty [] = broadcast, [uuid,...] = org-scoped
+        const { data } = await supabase
           .from('platform_news')
-          .select('id,title,body,link,link_label,emoji,created_at,organization_id')
+          .select('id,title,body,link,link_label,emoji,created_at,organization_ids')
           .eq('active', true)
           .order('created_at', { ascending: false })
-          .limit(10);
+          .limit(20);
 
-        if (orgId) {
-          // org-specific news OR broadcast (organization_id IS NULL)
-          query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        } else {
-          // no org — only broadcast
-          query = query.is('organization_id', null);
+        if (data) {
+          const filtered = data.filter((item: any) => {
+            const ids: string[] = item.organization_ids ?? [];
+            return ids.length === 0 || (orgId && ids.includes(orgId));
+          });
+          setNewsItems(filtered as NewsItem[]);
         }
-
-        const { data } = await query;
-        if (data) setNewsItems(data as NewsItem[]);
       } catch {
         // silent failure — banner is non-critical
       }
@@ -369,16 +365,13 @@ const HomePage: React.FC = () => {
             <div className="mb-8 flex flex-col items-center">
               {/* Platform logo — driven by useBranding */}
               {branding.logoPath ? (
-                <div className="flex flex-col items-center gap-3 mb-4">
+                <div className="flex flex-col items-center mb-4">
                   <img
                     src={branding.logoPath}
                     alt={branding.shortName}
                     className="h-40 object-contain drop-shadow-lg"
                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
-                  <span className="text-2xl font-bold text-white drop-shadow-md tracking-wide">
-                    {orgName ?? branding.shortName}
-                  </span>
                 </div>
               ) : (
                 <div className="flex items-center gap-3 mb-4">
