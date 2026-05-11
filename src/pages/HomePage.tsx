@@ -207,7 +207,9 @@ const HomePage: React.FC = () => {
     }).finally(() => setLoadingContinent(false));
   }, [user?.id]);
 
-
+  // 2) Determine theme
+  const isAfrica       = branding.variant === 'vai' || branding.variant === 'oloibiri' || continent === 'Africa';
+  const isNorthAmerica = continent === 'North America';
 
   // ── Communication-level content ───────────────────────────────────────────
   // level null  = no baseline yet (default to level 1 — Emerging)
