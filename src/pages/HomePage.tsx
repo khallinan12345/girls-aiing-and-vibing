@@ -8,10 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabaseClient';
 import { useBranding } from '../lib/useBranding';
 
-const US_BACKGROUND =
-  'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=2832&q=80';
-const AFRICA_BACKGROUND       = '/home_page_africa.png';
-const NORTH_AMERICA_BACKGROUND = '/background_home_page_North_America.png';
+
 
 const aiReadySkills = [
   {
@@ -47,13 +44,7 @@ const HomePage: React.FC = () => {
   const [orgName, setOrgName] = useState<string | null>(null);
   const [loadingContinent, setLoadingContinent] = useState(true);
   const [communicationLevel, setCommunicationLevel] = useState<number | null>(null);
-  const [mousePosition, setMousePosition] = useState({ x: 50, y: 50 });
-  const [mousePixels, setMousePixels] = useState({ x: 0, y: 0 });
-  const [mouseVelocity, setMouseVelocity] = useState({ x: 0, y: 0 });
-  const prevMousePos = React.useRef({ x: 50, y: 50 });
-  const [windowSize, setWindowSize] = useState({ width: 1920, height: 1080 });
-  const [isMouseMoving, setIsMouseMoving] = useState(false);
-  const mouseTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
 
   // ── News banner ───────────────────────────────────────────────────────────
   interface NewsItem {
@@ -111,60 +102,7 @@ const HomePage: React.FC = () => {
     fetchOrgNews();
   }, [user?.id]);
 
-  // Track window size for proper background positioning
-  useEffect(() => {
-    const handleResize = () => {
-      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
-    };
-    
-    if (typeof window !== 'undefined') {
-      handleResize(); // Set initial size
-      window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
-    }
-  }, []);
 
-  // Cleanup mouse timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (mouseTimeoutRef.current) {
-        clearTimeout(mouseTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Track mouse movement for background effect with velocity
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-    
-    // Store actual pixel position relative to the background div (accounts for sidebar/header)
-    const pixelX = e.clientX - 256; // 256px = 16rem (sidebar width)
-    const pixelY = e.clientY - 64;  // 64px = 4rem (header height)
-    
-    // Calculate velocity for ripple intensity
-    const velocityX = x - prevMousePos.current.x;
-    const velocityY = y - prevMousePos.current.y;
-    
-    setMousePosition({ x, y });
-    setMousePixels({ x: pixelX, y: pixelY });
-    setMouseVelocity({ x: velocityX, y: velocityY });
-    prevMousePos.current = { x, y };
-    
-    // Set moving state to true
-    setIsMouseMoving(true);
-    
-    // Clear existing timeout
-    if (mouseTimeoutRef.current) {
-      clearTimeout(mouseTimeoutRef.current);
-    }
-    
-    // Set timeout to mark as not moving after 150ms of no movement
-    mouseTimeoutRef.current = setTimeout(() => {
-      setIsMouseMoving(false);
-    }, 150);
-  };
 
   // ── Seed default personality baseline for brand-new users ───────────────
   // Extracted so it can be called from the useEffect below without being
@@ -269,12 +207,7 @@ const HomePage: React.FC = () => {
     }).finally(() => setLoadingContinent(false));
   }, [user?.id]);
 
-  // 2) Determine theme
-  const isAfrica       = branding.variant === 'vai' || branding.variant === 'oloibiri' || continent === 'Africa';
-  const isNorthAmerica = continent === 'North America';
-  const backgroundUrl  = isAfrica       ? AFRICA_BACKGROUND
-                       : isNorthAmerica ? NORTH_AMERICA_BACKGROUND
-                       : US_BACKGROUND;
+
 
   // ── Communication-level content ───────────────────────────────────────────
   // level null  = no baseline yet (default to level 1 — Emerging)
@@ -410,102 +343,23 @@ const HomePage: React.FC = () => {
   return (
     <div className="flex min-h-screen">
       <AppLayout>
-        <main className="flex-1 relative overflow-hidden" onMouseMove={handleMouseMove}>
-          {/* SVG Filter for swirl distortion effect */}
-          <svg className="absolute w-0 h-0">
-            <defs>
-              <filter id="ripple-distortion" x="-50%" y="-50%" width="200%" height="200%">
-                {/* Create smooth turbulence for swirl base */}
-                <feTurbulence
-                  type="fractalNoise"
-                  baseFrequency="0.01 0.01"
-                  numOctaves="3"
-                  seed={Date.now() / 100}
-                  result="turbulence"
-                >
-                  <animate
-                    attributeName="seed"
-                    from="0"
-                    to="100"
-                    dur="10s"
-                    repeatCount="indefinite"
-                  />
-                </feTurbulence>
-                
-                {/* Smooth the turbulence to reduce pixelation */}
-                <feGaussianBlur
-                  in="turbulence"
-                  stdDeviation="8"
-                  result="smoothTurbulence"
-                />
-                
-                {/* Create the swirl displacement - higher scale = more swirl */}
-                <feDisplacementMap
-                  in="SourceGraphic"
-                  in2="smoothTurbulence"
-                  scale="80"
-                  xChannelSelector="R"
-                  yChannelSelector="G"
-                  result="displace1"
-                />
-                
-                {/* Add second layer of displacement for stronger swirl */}
-                <feDisplacementMap
-                  in="displace1"
-                  in2="smoothTurbulence"
-                  scale="60"
-                  xChannelSelector="G"
-                  yChannelSelector="B"
-                  result="displace2"
-                />
-                
-                {/* Final blur to smooth out any remaining artifacts */}
-                <feGaussianBlur
-                  in="displace2"
-                  stdDeviation="1"
-                />
-              </filter>
-            </defs>
-          </svg>
-
-          {/* Normal background (no distortion) */}
+        <main className="flex-1 relative overflow-hidden">
+          {/* Static background — matches PublicLandingPage */}
           <div
             className="fixed top-16 left-64 right-0 bottom-0"
             style={{
-              backgroundImage: `url('${backgroundUrl}')`,
+              backgroundImage: "url('/home_page_africa.png')",
               backgroundSize: 'cover',
-              backgroundPosition: 'center',
+              backgroundPosition: 'center 30%',
               backgroundRepeat: 'no-repeat',
               zIndex: 0,
             }}
           >
-            {/* Gradient overlays */}
-            <div className="absolute inset-0 bg-gradient-to-br from-purple-900/80 via-pink-800/70 to-blue-900/80" />
-            <div className="absolute inset-0 bg-black/20" />
-          </div>
-
-          {/* Distorted background layer - only visible when cursor is moving */}
-          {isMouseMoving && (
             <div
-              className="fixed top-16 left-64 right-0 bottom-0 pointer-events-none transition-opacity duration-100"
-              style={{
-                backgroundImage: `url('${backgroundUrl}')`,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
-                backgroundRepeat: 'no-repeat',
-                zIndex: 1,
-                filter: 'url(#ripple-distortion)',
-                WebkitMaskImage: `radial-gradient(circle 150px at ${mousePixels.x}px ${mousePixels.y}px, black 0%, black 50%, transparent 100%)`,
-                maskImage: `radial-gradient(circle 150px at ${mousePixels.x}px ${mousePixels.y}px, black 0%, black 50%, transparent 100%)`,
-                maskSize: '100% 100%',
-                WebkitMaskSize: '100% 100%',
-              }}
-            >
-              {/* Same gradient overlays for consistency */}
-              <div className="absolute inset-0 bg-gradient-to-br from-purple-900/80 via-pink-800/70 to-blue-900/80" />
-              <div className="absolute inset-0 bg-black/20" />
-            </div>
-          )}
+              className="absolute inset-0"
+              style={{ background: 'linear-gradient(180deg,rgba(8,14,6,0.25) 0%,rgba(8,14,6,0.1) 45%,rgba(8,14,6,0.72) 100%)' }}
+            />
+          </div>
 
           {/* Content */}
           <div className="relative z-10 flex flex-col justify-center items-center min-h-screen px-6 py-20 text-center">
@@ -513,13 +367,16 @@ const HomePage: React.FC = () => {
             <div className="mb-8 flex flex-col items-center">
               {/* Platform logo — driven by useBranding */}
               {branding.logoPath ? (
-                <div className="flex flex-col items-center mb-4">
+                <div className="flex flex-col items-center gap-3 mb-4">
                   <img
                     src={branding.logoPath}
                     alt={branding.shortName}
                     className="h-40 object-contain drop-shadow-lg"
                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
+                  <span className="text-2xl font-bold text-white drop-shadow-md tracking-wide">
+                    {orgName ?? branding.shortName}
+                  </span>
                 </div>
               ) : (
                 <div className="flex items-center gap-3 mb-4">
