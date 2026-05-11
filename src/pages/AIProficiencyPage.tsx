@@ -651,10 +651,15 @@ Evaluate the learner's response and provide:
 1. A score (0, 1, 2, or 3)
 2. Evidence explaining why this score was assigned based on the rubric
 
+For the evidence field, use markdown formatting:
+- Bold (**text**) the key concepts and criteria being assessed
+- Use short paragraphs or a brief bulleted list — do NOT write one long paragraph
+- Keep it concise: 3–5 key points maximum
+
 Respond ONLY in this JSON format:
 {
   "score": <number 0-3>,
-  "evidence": "<detailed explanation>"
+  "evidence": "<markdown-formatted explanation>"
 }
 `;
 
@@ -1602,10 +1607,10 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
             prose-h1:text-xl prose-h2:text-xl prose-h3:text-lg
             prose-strong:text-gray-900
             prose-li:my-1 prose-ul:my-2 prose-ol:my-2
-            prose-p:leading-relaxed prose-p:my-3
+            prose-p:leading-relaxed prose-p:my-2
             [&>h2]:mb-2 [&>h2]:mt-5
-            [&_p+p]:mt-4
-            [&_strong+p]:mt-3">
+            [&_p:has(>strong:first-child)]:mt-6
+            [&_p:has(>strong:first-child)]:mb-1">
             <ReactMarkdown>
               {tailoredPrompt || selectedAssessment?.certification_prompt || ''}
             </ReactMarkdown>
@@ -1722,7 +1727,9 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
               `Your score is ${evaluationScore !== null ? ['No Evidence', 'Emerging', 'Proficient', 'Advanced'][evaluationScore] : ''}. ${evaluationEvidence}${improvementAdvice ? ' ' + improvementAdvice.replace(/\*\*/g, '').replace(/\[.*?\]\(.*?\)/g, '') : ''}`,
               'Hear feedback'
             )}
-            <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">{evaluationEvidence}</p>
+            <div className="prose prose-gray max-w-none text-gray-700 prose-p:leading-relaxed prose-p:my-2 prose-strong:text-gray-900 prose-strong:font-bold prose-ul:my-2 prose-li:my-1 prose-headings:text-gray-900 prose-headings:font-bold prose-h2:text-base prose-h3:text-base prose-hr:my-3">
+              <ReactMarkdown>{evaluationEvidence}</ReactMarkdown>
+            </div>
           </div>
           {improvementAdvice && (
             <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-6 mb-6">
@@ -1731,8 +1738,18 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
                   ? evaluationScore === 3 ? 'Excellent Work!' : 'Path to Advanced'
                   : 'Improvement Advice'}
               </h3>
-              <div className="text-gray-700 whitespace-pre-wrap leading-relaxed">
-                {renderAdviceWithLinks(improvementAdvice)}
+              <div className="prose prose-blue max-w-none text-gray-700 prose-p:leading-relaxed prose-p:my-2 prose-strong:text-gray-900 prose-strong:font-bold prose-ul:my-2 prose-li:my-1 prose-headings:text-gray-900 prose-headings:font-bold prose-h2:text-base prose-h3:text-base prose-hr:my-3 prose-a:text-blue-600 prose-a:underline">
+                <ReactMarkdown
+                  components={{
+                    a: ({ href, children }: { href?: string; children: React.ReactNode }) => (
+                      <Link to={href || '#'} className="text-blue-600 hover:text-blue-800 underline font-medium">
+                        {children}
+                      </Link>
+                    )
+                  }}
+                >
+                  {improvementAdvice}
+                </ReactMarkdown>
               </div>
             </div>
           )}
