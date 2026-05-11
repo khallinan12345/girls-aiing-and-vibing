@@ -28,6 +28,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useVoice } from '../hooks/useVoice';
 import { VoiceFallback } from '../components/VoiceFallback';
 import { useBranding, addBrandingToPDF } from '../lib/useBranding';
+import { jsPDF } from 'jspdf';
 
 
 // Distorted Background Component
@@ -937,14 +938,6 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
 
   const generateCertificate = async () => {
     try {
-      // Dynamic import to avoid build errors
-      const jsPDFModule = await import('jspdf').catch(() => null);
-      if (!jsPDFModule) {
-        alert('PDF generation not available. Please contact support.');
-        return;
-      }
-
-      const { jsPDF } = jsPDFModule;
       const doc = new jsPDF({
         orientation: 'landscape',
         unit: 'mm',
