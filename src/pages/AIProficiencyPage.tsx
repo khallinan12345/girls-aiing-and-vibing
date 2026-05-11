@@ -147,38 +147,28 @@ const ASSESSMENT_COLUMN_MAP: Record<string, string> = {
 // so we can build a matching answer template.
 // ---------------------------------------------------------------------------
 const buildAnswerTemplate = (promptText: string): string => {
-  // Try to extract numbered items like "1. **Data** — ..." or "1. Data —"
+  // Match lines like "**Question 1: Label**" or "1. **Label**" or "1. Label"
   const lines = promptText.split('\n');
   const questionLines: string[] = [];
 
   lines.forEach((line) => {
-    // Match lines that start with a number followed by . or )
-    const match = line.match(/^\s*(\d+)[.)]\s+\*{0,2}([^*\n—–-]+)\*{0,2}/);
-    if (match) {
-      // Strip any trailing punctuation / dashes
-      const label = match[2].trim().replace(/[—–\-:]+$/, '').trim();
+    // New format: **Question 1: Short label**
+    const newFormat = line.match(/^\*{0,2}Question\s+(\d+)[:\s]+([^*\n]+)\*{0,2}/i);
+    if (newFormat) {
+      const label = newFormat[2].trim().replace(/[*_]+$/, '').trim();
+      questionLines.push(label);
+      return;
+    }
+    // Legacy format: "1. **Label** —" or "1. Label"
+    const legacyFormat = line.match(/^\s*(\d+)[.)]\s+\*{0,2}([^*\n—–-]+)\*{0,2}/);
+    if (legacyFormat) {
+      const label = legacyFormat[2].trim().replace(/[—–\-:]+$/, '').trim();
       questionLines.push(label);
     }
   });
 
   if (questionLines.length === 0) {
-    // Fallback: generic template
-    return `1. [Answer Here]
-
-
-
-2. [Answer Here]
-
-
-
-3. [Answer Here]
-
-
-
-4. [Answer Here]
-
-
-`;
+    return `1. [Answer Here]\n\n\n\n2. [Answer Here]\n\n\n\n3. [Answer Here]\n\n\n\n4. [Answer Here]\n\n\n`;
   }
 
   return questionLines
@@ -530,21 +520,48 @@ Learner's Context:
 - Audience: ${learnerContext.audience}
 ${personalizedBlock}${commLevelBlock}
 
-Task: Rewrite the generic assessment prompt to be specifically tailored to this learner's context. The tailored prompt should:
-1. Reference their specific topic, setting, constraints, and audience
-2. Maintain the same learning objectives and assessment rigor as the original
-3. Feel personal and relevant to their real-world situation
-4. Be clear and actionable — written at the communication level specified above
-5. Keep the same level of difficulty and expectations
-${(cs || ls) ? '6. Reflect the learner\'s preferred communication style and engagement approach in how the prompt is framed and worded' : ''}
+Task: Create a structured assessment setup for this learner. Your output must follow this EXACT format:
 
-Respond with ONLY the tailored prompt text, nothing else.
+## [A short, specific title using the learner's topic — e.g. "How AI Could Help Your Village Water Business"]
+
+[1–2 sentences of brief framing that connects AI to their specific topic and setting. Do NOT explain how AI works. Do NOT teach. Just orient the learner to what they are about to answer.]
+
+**Question 1: [Short question label]**
+[The question itself, written clearly and specifically using their topic, setting, and constraints.]
+
+💡 **What to include in your answer:** [2–3 bullet points telling the learner exactly what elements a strong answer should contain. Be specific to their topic. Example bullets: "Name one specific type of data that would be collected", "Explain what the AI would do with that data", "Give one real example relevant to your context."]
+
+**Question 2: [Short question label]**
+[The question itself.]
+
+💡 **What to include in your answer:** [2–3 bullet points]
+
+**Question 3: [Short question label]**
+[The question itself.]
+
+💡 **What to include in your answer:** [2–3 bullet points]
+
+**Question 4: [Short question label]**
+[The question itself.]
+
+💡 **What to include in your answer:** [2–3 bullet points]
+
+Rules:
+- Use ## for the title (not #)
+- Put a blank line between each question block
+- The questions must test the same learning objectives as the generic prompt
+- Write at the communication level specified above
+- Do NOT explain AI concepts — the learner already knows them; this is an assessment, not a lesson
+- Do NOT add any text after Question 4
+${(cs || ls) ? '- Reflect the learner\'s preferred communication style in how the questions and hints are worded' : ''}
+
+Respond with ONLY the formatted assessment setup. No preamble, no closing remarks.
 `;
 
     try {
       const tailoredPrompt = await chatText({ page: 'AIProficiencyPage',
         messages: [{ role: 'user', content: userMessage }],
-        system: 'You are an expert educational assessment designer who creates personalized, contextually-relevant prompts. Always honour the communication level instruction — it controls vocabulary complexity and sentence structure. When a learner profile is provided, also reflect their preferred communication style in the framing.',
+        system: 'You are an expert educational assessment designer. Your job is to set up assessments — NOT to teach or explain concepts. You present questions and tell learners what their answers should contain. Always honour the communication level instruction. When a learner profile is provided, reflect their preferred communication style in framing.',
         max_tokens: 800,
         temperature: 0.7
       });
@@ -1582,10 +1599,13 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
           {/* Markdown-rendered prompt */}
           <div className="prose prose-blue max-w-none text-gray-800
             prose-headings:text-gray-900 prose-headings:font-bold
-            prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
+            prose-h1:text-xl prose-h2:text-xl prose-h3:text-lg
             prose-strong:text-gray-900
             prose-li:my-1 prose-ul:my-2 prose-ol:my-2
-            prose-p:leading-relaxed prose-p:my-2">
+            prose-p:leading-relaxed prose-p:my-3
+            [&>h2]:mb-2 [&>h2]:mt-5
+            [&_p+p]:mt-4
+            [&_strong+p]:mt-3">
             <ReactMarkdown>
               {tailoredPrompt || selectedAssessment?.certification_prompt || ''}
             </ReactMarkdown>
@@ -1624,7 +1644,7 @@ Keep your advice concise (3-5 key points). Write at the communication level spec
             className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none min-h-[420px] font-mono text-sm leading-relaxed"
           />
           <p className="text-sm text-gray-500 mt-2">
-            Replace each <em>[Answer Here]</em> with your own answer. Be thorough — the more detail you provide, the better your evaluation will be.
+            Answer each question by replacing <em>[Answer Here]</em> with your own response. Use the 💡 hints above each question to make sure you cover the key points — the more specific and detailed you are, the better your evaluation will be.
           </p>
         </div>
 
