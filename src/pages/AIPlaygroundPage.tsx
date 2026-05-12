@@ -550,6 +550,34 @@ async function* streamPlayground(
   yield { done: true, fullText };
 }
 
+// ── Playground via free-tier chain (non-Sonnet users) ────────────────────────
+async function* chatPlaygroundFree(
+  messages: { role: string; content: string }[],
+  system: string,
+  maxTokens: number,
+  temperature: number,
+  userId?: string,
+): AsyncGenerator<{ chunk?: string; done?: boolean; fullText?: string }> {
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages, system,
+      max_tokens:  maxTokens,
+      temperature,
+      page:        'AIPlaygroundPage',
+      userId:      userId ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err?.error ?? `Chat error ${res.status}`);
+  }
+  const data = await res.json();
+  const fullText = data?.choices?.[0]?.message?.content ?? '';
+  yield { chunk: fullText };
+  yield { done: true, fullText };
+}
 
 const MODEL_OPTIONS = [
   { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku' },
@@ -843,7 +871,7 @@ const AIPlaygroundPage: React.FC = () => {
       const streamGen = streamPlayground(
         [{
           role: 'user',
-          content: `Here is the current code (${artifact.title}):\n\`\`\`${artifact.type === 'code' ? 'tsx' : 'text'}\n${artifact.content}\n\`\`\`\n\nEdit instruction: ${instruction}`,
+          content: `Here is the current code (${artifact!.title}):\n\`\`\`${artifact!.type === 'code' ? 'tsx' : 'text'}\n${artifact!.content}\n\`\`\`\n\nEdit instruction: ${instruction}`,
         }],
         `You are a precise code editor. Return ONLY the complete updated code inside a single fenced code block with the correct language tag. No explanation before or after — just the fenced block. Preserve all logic not explicitly changed.`,
         playgroundModel,
@@ -939,15 +967,10 @@ const AIPlaygroundPage: React.FC = () => {
     let estTokensOut = 0; // updated after stream completes
 
     try {
-      // ── Stream via Edge function → Anthropic (no Vercel timeout) ─────────────
-      const streamGen = streamPlayground(
-        apiMessages,
-        SYSTEM_PROMPT,
-        playgroundModel,
-        32000,
-        0.3,
-        user?.id,
-      );
+      // ── Route by model: Sonnet → streaming Edge function, others → free-tier chain ──
+      const streamGen = playgroundModel === 'claude-sonnet-4-6'
+        ? streamPlayground(apiMessages, SYSTEM_PROMPT, playgroundModel, 32000, 0.3, user?.id)
+        : chatPlaygroundFree(apiMessages, SYSTEM_PROMPT, 32000, 0.3, user?.id);
 
       // ── Consume stream: prose → chat bubble, code → artifact panel ────────────
       let lineBuffer = '';
