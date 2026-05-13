@@ -3944,8 +3944,6 @@ Provide assessment now:`;
           </div>
         )}
           </div>
-          </div>
-        </div>
       </AppLayout>
     );
   }
