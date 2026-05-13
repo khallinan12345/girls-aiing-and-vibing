@@ -1009,14 +1009,6 @@ const ScienceSkillsPage: React.FC = () => {
 
   useEffect(() => { loadAllProgress(); }, [loadAllProgress]);
 
-  // Reload stage sessions whenever the topic view becomes active
-  useEffect(() => {
-    if (view === 'topic' && selectedStage) {
-      setStageSessions([]);
-      loadStageSessions(selectedStage.name);
-    }
-  }, [view, selectedStage, loadStageSessions]);
-
   const loadStageSessions = useCallback(async (stageName: string) => {
     if (!user?.id) return;
     const { data } = await supabase
@@ -1028,6 +1020,14 @@ const ScienceSkillsPage: React.FC = () => {
       .order('updated_at', { ascending: false });
     setStageSessions((data ?? []) as DashboardSession[]);
   }, [user?.id]);
+
+  // Reload stage sessions whenever the topic view becomes active
+  useEffect(() => {
+    if (view === 'topic' && selectedStage) {
+      setStageSessions([]);
+      loadStageSessions(selectedStage.name);
+    }
+  }, [view, selectedStage, loadStageSessions]);
 
   // ── Science level scaffold ─────────────────────────────────────────────
   const buildScienceLevelBlock = (level: number): string => {
