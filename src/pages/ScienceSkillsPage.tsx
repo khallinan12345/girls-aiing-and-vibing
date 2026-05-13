@@ -1009,6 +1009,14 @@ const ScienceSkillsPage: React.FC = () => {
 
   useEffect(() => { loadAllProgress(); }, [loadAllProgress]);
 
+  // Reload stage sessions whenever the topic view becomes active
+  useEffect(() => {
+    if (view === 'topic' && selectedStage) {
+      setStageSessions([]);
+      loadStageSessions(selectedStage.name);
+    }
+  }, [view, selectedStage, loadStageSessions]);
+
   const loadStageSessions = useCallback(async (stageName: string) => {
     if (!user?.id) return;
     const { data } = await supabase
@@ -1236,7 +1244,7 @@ Push for precision, nuance, and connection between concepts. Challenge oversimpl
         key={`${stage.pathway}-${stage.id}`}
         onClick={() => {
           if (!unlocked) return;
-          setSelectedStage(stage); setTopicInput('');
+          setSelectedStage(stage); setTopicInput(''); setStageSessions([]);
           loadStageSessions(stage.name); setView('topic');
         }}
         className={`relative rounded-2xl border-2 p-5 transition-all duration-200
