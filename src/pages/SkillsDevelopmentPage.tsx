@@ -4022,7 +4022,6 @@ Provide assessment now:`;
                 </div>
               </div>
             </div>
-          </div>
 
           {/* Actions */}
           <div className="flex items-center justify-between mt-2">
