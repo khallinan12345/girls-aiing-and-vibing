@@ -52,7 +52,6 @@ import { supabase } from '../lib/supabaseClient';
 import { chatText, chatJSON, ChatMessage as ClientChatMessage } from '../lib/chatClient';
 import AppLayout from '../components/layout/AppLayout';
 import Button from '../components/ui/Button';
-import { VibeCodingWorkflow } from '../components/learning/VibeCodingWorkflow';
 import {
   Code,
   Monitor, 
@@ -1095,9 +1094,6 @@ const SkillsPage: React.FC = () => {
   const [savingSession, setSavingSession] = useState(false);
   const [finishingModule, setFinishingModule] = useState(false);
 
-  // Vibe Coding — prompt injected from chat into VibeCodingWorkflow instructions box
-  const [vibeCodingInjectedPrompt, setVibeCodingInjectedPrompt] = useState<string | null>(null);
-  const [generatingVibePromptFromChat, setGeneratingVibePromptFromChat] = useState(false);
   const [showEvaluationModal, setShowEvaluationModal] = useState(false);
   const [evaluationResult, setEvaluationResult] = useState<{score: number, evidence: string} | SkillsRubricEvaluation | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
@@ -2122,7 +2118,7 @@ Provide assessment now:`;
       ];
 
       const assessment = await chatJSON({
-        page: 'SkillsDevelopmentPage-code',
+        page: 'SkillsDevelopmentPage',
         messages,
         system: 'You are an expert AI assessment evaluator for comprehensive skill evaluation. Respond only with valid JSON.',
         max_tokens: 2000,
@@ -3046,217 +3042,6 @@ Provide assessment now:`;
     navigator.clipboard.writeText(codeEditorContent);
   };
 
-  // ========== VIBE CODING WORKFLOW CALLBACKS ==========
-
-// Get AI critique of instructions (before code exists)
-const handleGetInstructionCritique = async (instructions: string) => {
-  try {
-    console.log('[Vibe Coding] Getting instruction critique...');
-    
-    const critiquePrompt = `You are evaluating a student's Vibe Coding instructions BEFORE generating code.
-
-STUDENT'S INSTRUCTIONS:
-${instructions}
-
-TASK: Evaluate these instructions using ONLY these two rubric dimensions:
-
-1. **Problem Decomposition** (0-3):
-   - 0: No breakdown of steps, inputs, or outputs
-   - 1: Names components but lacks sequencing or rationale
-   - 2: Explicitly decomposes into ordered steps with inputs/outputs
-   - 3: Decomposes, prioritizes, identifies edge cases
-
-2. **Prompt Engineering** (0-3):
-   - 0: Vague, copied, or irrelevant
-   - 1: Specifies goal but omits constraints, context, or success criteria
-   - 2: Clearly specifies task, constraints, inputs, expected format
-   - 3: Anticipates failure modes, requests alternatives
-
-Respond with ONLY valid JSON:
-{
-  "problemDecomposition": {
-    "score": <0-3>,
-    "evidence": "<specific quote or observation>",
-    "improvement": "<one specific suggestion>"
-  },
-  "promptEngineering": {
-    "score": <0-3>,
-    "evidence": "<specific quote or observation>",
-    "improvement": "<one specific suggestion>"
-  },
-  "recommendation": "<Should they improve (if scores <2) or proceed (if scores >=2)? One sentence.>"
-}`;
-
-    const messages: ClientChatMessage[] = [
-      { role: 'user', content: critiquePrompt }
-    ];
-
-    const critiqueResult = await chatJSON({
-      page: 'SkillsDevelopmentPage-code',
-      messages,
-      system: 'You are an expert at evaluating coding instructions. Respond only with valid JSON.',
-      max_tokens: 800,
-      temperature: 0.3,
-      page: 'SkillsDevelopmentPage-code',  // → Claude Sonnet 4.6
-    });
-
-    let parsed: any;
-    if (typeof critiqueResult === 'string') {
-      parsed = JSON.parse(critiqueResult);
-    } else {
-      parsed = critiqueResult;
-    }
-
-    console.log('[Vibe Coding] Critique received:', parsed);
-    return parsed;
-
-  } catch (error) {
-    console.error('[Vibe Coding] Critique error:', error);
-    throw error;
-  }
-};
-
-// Generate code from instructions
-const handleGenerateCodeFromInstructions = async (instructions: string, language: 'python' | 'javascript' | 'html') => {
-  try {
-    console.log(`[Vibe Coding] Generating ${language} code from instructions...`);
-
-    const isHTML = language === 'html';
-    const codeGenPrompt = isHTML
-      ? `Generate a complete, self-contained HTML file based on these instructions:\n\n${instructions}\n\nREQUIREMENTS:\n- Single HTML file with embedded CSS and JavaScript\n- Mobile-friendly, works in any browser\n- No external dependencies except CDN libraries if needed\n- Clean, well-commented code\n\nRespond with ONLY the complete HTML file, no explanations or markdown formatting.`
-      : `Generate ${language} code based on these instructions:\n\n${instructions}\n\nREQUIREMENTS:\n- Write clean, well-commented code\n- Include error handling where appropriate\n- Make it executable and testable\n- Keep it simple and readable\n\nRespond with ONLY the code, no explanations or markdown formatting.`;
-
-    const messages: ClientChatMessage[] = [{ role: 'user', content: codeGenPrompt }];
-
-    const code = await chatText({
-      messages,
-      system: isHTML
-        ? 'You are a web developer. Generate ONLY a complete HTML file with no markdown backticks or explanations.'
-        : `You are a code generator. Generate ONLY executable ${language} code with no markdown backticks or explanations.`,
-      max_tokens: 2500,
-      temperature: 0.5,
-      page: 'SkillsDevelopmentPage-code',  // → Claude Sonnet 4.6
-    });
-
-    let cleanedCode = code.trim();
-    cleanedCode = cleanedCode.replace(/^```(?:html|python|javascript|js)?\n/i, '');
-    cleanedCode = cleanedCode.replace(/\n```$/i, '');
-
-    console.log('[Vibe Coding] Code generated');
-    return cleanedCode;
-
-  } catch (error) {
-    console.error('[Vibe Coding] Code generation error:', error);
-    throw error;
-  }
-};
-
-// Generate a vibe coding prompt from the design conversation in the chat panel
-const handleCreateVibePromptFromChat = async () => {
-  if (chatHistory.length < 2) return;
-  setGeneratingVibePromptFromChat(true);
-  try {
-    const conversation = chatHistory
-      .map(m => `${m.role === 'assistant' ? 'Coach' : 'Student'}: ${m.content}`)
-      .join('\n\n');
-
-    const prompt = await chatText({
-      page: 'SkillsDevelopmentPage-code',  // → Claude Sonnet 4.6
-      messages: [{
-        role: 'user',
-        content: `A student has been working with an AI coding coach to design a coding project. Based on the conversation below, write a clear, complete VIBE CODING PROMPT that captures exactly what they want to build.
-
-The prompt should:
-- Start with "Build me a..." or "Create a..."
-- Specify the technology (HTML/CSS/JS, Python, etc.)
-- Describe all features and behaviours discussed
-- Include design preferences (colours, layout, style) mentioned
-- Be specific enough that any AI coding tool can start building immediately
-
-CONVERSATION:
-${conversation}
-
-Write ONLY the vibe coding prompt — no explanation, no preamble. Make it specific and complete.`
-      }],
-      system: 'You write precise, complete vibe coding prompts. Output only the prompt itself.',
-      max_tokens: 600,
-      temperature: 0.4,
-    });
-
-    setVibeCodingInjectedPrompt(prompt.trim());
-  } catch (err) {
-    console.error('[Vibe Coding] Failed to generate prompt from chat:', err);
-  } finally {
-    setGeneratingVibePromptFromChat(false);
-  }
-};
-
-// Get debugging help
-const handleGetDebuggingHelp = async (code: string, error: string, instructions: string) => {
-  try {
-    console.log('[Vibe Coding] Getting debugging help...');
-    
-    const debugPrompt = `A student's code produced an error. Help them understand and fix it.
-
-ORIGINAL INSTRUCTIONS:
-${instructions}
-
-GENERATED CODE:
-\`\`\`
-${code}
-\`\`\`
-
-ERROR:
-${error}
-
-TASK: Provide debugging help that teaches, not just fixes:
-1. Explain what the error means in simple terms
-2. Identify which part of the instructions might have caused this
-3. Suggest how to improve the instructions to prevent this error
-4. Give ONE specific fix they can try
-
-Keep it concise and educational.`;
-
-    const messages: ClientChatMessage[] = [
-      { role: 'user', content: debugPrompt }
-    ];
-
-    const advice = await chatText({
-      messages,
-      system: 'You are a patient coding tutor. Help students learn from errors, don\'t just fix things for them.',
-      max_tokens: 600,
-      temperature: 0.7,
-      page: 'SkillsDevelopmentPage-code',  // → Claude Sonnet 4.6
-    });
-
-    console.log('[Vibe Coding] Debugging advice provided');
-    return advice;
-
-  } catch (error) {
-    console.error('[Vibe Coding] Debugging help error:', error);
-    throw error;
-  }
-};
-
-// Execute code via E2B (reuse your existing function)
-const handleExecuteCode = async (code: string, language: 'python' | 'javascript') => {
-  try {
-    const execution = await CodeExecutionService.executeCode(code, language);
-    
-    // Store the latest execution result for display in output area
-    setLatestExecution(execution);
-    
-    return {
-      output: execution.output,
-      error: execution.error,
-      executionTime: execution.executionTime
-    };
-  } catch (error) {
-    console.error('[Vibe Coding] Execution error:', error);
-    throw error;
-  }
-};
-
   // Get activities for category
   const getActivitiesForCategory = (categoryId: string): DashboardActivity[] => {
     const category = skillCategories.find(cat => cat.id === categoryId);
@@ -3761,12 +3546,7 @@ const handleExecuteCode = async (code: string, language: 'python' | 'javascript'
         <DistortedBackground imageUrl="/skills-development-bg.png" />
         {showConfetti && <ConfettiAnimation />}
         
-        <div className={classNames(
-          "relative z-10 py-8",
-          selectedActivity.sub_category === 'Vibe Coding'
-            ? "max-w-7xl mx-auto px-6"
-            : "max-w-[67%] mx-auto px-6"
-        )}>
+        <div className="relative z-10 py-8 max-w-[67%] mx-auto px-6">
           {/* Remove the broken conditional wrapper */}
 
           {/* Header */}
@@ -3828,24 +3608,20 @@ const handleExecuteCode = async (code: string, language: 'python' | 'javascript'
           </div>
 
           {/* Chat Interface */}
-{/* CONDITIONAL LAYOUT based on Vibe Coding */}
-{selectedActivity.sub_category === 'Vibe Coding' ? (
-            /* 2-COLUMN LAYOUT for Vibe Coding */
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-
-              {/* LEFT: Chat — Design your prompt here */}
-              <div className="bg-white rounded-lg shadow-md flex flex-col" style={{ height: '700px' }}>
-
-                {/* Start Here header */}
-                <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-5 py-4 rounded-t-lg flex-shrink-0">
-                  <p className="text-xs font-bold text-purple-200 uppercase tracking-wider mb-0.5">Start Here</p>
-                  <h3 className="text-base font-bold text-white leading-snug">
-                    Work with AI to Design Your Vibe Coding Prompt
-                  </h3>
-                  <p className="text-xs text-purple-100 mt-1 leading-relaxed">
-                    Describe your project idea to the coach. Ask questions, explore features, and refine your thinking. When you're ready, click <strong>Create Vibe Coding Prompt</strong> below to turn this conversation into a structured prompt — then move to the right column to generate your code.
-                  </p>
-                </div>
+{/* Chat Interface */}
+            <div className="w-full bg-white rounded-lg shadow-md mb-6 flex flex-col" style={{ height: '740px' }}>
+              {/* Score legend bar */}
+              <div className="flex items-center flex-wrap gap-2 px-5 py-3 border-b bg-indigo-50 text-xl text-indigo-700 flex-shrink-0">
+                <span className="font-semibold">Scores out of 3:</span>
+                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-300 font-bold">0</span>
+                <span>No Evidence</span>
+                <span className="px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-300 font-bold">1</span>
+                <span>Emerging</span>
+                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-300 font-bold">2</span>
+                <span className="font-semibold">Proficient ✓</span>
+                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 font-bold">3</span>
+                <span className="font-semibold">Advanced ✓</span>
+              </div>
 
                 {/* Chat messages */}
                 <div 
@@ -3979,27 +3755,6 @@ const handleExecuteCode = async (code: string, language: 'python' | 'javascript'
                     </div>
                   </div>
 
-                  {/* Create Vibe Coding Prompt from Design — full width below textarea */}
-                  <div className="mt-2">
-                    <Button
-                      onClick={handleCreateVibePromptFromChat}
-                      disabled={chatHistory.length < 2 || generatingVibePromptFromChat}
-                      isLoading={generatingVibePromptFromChat}
-                      className="w-full bg-purple-600 hover:bg-purple-700 text-white justify-center"
-                      icon={<Wand2 size={15} />}
-                    >
-                      {generatingVibePromptFromChat ? 'Creating Prompt…' : 'Create Vibe Coding Prompt from Design'}
-                    </Button>
-                    {chatHistory.length < 2 && (
-                      <p className="text-xs text-gray-400 text-center mt-1">Chat with the AI first to design your project</p>
-                    )}
-                    {vibeCodingInjectedPrompt && (
-                      <p className="text-xs text-emerald-600 text-center mt-1 flex items-center justify-center gap-1">
-                        <CheckCircle size={11} /> Prompt sent to the Vibe Coding panel →
-                      </p>
-                    )}
-                  </div>
-
                   <div className="mt-3 flex items-center justify-between">
                     <div className="flex items-center space-x-4 text-sm text-gray-600">
                       <label className="flex items-center space-x-2 cursor-pointer">
@@ -4073,32 +3828,6 @@ const handleExecuteCode = async (code: string, language: 'python' | 'javascript'
                 </div>
               </div>
 
-              {/* RIGHT: Vibe Coding Workflow */}
-              <VibeCodingWorkflow
-                onExecuteCode={handleExecuteCode}
-                onGetAICritique={handleGetInstructionCritique}
-                onGenerateCode={handleGenerateCodeFromInstructions}
-                onGetDebuggingHelp={handleGetDebuggingHelp}
-                injectedInstructions={vibeCodingInjectedPrompt}
-                onInstructionsInjected={() => setVibeCodingInjectedPrompt(null)}
-              />
-
-            </div>
-          ) : (
-            /* 1-COLUMN LAYOUT for other activities */
-            <div className="w-full bg-white rounded-lg shadow-md mb-6 flex flex-col" style={{ height: '740px' }}>
-              {/* Score legend bar */}
-              <div className="flex items-center flex-wrap gap-2 px-5 py-3 border-b bg-indigo-50 text-xl text-indigo-700 flex-shrink-0">
-                <span className="font-semibold">Scores out of 3:</span>
-                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-300 font-bold">0</span>
-                <span>No Evidence</span>
-                <span className="px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-300 font-bold">1</span>
-                <span>Emerging</span>
-                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-300 font-bold">2</span>
-                <span className="font-semibold">Proficient ✓</span>
-                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 font-bold">3</span>
-                <span className="font-semibold">Advanced ✓</span>
-              </div>
               {/* Chat messages */}
               <div 
                 ref={chatContainerRef}
@@ -4293,8 +4022,6 @@ const handleExecuteCode = async (code: string, language: 'python' | 'javascript'
                 </div>
               </div>
             </div>
-          )}
-          {/* END CONDITIONAL LAYOUT */}
 
           {/* Actions */}
           <div className="flex items-center justify-between mt-2">

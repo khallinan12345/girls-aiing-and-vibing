@@ -8,7 +8,7 @@
 //   page = 'VibeCodingPage' | 'WebDevelopmentPage' |
 //          'FullStackDevelopmentPage' | 'AIWorkflowDevPage'
 //     → taskType === 'coding'
-//         → Anthropic claude-sonnet-4-6 (best for code generation/debugging)
+//         → Anthropic claude-haiku-4-5-20251001 (cost-efficient for code tasks)
 //     → taskType !== 'coding' (explanations, planning, general Q&A)
 //         → Groq (primary) → Gemini → Cloudflare → OpenRouter → Mistral → DeepSeek → Anthropic Haiku (final)
 //
@@ -25,7 +25,7 @@
 //     writing tests, implementing features, fixing errors.
 //   'non-coding' tasks include: concept explanations, project planning, tool comparisons,
 //     career advice, general Q&A, resource recommendations.
-//   If taskType is omitted on a coding page, it defaults to 'coding' (preserves current behavior).
+//   If taskType is omitted on a coding page, it defaults to 'coding' (uses Haiku).
 //
 // FALLBACK CHAIN (for free-tier-routed pages):
 //   Groq → Gemini 2.0 Flash → Cerebras → Cloudflare Workers AI → OpenRouter (free) → Mistral → DeepSeek V3 → Anthropic Haiku
@@ -42,6 +42,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const FREE_TIER_PAGES = new Set([
   'AILearningPage',
   'EnglishSkillsPage',
+  'MathSkillsPage',
+  'ScienceSkillsPage',
   'SkillsDevelopmentPage',
   'AgricultureConsultantPage',
   'FishingConsultantPage',
@@ -188,18 +190,13 @@ function resolveRoute(page, playgroundModel, taskType) {
     return { provider: 'groq', model: GROQ_MODEL };
   }
 
-  // Hybrid coding pages → Sonnet for coding, free-tier for everything else
+  // Hybrid coding pages → Haiku for coding, free-tier for everything else
   if (HYBRID_CODING_PAGES.has(page)) {
     if (taskType === 'non-coding') {
       return { provider: 'groq', model: GROQ_MODEL };
     }
-    // Default to Sonnet (coding) if taskType is 'coding' or omitted
-    return { provider: 'anthropic', model: ANTHROPIC_SONNET };
-  }
-
-  // SkillsDevelopmentPage-code → always Sonnet (explicit code variant)
-  if (page === 'SkillsDevelopmentPage-code') {
-    return { provider: 'anthropic', model: ANTHROPIC_SONNET };
+    // Default to Haiku (coding) if taskType is 'coding' or omitted
+    return { provider: 'anthropic', model: ANTHROPIC_HAIKU };
   }
 
   // AIPlaygroundPage → Sonnet if profile set, otherwise free-tier chain
@@ -724,8 +721,7 @@ export default async function handler(req, res) {
         'openrouter/llama-3.3-70b:free (free fallback)',
         'mistral/small (free fallback)',
         'deepseek/deepseek-chat (paid fallback, ~71% cheaper than Haiku)',
-        'anthropic/haiku (final paid fallback)',
-        'anthropic/sonnet (coding tasks)',
+        'anthropic/haiku (final paid fallback + coding tasks)',
       ],
       method:    'GET',
       timestamp: new Date().toISOString(),
