@@ -4045,7 +4045,6 @@ Provide assessment now:`;
                 : <><CheckCircle size={22} /> Complete Session</>}
             </button>
           </div>
-        </div>
 
         {/* Complete Session Modal */}
         {showCompleteSessionModal && (
@@ -4149,6 +4148,8 @@ Provide assessment now:`;
             </div>
           </div>
         )}
+      </div>
+        </div>
       </AppLayout>
     );
   }
