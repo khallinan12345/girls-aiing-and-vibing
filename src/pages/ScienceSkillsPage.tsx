@@ -673,15 +673,69 @@ Return ONLY: { "improved": "...", "explanation": "..." }`;
 
 // ─── MessageContent ───────────────────────────────────────────────────────────
 
-const MessageContent: React.FC<{ content: string }> = ({ content }) => (
-  <div className="space-y-1">
-    {content.split('\n').map((line, i) =>
-      line.startsWith('✅')
-        ? <p key={i} className="text-green-300 font-semibold">{line}</p>
-        : <p key={i}>{line}</p>
-    )}
-  </div>
-);
+/** Renders a subset of markdown: bold, inline code, blank-line paragraphs, ✅ lines */
+const renderInline = (text: string, key: string | number): React.ReactNode => {
+  // Split on **bold** and `code` spans
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return (
+    <React.Fragment key={key}>
+      {parts.map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**'))
+          return <strong key={i} className="font-bold text-white">{part.slice(2, -2)}</strong>;
+        if (part.startsWith('`') && part.endsWith('`'))
+          return <code key={i} className="bg-slate-700 text-emerald-300 rounded px-1 text-sm font-mono">{part.slice(1, -1)}</code>;
+        return part;
+      })}
+    </React.Fragment>
+  );
+};
+
+const MessageContent: React.FC<{ content: string }> = ({ content }) => {
+  // Split into blocks separated by blank lines
+  const blocks = content.split(/\n{2,}/);
+  return (
+    <div className="space-y-3">
+      {blocks.map((block, bi) => {
+        const lines = block.split('\n').filter(l => l !== '');
+        if (lines.length === 0) return null;
+
+        // Numbered list block
+        if (lines.every(l => /^\d+\.\s/.test(l))) {
+          return (
+            <ol key={bi} className="list-decimal list-inside space-y-1 pl-1">
+              {lines.map((l, li) => (
+                <li key={li} className="text-slate-100">{renderInline(l.replace(/^\d+\.\s/, ''), li)}</li>
+              ))}
+            </ol>
+          );
+        }
+
+        // Bullet list block
+        if (lines.every(l => /^[-•*]\s/.test(l))) {
+          return (
+            <ul key={bi} className="list-disc list-inside space-y-1 pl-1">
+              {lines.map((l, li) => (
+                <li key={li} className="text-slate-100">{renderInline(l.replace(/^[-•*]\s/, ''), li)}</li>
+              ))}
+            </ul>
+          );
+        }
+
+        // Single or multi-line paragraph
+        return (
+          <p key={bi} className={`leading-relaxed ${lines[0].startsWith('✅') ? 'text-green-300 font-semibold' : ''}`}>
+            {lines.map((line, li) => (
+              <React.Fragment key={li}>
+                {li > 0 && <br />}
+                {renderInline(line, li)}
+              </React.Fragment>
+            ))}
+          </p>
+        );
+      })}
+    </div>
+  );
+};
 
 // ─── Derive progress from dashboard rows ──────────────────────────────────────
 
@@ -1058,6 +1112,22 @@ Push for precision, nuance, and connection between concepts. Challenge oversimpl
 
   // ── Resume session ─────────────────────────────────────────────────────
   const resumeSession = async (session: DashboardSession) => {
+    // Resolve the stage so selectedStage is never null when chat view renders
+    const ev = session.science_skills_evaluation;
+    let resolvedStage: typeof REASONING_STAGES[0] | null = selectedStage;
+    if (ev) {
+      const found = ALL_STAGES[ev.pathway]?.[ev.stage_id] ?? null;
+      if (found) resolvedStage = found;
+    }
+    // Fallback: match by category_activity name across all pathways
+    if (!resolvedStage && session.category_activity) {
+      for (const pathway of Object.values(ALL_STAGES)) {
+        const found = pathway.find(s => s.name === session.category_activity);
+        if (found) { resolvedStage = found; break; }
+      }
+    }
+    if (resolvedStage) setSelectedStage(resolvedStage);
+
     dashboardRowId.current = session.id;
     setTopic(session.sub_category ?? '');
     try { setMessages(session.chat_history ? JSON.parse(session.chat_history) : []); }
