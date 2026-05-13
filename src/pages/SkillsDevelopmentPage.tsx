@@ -3608,7 +3608,6 @@ Provide assessment now:`;
           </div>
 
           {/* Chat Interface */}
-{/* Chat Interface */}
             <div className="w-full bg-white rounded-lg shadow-md mb-6 flex flex-col" style={{ height: '740px' }}>
               {/* Score legend bar */}
               <div className="flex items-center flex-wrap gap-2 px-5 py-3 border-b bg-indigo-50 text-xl text-indigo-700 flex-shrink-0">
@@ -3624,210 +3623,6 @@ Provide assessment now:`;
               </div>
 
                 {/* Chat messages */}
-                <div 
-                  ref={chatContainerRef}
-                  className="flex-1 overflow-y-auto p-6 space-y-4"
-                >
-                  {chatHistory.map((message, index) => (
-                    <div
-                      key={index}
-                      className={classNames(
-                        'flex items-start space-x-3',
-                        message.role === 'assistant' ? 'justify-start' : 'justify-end'
-                      )}
-                    >
-                      {message.role === 'assistant' && (
-                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-purple-100 flex items-center justify-center">
-                          <Bot className="h-5 w-5 text-purple-600" />
-                        </div>
-                      )}
-                      <div
-                        className={classNames(
-                          'max-w-md rounded-lg px-4 py-3',
-                          message.role === 'assistant'
-                            ? 'bg-gray-100 text-gray-900'
-                            : 'bg-purple-600 text-white'
-                        )}
-                      >
-                        <MarkdownText text={message.content} />
-                        {message.codeExecution && (
-                          <div className={classNames(
-                            "mt-2 text-xs",
-                            message.role === 'user' ? 'text-purple-100' : 'text-gray-500'
-                          )}>
-                            🔧 Code executed: {message.codeExecution.language}
-                          </div>
-                        )}
-                      </div>
-                      {message.role === 'user' && (
-                        <div className="flex-shrink-0 h-8 w-8 rounded-full bg-purple-600 flex items-center justify-center">
-                          <User className="h-5 w-5 text-white" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {submitting && (
-                    <div className="flex items-start space-x-3">
-                      <div className="flex-shrink-0 h-8 w-8 rounded-full bg-purple-100 flex items-center justify-center">
-                        <Bot className="h-5 w-5 text-purple-600" />
-                      </div>
-                      <div className="bg-gray-100 rounded-lg px-4 py-3">
-                        <div className="flex space-x-2">
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Text fallback when TTS unavailable (e.g. no network voice in Nigeria) */}
-                {fallbackText && (
-                  <div className="px-4 py-2">
-                    <VoiceFallback text={fallbackText} onDismiss={clearFallback} />
-                  </div>
-                )}
-
-                {/* Input area */}
-                <div className="border-t p-4">
-                  <p className="text-xs text-indigo-600 mb-2 flex items-center gap-1">
-                    <span>💡</span>
-                    <span>Have a question? Just ask it — the AI will answer you directly before continuing.</span>
-                  </p>
-
-                  {/* Proficient/Advanced status banner */}
-                  {(() => {
-                    const scores = extractLatestRubricScores(chatHistory);
-                    if (scores.length === 0) return null;
-                    const allAdvanced = scores.every(s => s === 3);
-                    const allProficient = scores.every(s => s >= 2);
-                    if (allAdvanced) return (
-                      <div className="mb-2 flex items-start gap-2 rounded-xl bg-green-50 border border-green-300 px-3 py-2">
-                        <span className="text-lg flex-shrink-0">🏆</span>
-                        <div>
-                          <p className="text-xs font-bold text-green-800">Advanced on all criteria!</p>
-                          <p className="text-xs text-green-700 mt-0.5">You've hit the top level. Select <strong>Complete Session</strong> below to save your results.</p>
-                        </div>
-                      </div>
-                    );
-                    if (allProficient) return (
-                      <div className="mb-2 flex items-start gap-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2">
-                        <span className="text-lg flex-shrink-0">✅</span>
-                        <div>
-                          <p className="text-xs font-bold text-blue-800">Proficient or higher on all criteria</p>
-                          <p className="text-xs text-blue-700 mt-0.5">You've met the standard. Keep going for Advanced, or select <strong>Complete Session</strong> to save now.</p>
-                        </div>
-                      </div>
-                    );
-                    return null;
-                  })()}
-
-                  <div className="flex items-end space-x-2">
-                    <div className="flex-1">
-                      <textarea
-                        value={userInput}
-                        onChange={(e) => setUserInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder="Describe what you want to code..."
-                        rows={2}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div className="flex flex-col space-y-2">
-                      <Button
-                        onClick={toggleVoiceInput}
-                        icon={<Mic size={16} className={isListening ? 'text-red-500' : ''} />}
-                        variant={isListening ? 'danger' : 'secondary'}
-                        title={isListening ? 'Stop listening' : 'Start voice input'}
-                      >
-                        {isListening ? 'Stop' : 'Voice'}
-                      </Button>
-                      <Button
-                        onClick={handleSubmitMessage}
-                        icon={<Send size={16} />}
-                        disabled={!userInput.trim() || submitting}
-                        isLoading={submitting}
-                      >
-                        Send
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-between">
-                    <div className="flex items-center space-x-4 text-sm text-gray-600">
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={voiceOutputEnabled}
-                          onChange={toggleVoiceOutput}
-                          className="rounded border-gray-300"
-                        />
-                        <span>Voice Output</span>
-                      </label>
-                      
-                      {voiceOutputEnabled && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500">Coach voice:</span>
-                          <div className="flex rounded-lg overflow-hidden border border-gray-400 shadow-sm">
-                            <button
-                              onClick={() => setVoiceMode('english')}
-                              title="British English — Google UK English Female"
-                              className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold transition-all border-r border-gray-400
-                                ${voiceMode === 'english'
-                                  ? 'bg-blue-600 text-white'
-                                  : 'bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
-                            >
-                              🇬🇧 English
-                            </button>
-                            <button
-                              onClick={() => setVoiceMode('pidgin')}
-                              title="Nigerian English / Pidgin voice"
-                              className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold transition-all
-                                ${voiceMode === 'pidgin'
-                                  ? 'bg-green-600 text-white'
-                                  : 'bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}
-                            >
-                              🇳🇬 Pidgin
-                            </button>
-                          </div>
-                          {selectedVoice && (
-                            <span className="text-xs text-gray-400 italic hidden sm:inline">
-                              {selectedVoice.name} ({selectedVoice.lang}){selectedVoice.localService ? ' · offline' : ''}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      
-                      {isListening && (
-                        <span className="text-red-500 animate-pulse">● Listening...</span>
-                      )}
-                    </div>
-                    <Button
-                      onClick={handleImproveEnglish}
-                      disabled={!userInput.trim() || isImproving}
-                      className="bg-violet-500 hover:bg-violet-600 text-white flex items-center gap-2"
-                      size="sm"
-                    >
-                      {isImproving
-                        ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Improving...</>
-                        : <><Wand2 size={14} /> Improve my English</>}
-                    </Button>
-                    <Button
-                      onClick={handleSaveSession}
-                      icon={<Save size={16} />}
-                      disabled={chatHistory.length <= 1 || savingSession}
-                      isLoading={savingSession}
-                      variant="secondary"
-                      size="sm"
-                    >
-                      Save Session
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
               {/* Chat messages */}
               <div 
                 ref={chatContainerRef}
@@ -4148,7 +3943,8 @@ Provide assessment now:`;
             </div>
           </div>
         )}
-      </div>
+          </div>
+          </div>
         </div>
       </AppLayout>
     );
