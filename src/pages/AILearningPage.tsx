@@ -1598,7 +1598,6 @@ Respond ONLY with valid JSON:
         system: aiInstructions,
         max_tokens: 500,
         temperature: 0.7,
-        page: 'AILearningPage',   // → routes to Groq Llama 3.3 70B
       });
 
       console.log('[AI Chat] API response received successfully');
@@ -1686,7 +1685,6 @@ CRITICAL: Return ONLY the JSON object. No preamble, no explanation, no markdown.
         system: 'You are a UNESCO AI Competency evaluator. Respond ONLY with valid JSON. Do not include any other text.',
         max_tokens: 1200,
         temperature: 0.2,
-        page: 'AILearningPage',   // → routes to Groq; Haiku fallback if Groq unavailable
       });
 
       console.log('[UNESCO Comprehensive Assessment] Raw response:', assessment);
