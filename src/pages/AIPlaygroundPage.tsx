@@ -10,7 +10,7 @@ import {
   Plus, Search, Trash2, Download, Send, Paperclip,
   ChevronLeft, ChevronRight, Edit3, Check, X,
   MessageSquare, Loader2, Bot, User, Copy, FileText, Code2, Home,
-  Mic, MicOff, Volume2, VolumeX, AlertCircle, ChevronDown, History,
+  Mic, MicOff, Volume2, VolumeX, AlertCircle, ChevronDown, History, Pin,
 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -40,6 +40,14 @@ interface PlaygroundChat {
 }
 
 // HistoryBlock: a code block accumulated across the whole session
+interface ContextFile {
+  id:         string;
+  filename:   string;
+  language:   string | null;
+  size_chars: number;
+  content?:   string; // only present client-side before upload
+}
+
 interface HistoryBlock {
   id: string;           // unique id for keying
   language: string;
@@ -676,12 +684,15 @@ const AIPlaygroundPage: React.FC = () => {
   const [modelLoaded, setModelLoaded]             = useState(false);
   const [showReflection, setShowReflection]       = useState(false);
   const [compressionActive, setCompressionActive] = useState(false); // true when old code blocks have been compressed
+  const [contextFiles, setContextFiles]           = useState<ContextFile[]>([]); // files pinned to system prompt
+  const [contextUploading, setContextUploading]   = useState(false);
   const [isDragging, setIsDragging]               = useState(false);
 
   // ── Session code history: accumulates ALL code blocks seen this session ────────
   const [sessionCodeHistory, setSessionCodeHistory] = useState<HistoryBlock[]>([]);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef        = useRef<HTMLInputElement>(null);
+  const contextFileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef   = useRef<HTMLDivElement>(null);
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
   const dropZoneRef  = useRef<HTMLDivElement>(null);
@@ -734,8 +745,6 @@ const AIPlaygroundPage: React.FC = () => {
 
   // ── Reset on chat switch — clear history too ──────────────────────────────────
   useEffect(() => {
-    // Skip the reset when the activeChatId changed because we just created
-    // a new chat during handleSend — the artifact is already set correctly.
     if (justCreatedChatRef.current) {
       justCreatedChatRef.current = false;
       return;
@@ -744,7 +753,21 @@ const AIPlaygroundPage: React.FC = () => {
     setArtifact(null);
     setShowReflection(false);
     setSessionCodeHistory([]);
-  }, [activeChatId]);
+    setCompressionActive(false);
+    setContextFiles([]);
+    // Load any persisted context files for this chat
+    if (activeChatId && user?.id) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!session?.access_token) return;
+        fetch(`/api/playground-context?chat_id=${activeChatId}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        })
+          .then(r => r.json())
+          .then(({ files }) => { if (files?.length) setContextFiles(files); })
+          .catch(() => {});
+      });
+    }
+  }, [activeChatId, user?.id]);
 
   const activeChat = chats.find(c => c.id === activeChatId) ?? null;
   const messages   = activeChat?.messages ?? [];
@@ -818,6 +841,7 @@ const AIPlaygroundPage: React.FC = () => {
     setSessionCodeHistory([]);
     setActiveModel('');
     setCompressionActive(false);
+    setContextFiles([]);
   };
 
   // ── Generate title ────────────────────────────────────────────────────────────
@@ -868,6 +892,67 @@ const AIPlaygroundPage: React.FC = () => {
       historyId: id,
     });
   }, []);
+
+  // ── Attach file as persistent context (goes into system prompt, not message) ──
+  const handleContextFileAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length || !user?.id) return;
+    e.target.value = '';
+    setContextUploading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      // Ensure we have a chat to attach to (create one if needed)
+      let chatId = activeChatId;
+      if (!chatId) {
+        const { data: newChat, error } = await supabase
+          .from('ai_playground_chats')
+          .insert({ user_id: user.id, title: 'Code session', messages: [], model: playgroundModel, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .select().single();
+        if (error || !newChat) return;
+        setChats(prev => [newChat, ...prev]);
+        setActiveChatId(newChat.id);
+        chatId = newChat.id;
+      }
+
+      for (const file of files) {
+        const text = await file.text();
+        const lang = file.name.split('.').pop() ?? null;
+        const res  = await fetch('/api/playground-context', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body:    JSON.stringify({ chat_id: chatId, filename: file.name, content: text, language: lang }),
+        });
+        const { file: saved } = await res.json();
+        if (saved) {
+          // Store content client-side for immediate injection into system prompt
+          setContextFiles(prev => {
+            const without = prev.filter(f => f.filename !== file.name);
+            return [...without, { ...saved, content: text }];
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[Context attach]', err);
+    } finally {
+      setContextUploading(false);
+    }
+  };
+
+  const handleContextFileRemove = async (file: ContextFile) => {
+    setContextFiles(prev => prev.filter(f => f.id !== file.id));
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+      await fetch(`/api/playground-context?id=${file.id}`, {
+        method:  'DELETE',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+    } catch (err) {
+      console.error('[Context remove]', err);
+    }
+  };
 
   // ── selectFromHistory ─────────────────────────────────────────────────────────
   const selectFromHistory = useCallback((block: HistoryBlock) => {
@@ -1020,7 +1105,18 @@ const AIPlaygroundPage: React.FC = () => {
       // chat-stream.js handles: coding → Sonnet, non-coding → Groq → Haiku.
       // We still pass playgroundModel so the user's explicit Sonnet preference is respected.
       setActiveModel('…');  // show spinner label while waiting
-      const streamGen = streamPlayground(apiMessages, SYSTEM_PROMPT, playgroundModel, 32000, 0.3, user?.id);
+      // Build system prompt: base + any pinned context files
+      // Context files are injected here (cached block) rather than in messages,
+      // so they're paid for once and served from cache on every subsequent turn.
+      const contextBlock = contextFiles.length > 0
+        ? '\n\n---\n\nThe user has attached the following files as persistent context. Reference them throughout this conversation without the user needing to re-paste them:\n\n' +
+          contextFiles.map(f =>
+            '### ' + f.filename + (f.language ? ' (' + f.language + ')' : '') + '\n```' + (f.language ?? '') + '\n' + (f.content ?? '[content not loaded — user may need to re-attach]') + '\n```'
+          ).join('\n\n')
+        : '';
+      const activeSystemPrompt = SYSTEM_PROMPT + contextBlock;
+
+      const streamGen = streamPlayground(apiMessages, activeSystemPrompt, playgroundModel, 32000, 0.3, user?.id);
 
       // ── Consume stream: prose → chat bubble, code → artifact panel ────────────
       let lineBuffer = '';
@@ -1517,6 +1613,19 @@ const AIPlaygroundPage: React.FC = () => {
 
           {/* Input area */}
           <div className="px-6 py-4 bg-white border-t border-gray-200 flex-shrink-0">
+            {/* Pinned context file pills */}
+            {contextFiles.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {contextFiles.map(f => (
+                  <div key={f.id} className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5 text-blue-700 text-xs" title="Pinned to system prompt — available throughout this chat">
+                    <Pin size={10} className="flex-shrink-0" />
+                    <span className="font-medium max-w-[140px] truncate">{f.filename}</span>
+                    <span className="text-blue-400">{Math.round(f.size_chars / 100) / 10}KB</span>
+                    <button onClick={() => handleContextFileRemove(f)} className="hover:text-blue-900 ml-0.5"><X size={10} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
             {attachments.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {attachments.map((att, idx) => (
@@ -1541,8 +1650,12 @@ const AIPlaygroundPage: React.FC = () => {
               </div>
             )}
             <div className="flex items-end gap-2 bg-white border border-gray-300 rounded-2xl px-4 py-3 shadow-sm focus-within:border-purple-400 focus-within:ring-2 focus-within:ring-purple-100 transition-all">
-              <button onClick={() => fileInputRef.current?.click()} className="flex-shrink-0 p-1 text-gray-400 hover:text-purple-600 transition-colors mb-0.5" title="Attach file"><Paperclip size={17} /></button>
+              <button onClick={() => fileInputRef.current?.click()} className="flex-shrink-0 p-1 text-gray-400 hover:text-purple-600 transition-colors mb-0.5" title="Attach file (inline — included in this message only)"><Paperclip size={17} /></button>
               <input ref={fileInputRef} type="file" onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css" multiple />
+              <button onClick={() => contextFileInputRef.current?.click()} disabled={contextUploading} className="flex-shrink-0 p-1 text-gray-400 hover:text-blue-600 transition-colors mb-0.5" title="Pin file to context (stays in system prompt for entire chat — ideal for large code files)">
+                {contextUploading ? <Loader2 size={17} className="animate-spin" /> : <Pin size={17} />}
+              </button>
+              <input ref={contextFileInputRef} type="file" onChange={handleContextFileAttach} className="hidden" accept=".txt,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.sh,.yaml,.yml,.toml,.env" multiple />
               <textarea ref={textareaRef} value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={handleKeyDown}
                 placeholder={quotaUsed >= QUOTA_TOKENS ? 'Quota reached — please wait for reset' : 'Message Claude...'} rows={1} disabled={sending || !modelLoaded || quotaUsed >= QUOTA_TOKENS}
                 className="flex-1 resize-none outline-none text-base text-gray-800 placeholder-gray-400 bg-transparent min-h-[24px] max-h-[200px] leading-6" />
