@@ -15,7 +15,9 @@ import {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const MAX_CHAR_LIMIT     = 4000;
-const MAX_API_MESSAGES   = 20;
+const MAX_API_MESSAGES    = 20;
+const MAX_CONTEXT_TOKENS  = 60000;  // compress older messages when history exceeds ~60K tokens
+const CODE_FENCE_RE       = /\`\`\`[\s\S]*?\`\`\`/g;
 const REFLECTION_TRIGGER = 10;
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
@@ -673,6 +675,7 @@ const AIPlaygroundPage: React.FC = () => {
   const [activeModel, setActiveModel]             = useState<string>('');   // '' = not yet sent
   const [modelLoaded, setModelLoaded]             = useState(false);
   const [showReflection, setShowReflection]       = useState(false);
+  const [compressionActive, setCompressionActive] = useState(false); // true when old code blocks have been compressed
   const [isDragging, setIsDragging]               = useState(false);
 
   // ── Session code history: accumulates ALL code blocks seen this session ────────
@@ -814,6 +817,7 @@ const AIPlaygroundPage: React.FC = () => {
     setShowReflection(false);
     setSessionCodeHistory([]);
     setActiveModel('');
+    setCompressionActive(false);
   };
 
   // ── Generate title ────────────────────────────────────────────────────────────
@@ -966,13 +970,44 @@ const AIPlaygroundPage: React.FC = () => {
     setShowReflection(false);
 
     const updatedMessages = [...messages, userMsg];
-    const recentMessages  = updatedMessages.slice(-MAX_API_MESSAGES);
-    const apiMessages = recentMessages.map(m => ({
+
+    // ── Token-aware message preparation ─────────────────────────────────────
+    // 1. Expand attachments into content strings
+    // 2. Estimate token count; if over MAX_CONTEXT_TOKENS, compress code blocks
+    //    in older messages (keep the last 6 messages verbatim — current context)
+    const expandedMessages = updatedMessages.slice(-MAX_API_MESSAGES).map(m => ({
       role: m.role,
       content: m.attachment && m.attachment.length
         ? m.attachment.map(a => `[Attached file: ${a.name}]\n\n${a.content}`).join('\n\n---\n\n') + (m.content ? `\n\n${m.content}` : '')
         : m.content,
     }));
+
+    const KEEP_RECENT = 6; // always keep last N messages verbatim
+    const estimateTokens = (msgs: { content: string }[]) =>
+      Math.ceil(msgs.reduce((s, m) => s + m.content.length, 0) / 4);
+
+    let apiMessages = expandedMessages;
+    if (estimateTokens(expandedMessages) > MAX_CONTEXT_TOKENS) {
+      setCompressionActive(true);
+      // Compress code blocks in older messages to a short placeholder
+      const splitAt = Math.max(0, expandedMessages.length - KEEP_RECENT);
+      const compressCodeBlocks = (text: string): string =>
+        text.replace(
+          /(```\w*)(\n[\s\S]*?)(```)/g,
+          (match, open, body, _close) => {
+            const tokens = Math.ceil(match.length / 4);
+            if (tokens < 500) return match; // keep small blocks verbatim
+            const lineCount = body.split('\n').length;
+            const lang = open.replace('```', '');
+            return '```' + lang + '\n[~' + lineCount + ' lines / ~' + tokens + ' tokens — compressed]\n```';
+          }
+        );
+      const older = expandedMessages.slice(0, splitAt).map(m => ({
+        ...m,
+        content: compressCodeBlocks(m.content),
+      }));
+      apiMessages = [...older, ...expandedMessages.slice(splitAt)];
+    }
 
     // Hoist token estimates so finally block can update quota optimistically
     const estTokensIn = Math.ceil(
@@ -1431,6 +1466,24 @@ const AIPlaygroundPage: React.FC = () => {
                 </div>
               );
             })}
+
+            {/* Compression banner */}
+            {compressionActive && (
+              <div className="flex justify-center sticky bottom-2 z-10 pointer-events-none">
+                <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 rounded-xl px-4 py-2.5 shadow-sm pointer-events-auto">
+                  <span className="text-amber-500 text-base">⚠️</span>
+                  <p className="text-xs text-amber-800 leading-snug">
+                    <span className="font-semibold">Earlier code blocks have been compressed</span> to manage context length.
+                    Re-paste any files you need the AI to reference.
+                  </p>
+                  <button
+                    onClick={() => setCompressionActive(false)}
+                    className="ml-2 text-amber-400 hover:text-amber-600 flex-shrink-0"
+                    title="Dismiss"
+                  >✕</button>
+                </div>
+              </div>
+            )}
 
             {/* Reflection prompt */}
             {showReflection && !sending && (
