@@ -161,13 +161,14 @@ async function compressOldMessages(messages, apiKey, user_id, cohort) {
       headers: {
         'x-api-key':         apiKey,
         'anthropic-version': '2023-06-01',
+        'anthropic-beta':    'prompt-caching-2024-07-31',
         'content-type':      'application/json',
       },
       body: JSON.stringify({
         model:       compressionModel,
         max_tokens:  600,
         temperature: 0.1,
-        system: 'You are a conversation summariser. Write a concise factual summary of a chat history for use as context in an ongoing conversation. Include: key topics discussed, decisions made, important facts the user shared, and any code or artifacts produced. Write in third person. Be specific and dense — this replaces the full history.',
+        system: [{ type: 'text', text: 'You are a conversation summariser. Write a concise factual summary of a chat history for use as context in an ongoing conversation. Include: key topics discussed, decisions made, important facts the user shared, and any code or artifacts produced. Write in third person. Be specific and dense — this replaces the full history.', cache_control: { type: 'ephemeral' } }],
         messages: [{
           role:    'user',
           content: `Summarise this conversation history (${toCompress.length} messages) into a compact context summary:\n\n${transcript}`,
@@ -221,6 +222,174 @@ async function compressOldMessages(messages, apiKey, user_id, cohort) {
     console.warn('[chat-stream] Compression error:', err.message);
     return { compressed: false, messages };
   }
+}
+
+
+// Cache the last assistant message so the growing conversation history
+// is served from cache on subsequent turns (~90% input cost savings on repeats).
+function applyCacheToLastAssistant(messages) {
+  if (messages.length < 4) return messages;
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') { lastAssistantIdx = i; break; }
+  }
+  if (lastAssistantIdx === -1) return messages;
+  return messages.map((msg, idx) => {
+    if (idx !== lastAssistantIdx) return msg;
+    const content = typeof msg.content === 'string'
+      ? [{ type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } }]
+      : Array.isArray(msg.content)
+        ? msg.content.map((c, ci) =>
+            ci === msg.content.length - 1 ? { ...c, cache_control: { type: 'ephemeral' } } : c
+          )
+        : msg.content;
+    return { ...msg, content };
+  });
+}
+
+
+// ─── Task classifier ──────────────────────────────────────────────────────────
+//
+// Sends the last user message to Haiku with a tight binary prompt.
+// Returns 'coding' or 'non-coding'. Falls back to 'coding' on any error
+// so we never accidentally deny Sonnet when the user needs it.
+//
+// Cost: ~$0.001 per call (tiny prompt, 1-token output).
+
+async function classifyTask(messages, apiKey) {
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  if (!lastUserMsg) return 'coding'; // safe default
+
+  const userText = typeof lastUserMsg.content === 'string'
+    ? lastUserMsg.content
+    : lastUserMsg.content?.[0]?.text ?? '';
+
+  // Fast heuristic: if the message contains code fences or technical keywords,
+  // skip the API call and classify immediately.
+  const codingSignals = /```|<code|function |const |let |var |def |class |import |<html|SELECT |FROM |CREATE TABLE/i;
+  if (codingSignals.test(userText)) return 'coding';
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key':         apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta':    'prompt-caching-2024-07-31',
+        'content-type':      'application/json',
+      },
+      body: JSON.stringify({
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 5,
+        temperature: 0,
+        system: [{ type: 'text', text: 'You classify user messages. Reply with exactly one word: "coding" if the message is about writing, debugging, reviewing, or explaining code or technical implementation. Reply "non-coding" for everything else (concepts, learning, questions, advice, language help, general chat).', cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: userText.slice(0, 500) }],
+      }),
+    });
+
+    if (!res.ok) return 'coding'; // safe default on API error
+    const data = await res.json();
+    const label = (data.content?.[0]?.text ?? '').trim().toLowerCase();
+
+    // Log classifier cost (fire-and-forget)
+    if (data.usage) {
+      logCost({
+        model:       'claude-haiku-4-5-20251001',
+        action:      'classify',
+        inputTokens:  data.usage.input_tokens  ?? 0,
+        outputTokens: data.usage.output_tokens ?? 0,
+      });
+    }
+
+    return label.startsWith('non') ? 'non-coding' : 'coding';
+  } catch {
+    return 'coding'; // safe default on network error
+  }
+}
+
+// ─── Free-tier non-streaming call (with Haiku backup) ─────────────────────────
+//
+// For non-coding Playground turns. Tries Groq first, falls back to Haiku.
+// Returns the full response as a single SSE done event (no streaming chunks)
+// so the frontend handles it identically to a finished Sonnet stream.
+
+async function callFreeTierWithHaikuBackup({ messages, system, max_tokens, temperature, apiKey, user_id, cohort }) {
+  const groqKey = process.env.GROQ_API_KEY;
+
+  // ── Try Groq first ──────────────────────────────────────────────────────────
+  if (groqKey) {
+    try {
+      const groqMessages = [
+        ...(system ? [{ role: 'system', content: system }] : []),
+        ...messages,
+      ];
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${groqKey}`,
+          'Content-Type':  'application/json',
+        },
+        body: JSON.stringify({
+          model:      'llama-3.3-70b-versatile',
+          messages:   groqMessages,
+          max_tokens: Math.min(max_tokens, 8000), // Groq limit
+          temperature,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.choices?.[0]?.message?.content ?? '';
+        logCost({
+          model:       'llama-3.3-70b-versatile',
+          action:      'generate',
+          inputTokens:  data.usage?.prompt_tokens     ?? 0,
+          outputTokens: data.usage?.completion_tokens ?? 0,
+          user_id, cohort,
+        });
+        return { text, model: 'llama-3.3-70b-versatile', provider: 'groq' };
+      }
+    } catch { /* fall through to Haiku */ }
+  }
+
+  // ── Haiku backup ────────────────────────────────────────────────────────────
+  const systemPayload = system
+    ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+    : undefined;
+
+  const cachedMessages = applyCacheToLastAssistant(messages);
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key':         apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta':    'prompt-caching-2024-07-31',
+      'content-type':      'application/json',
+    },
+    body: JSON.stringify({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: Math.min(max_tokens, 8192),
+      temperature,
+      messages:   cachedMessages,
+      ...(systemPayload ? { system: systemPayload } : {}),
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error?.message ?? 'Haiku API error');
+
+  const text = data.content?.[0]?.text ?? '';
+  logCost({
+    model:           'claude-haiku-4-5-20251001',
+    action:          'generate',
+    inputTokens:      data.usage?.input_tokens                ?? 0,
+    outputTokens:     data.usage?.output_tokens               ?? 0,
+    cacheHitTokens:   data.usage?.cache_read_input_tokens     ?? 0,
+    cacheWriteTokens: data.usage?.cache_creation_input_tokens ?? 0,
+    user_id, cohort,
+  });
+  return { text, model: 'claude-haiku-4-5-20251001', provider: 'anthropic' };
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -289,6 +458,73 @@ export default async function handler(req) {
   // user_id and cohort are forwarded so compression cost is attributed correctly.
   const { compressed, messages: messagesForApi } = await compressOldMessages(messages, apiKey, user_id, cohort);
 
+  // ── Task classification: only use Sonnet for coding tasks ─────────────────
+  // Classify the latest user message. Non-coding turns go to Groq → Haiku
+  // instead of Sonnet, cutting cost by ~95% for general conversation.
+  const taskType = await classifyTask(messagesForApi, apiKey);
+
+  if (taskType === 'non-coding') {
+    // ── Non-coding path: Groq → Haiku (no streaming, single SSE done event) ─
+    const { readable: ncReadable, writable: ncWritable } = new TransformStream();
+    const ncWriter  = ncWritable.getWriter();
+    const ncEncoder = new TextEncoder();
+
+    (async () => {
+      try {
+        const { text, model: usedModel, provider } = await callFreeTierWithHaikuBackup({
+          messages:    messagesForApi,
+          system,
+          max_tokens,
+          temperature,
+          apiKey,
+          user_id,
+          cohort,
+        });
+
+        // Send as a single chunk so the frontend renders it the same way
+        await ncWriter.write(ncEncoder.encode(`data: ${JSON.stringify({ chunk: text })}
+
+`));
+        await ncWriter.write(
+          ncEncoder.encode(
+            `data: ${JSON.stringify({
+              done: true,
+              fullText: text,
+              taskType: 'non-coding',
+              usedModel,
+              provider,
+              ...(compressed ? { compressedMessages: messagesForApi } : {}),
+            })}
+
+`
+          )
+        );
+      } catch (err) {
+        await ncWriter.write(
+          ncEncoder.encode(`data: ${JSON.stringify({ done: true, fullText: '', error: err.message })}
+
+`)
+        );
+      } finally {
+        await ncWriter.close();
+      }
+    })();
+
+    return new Response(ncReadable, {
+      status: 200,
+      headers: {
+        ...CORS_HEADERS,
+        'Content-Type':      'text/event-stream',
+        'Cache-Control':     'no-cache',
+        'X-Accel-Buffering': 'no',
+      },
+    });
+  }
+
+  // ── Coding path: Sonnet with streaming ────────────────────────────────────
+  // Cache the last assistant message so repeated context is served from cache
+  const cachedMessagesForApi = applyCacheToLastAssistant(messagesForApi);
+
   const upstream = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -302,7 +538,7 @@ export default async function handler(req) {
       max_tokens,
       temperature,
       stream: true,
-      messages: messagesForApi,
+      messages: cachedMessagesForApi,
       ...(systemPayload ? { system: systemPayload } : {}),
     }),
   });

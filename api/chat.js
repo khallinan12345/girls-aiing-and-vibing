@@ -209,6 +209,29 @@ function resolveRoute(page, playgroundModel, taskType) {
   return { provider: 'anthropic', model: ANTHROPIC_HAIKU };
 }
 
+
+// Cache the last assistant message in a conversation so the growing history
+// is served from cache on subsequent turns (~90% input cost savings on repeats).
+function applyCacheToLastAssistant(messages) {
+  if (messages.length < 4) return messages;
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') { lastAssistantIdx = i; break; }
+  }
+  if (lastAssistantIdx === -1) return messages;
+  return messages.map((msg, idx) => {
+    if (idx !== lastAssistantIdx) return msg;
+    const content = typeof msg.content === 'string'
+      ? [{ type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } }]
+      : Array.isArray(msg.content)
+        ? msg.content.map((c, ci) =>
+            ci === msg.content.length - 1 ? { ...c, cache_control: { type: 'ephemeral' } } : c
+          )
+        : msg.content;
+    return { ...msg, content };
+  });
+}
+
 // ── Anthropic call (with prompt caching on system prompt) ──────────────────────
 
 async function callAnthropic(model, messages, system, max_tokens, temperature) {
@@ -216,11 +239,13 @@ async function callAnthropic(model, messages, system, max_tokens, temperature) {
     ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
     : undefined;
 
+  const cachedMessages = applyCacheToLastAssistant(messages);
+
   const requestBody = {
     model,
     max_tokens,
     temperature,
-    messages,
+    messages: cachedMessages,
     ...(systemPayload ? { system: systemPayload } : {}),
   };
 
@@ -625,6 +650,8 @@ async function callAnthropicStreaming(model, messages, system, max_tokens, tempe
     ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
     : undefined;
 
+  const cachedMessages = applyCacheToLastAssistant(messages);
+
   const upstream = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -637,7 +664,7 @@ async function callAnthropicStreaming(model, messages, system, max_tokens, tempe
       model,
       max_tokens,
       temperature,
-      messages,
+      messages: cachedMessages,
       stream: true,
       ...(systemPayload ? { system: systemPayload } : {}),
     }),
