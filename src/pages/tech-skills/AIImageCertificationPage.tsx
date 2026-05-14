@@ -374,8 +374,11 @@ const AIImageCertificationPage: React.FC = () => {
   // ── Persist images ────────────────────────────────────────────────────
   const persistImages = useCallback(async (imgs: ImageEntry[]) => {
     const sid = sessionIdRef.current; if (!user?.id || !sid) return;
+    // Strip imageUrl before persisting — base64 or CDN URLs can be 50K+ chars each
+    // and inflate token counts if chatClient ever reads stored history as context.
+    const imgsForStorage = imgs.map(({ imageUrl: _url, ...rest }) => rest);
     await supabase.from('dashboard').update({
-      image_chat_history: imgs,
+      image_chat_history: imgsForStorage,
       image_prompt: sessionName,
       updated_at: new Date().toISOString(),
     }).eq('user_id', user.id).eq('image_cert_session_id', sid);
@@ -470,20 +473,25 @@ const AIImageCertificationPage: React.FC = () => {
     const newScores: AssessmentScore[] = [];
 
     try {
-      for (const assessment of assessments) {
-        setEvalProgress(`Evaluating: ${assessment.assessment_name}…`);
+      // ── Single call evaluating all criteria at once ──────────────────────────
+      // Previously: N calls × ~33K tokens = ~165K tokens per evaluation session.
+      // Now: 1 call with all criteria in one prompt = ~8K tokens total (~95% reduction).
+      setEvalProgress('Evaluating your portfolio…');
 
-        const evalPrompt = `You are evaluating a student's AI image creation work for the "${assessment.assessment_name}" criterion.
-
-CRITERION: ${assessment.assessment_name}
-DESCRIPTION: ${assessment.description}
-ASSESSMENT QUESTION: ${assessment.certification_prompt}
-
+      const criteriaBlock = assessments.map(a => `CRITERION: ${a.assessment_name}
+DESCRIPTION: ${a.description}
+QUESTION: ${a.certification_prompt}
 RUBRIC:
-- Level 0 (No Evidence): ${assessment.certification_level0_metric}
-- Level 1 (Emerging): ${assessment.certification_level1_metric}
-- Level 2 (Proficient): ${assessment.certification_level2_metric}
-- Level 3 (Advanced): ${assessment.certification_level3_metric}
+  0 (No Evidence): ${a.certification_level0_metric}
+  1 (Emerging): ${a.certification_level1_metric}
+  2 (Proficient): ${a.certification_level2_metric}
+  3 (Advanced): ${a.certification_level3_metric}`).join('
+
+---
+
+');
+
+      const evalPrompt = `You are evaluating a student's AI image creation portfolio across ${assessments.length} criteria.
 
 STUDENT'S IMAGE PORTFOLIO SUMMARY:
 ${portfolioSummary}
@@ -491,22 +499,28 @@ ${portfolioSummary}
 PORTFOLIO STATISTICS:
 ${iterationEvidence}
 
-NOTE: You are evaluating based on the PROMPTS and PROCESS the student demonstrated, not the actual image content (which you cannot see). Evaluate prompt quality, creative direction, stylistic awareness, iteration, and compositional thinking as demonstrated through their written prompts.
+NOTE: Evaluate based on the PROMPTS and PROCESS the student demonstrated, not the actual images (which you cannot see). Judge prompt quality, creative direction, stylistic awareness, iteration, and compositional thinking through their written prompts.
 
-Respond ONLY in this JSON format:
+${criteriaBlock}
+
+Respond ONLY with a JSON object where each key is the exact criterion name and the value has "score" (0-3) and "evidence" (2-4 sentences). Example:
 {
-  "score": <0, 1, 2, or 3>,
-  "evidence": "<2-4 sentences explaining the score with specific references to the student's prompts and process>"
+  "Criterion Name": { "score": 2, "evidence": "..." },
+  "Another Criterion": { "score": 1, "evidence": "..." }
 }`;
 
-        const result = await chatJSON({ page: 'AIImageCertificationPage',
-          messages: [{ role: 'user', content: evalPrompt }],
-          system: 'You are an expert AI image creation educator. Evaluate student work fairly based on their demonstrated prompt engineering skills, creative choices, and iterative process.',
-          max_tokens: 400, temperature: 0.3,
-        });
+      const result = await chatJSON({
+        page: 'AIImageCertificationPage',
+        messages: [{ role: 'user', content: evalPrompt }],
+        system: 'You are an expert AI image creation educator. Evaluate student work fairly based on their demonstrated prompt engineering skills, creative choices, and iterative process. Respond ONLY with valid JSON.',
+        max_tokens: assessments.length * 200 + 200,
+        temperature: 0.3,
+      });
 
-        const score    = result.score ?? 0;
-        const evidence = result.evidence ?? 'Unable to evaluate.';
+      for (const assessment of assessments) {
+        const r        = result?.[assessment.assessment_name] ?? {};
+        const score    = typeof r.score === 'number' ? r.score : 0;
+        const evidence = r.evidence ?? 'Unable to evaluate.';
         scores[assessment.assessment_name] = { score, evidence };
         newScores.push({ assessment_name: assessment.assessment_name, score, evidence });
       }
