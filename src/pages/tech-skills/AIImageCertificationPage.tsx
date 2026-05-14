@@ -490,18 +490,16 @@ const AIImageCertificationPage: React.FC = () => {
         img.negativePrompt ? `Negative: ${img.negativePrompt}` : '',
       ].filter(Boolean).join('\n')).join('\n\n');
 
-      const criteriaBlock = assessments.map(a => `CRITERION: ${a.assessment_name}
-DESCRIPTION: ${a.description}
-QUESTION: ${a.certification_prompt}
-RUBRIC:
-  0 (No Evidence): ${a.certification_level0_metric}
-  1 (Emerging): ${a.certification_level1_metric}
-  2 (Proficient): ${a.certification_level2_metric}
-  3 (Advanced): ${a.certification_level3_metric}`).join('
-
----
-
-');
+      const criteriaBlock = assessments.map(a => [
+        'CRITERION: ' + a.assessment_name,
+        'DESCRIPTION: ' + a.description,
+        'QUESTION: ' + a.certification_prompt,
+        'RUBRIC:',
+        '  0 (No Evidence): ' + a.certification_level0_metric,
+        '  1 (Emerging): '   + a.certification_level1_metric,
+        '  2 (Proficient): ' + a.certification_level2_metric,
+        '  3 (Advanced): '   + a.certification_level3_metric,
+      ].join('\n')).join('\n\n---\n\n');
 
       const totalImages = images.length;
       const evalPrompt = `You are evaluating a student's AI image creation portfolio across ${assessments.length} criteria. The student generated ${totalImages} images total; this summary shows a representative sample of up to ${MAX_EVAL_IMAGES}.
