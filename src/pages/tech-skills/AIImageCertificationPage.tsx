@@ -451,13 +451,7 @@ const AIImageCertificationPage: React.FC = () => {
     setIsEvaluating(true); setEvalError(null);
     await ensureRecord();
 
-    const portfolioSummary = images.map((img, i) => [
-      `Image ${i + 1} (${img.status}) — ${img.aspectRatio} — Iteration #${img.iteration}`,
-      `Purpose: ${img.purpose || 'Not stated'}`,
-      `Style: ${img.style || 'Not specified'}`,
-      `Prompt: ${img.prompt}`,
-      img.negativePrompt ? `Negative: ${img.negativePrompt}` : '',
-    ].filter(Boolean).join('\n')).join('\n\n');
+    // portfolioSummary now built inside handleEvaluate with MAX_EVAL_IMAGES cap
 
     const iterationEvidence = [
       `Total images generated: ${images.length}`,
@@ -478,6 +472,24 @@ const AIImageCertificationPage: React.FC = () => {
       // Now: 1 call with all criteria in one prompt = ~8K tokens total (~95% reduction).
       setEvalProgress('Evaluating your portfolio…');
 
+      // Cap portfolio at 30 images for evaluation — beyond that, quality signals
+      // are well-established and extra images just inflate tokens without changing scores.
+      const MAX_EVAL_IMAGES = 30;
+      const evalImages = images.length > MAX_EVAL_IMAGES
+        ? [
+            ...images.filter(i => i.status === 'succeeded').slice(0, MAX_EVAL_IMAGES - 5),
+            ...images.filter(i => i.status === 'succeeded').slice(-5),   // always include latest 5
+          ].slice(0, MAX_EVAL_IMAGES)
+        : images;
+
+      const portfolioSummary = evalImages.map((img, i) => [
+        `Image ${i + 1} (${img.status}) — ${img.aspectRatio} — Iteration #${img.iteration}`,
+        `Purpose: ${img.purpose || 'Not stated'}`,
+        `Style: ${img.style || 'Not specified'}`,
+        `Prompt: ${img.prompt}`,
+        img.negativePrompt ? `Negative: ${img.negativePrompt}` : '',
+      ].filter(Boolean).join('\n')).join('\n\n');
+
       const criteriaBlock = assessments.map(a => `CRITERION: ${a.assessment_name}
 DESCRIPTION: ${a.description}
 QUESTION: ${a.certification_prompt}
@@ -491,7 +503,8 @@ RUBRIC:
 
 ');
 
-      const evalPrompt = `You are evaluating a student's AI image creation portfolio across ${assessments.length} criteria.
+      const totalImages = images.length;
+      const evalPrompt = `You are evaluating a student's AI image creation portfolio across ${assessments.length} criteria. The student generated ${totalImages} images total; this summary shows a representative sample of up to ${MAX_EVAL_IMAGES}.
 
 STUDENT'S IMAGE PORTFOLIO SUMMARY:
 ${portfolioSummary}
