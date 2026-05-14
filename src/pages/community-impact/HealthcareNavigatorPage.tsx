@@ -49,7 +49,8 @@ type AppMode =
   | 'add-patient'
   | 'patient-detail'
   | 'new-assessment'
-  | 'followup-chat'
+  | 'followup-chat'         // "Evaluate My Case History" — reflective self-review
+  | 'prior-followup-chat'  // "Follow-up Prior Assessment" — guided clinical follow-up
   | 'case-detail';
 
 type TriageLevel = 'red' | 'yellow' | 'green' | 'pending';
@@ -333,7 +334,7 @@ const VILLAGES = ['Oloibiri', 'Ibiade', 'Otuabagi', 'Nembe', 'Ogbia', 'Yenagoa',
 
 // ─── Build AI triage system prompt ───────────────────────────────────────────
 
-function buildTriagePrompt(patient: Patient, assessment: AssessmentData, probeNotes: Record<string, string>): string {
+function buildTriagePrompt(patient: Patient, assessment: AssessmentData, probeNotes: Record<string, string>, priorHistoryContext = ''): string {
   const pg = PATIENT_GROUPS[patient.patient_group];
   const ageStr = patient.age_years != null
     ? `${patient.age_years} years${patient.age_months ? ` ${patient.age_months} months` : ''}`
@@ -421,26 +422,99 @@ IMPORTANT CONSTRAINTS:
 - Note any measurements that were NOT taken that should have been for this patient type
 - End with one sentence the navigator can say directly to the patient/caregiver
 
-⚠️ DISCLAIMER: This is clinical decision SUPPORT only. The navigator must follow their training and supervision protocols. This does not replace a doctor's assessment.`;
+⚠️ DISCLAIMER: This is clinical decision SUPPORT only. The navigator must follow their training and supervision protocols. This does not replace a doctor's assessment.${priorHistoryContext}`;
 }
 
-// ─── Build follow-up chat prompt ──────────────────────────────────────────────
+// ─── Build EVALUATE MY CASE HISTORY prompt (reflective self-review) ───────────
 
 function buildFollowupPrompt(patient: Patient, assessment: Assessment): string {
   const pg = PATIENT_GROUPS[patient.patient_group];
   const tc = TRIAGE_CONFIG[assessment.triage_level];
-  return `You are a clinical decision support advisor for a Community Health Navigator in Oloibiri, Bayelsa State, Nigeria. The navigator has completed an assessment and has follow-up questions.
+  const probeCount = Object.keys(assessment.probe_notes ?? {}).length;
+  const probeList = Object.keys(assessment.probe_notes ?? {}).join(', ') || 'none';
+  return `You are a clinical supervision coach for a Community Health Navigator in Oloibiri, Bayelsa State, Nigeria. The navigator wants to reflect on the quality of their own assessment and identify where they could improve.
 
 ${CLINICAL_CONTEXT}
 
-PATIENT ON FILE: ${patient.patient_name}, ${pg.label}, ${patient.village}
-TRIAGE CLASSIFICATION: ${tc.label}
-CHIEF COMPLAINT: ${assessment.assessment_data.chiefComplaint || 'not recorded'}
-AI TRIAGE SUMMARY: ${assessment.ai_triage_summary || 'see assessment'}
+CASE UNDER REVIEW:
+Patient: ${patient.patient_name}, ${pg.label}, ${patient.village}
+Chief complaint: ${assessment.assessment_data.chiefComplaint || 'not recorded'}
+Triage result: ${tc.label}
+Symptoms probed in-depth: ${probeList} (${probeCount} of the symptoms ticked)
+AI triage summary: ${assessment.ai_triage_summary || 'not available'}
+Follow-up scheduled: ${assessment.follow_up_needed ? (assessment.follow_up_date ? `Yes — ${assessment.follow_up_date}` : 'Yes (no date set)') : 'No'}
+Resolved: ${assessment.resolved ? 'Yes' : 'No'}
 
-The navigator may ask follow-up clinical questions, ask for clarification on the triage, ask how to explain something to the patient/caregiver, or ask about referral logistics.
+YOUR ROLE — REFLECTIVE SUPERVISOR:
+- Help the navigator critically evaluate the quality and completeness of THEIR OWN assessment
+- Ask them what they think they did well or missed, then give honest, specific feedback
+- Point out: symptoms that were ticked but NOT probed in-depth (missed depth), symptoms they may not have considered given the presentation, vital signs that were not recorded but should have been for this patient type, follow-up planning quality
+- Be constructive and educational — this is a learning tool, not punishment
+- Use the Bayelsa disease context to frame what a skilled navigator SHOULD have looked for
+- Ask one reflective question at a time, wait for their answer, then respond
 
-Respond with practical, specific advice appropriate to this community health navigator role. Keep answers concise and actionable. Never prescribe specific drug doses unless part of approved IMCI/CHIPS protocols. Remind the navigator to consult their supervising health worker for anything outside their scope.`;
+Start by acknowledging the case briefly, then ask the navigator: "Looking back at this assessment, what do you feel went well — and what would you do differently?"`;
+}
+
+// ─── Build PRIOR FOLLOW-UP CHAT prompt (guided clinical follow-up questions) ──
+
+function buildPriorFollowupPrompt(
+  patient: Patient,
+  priorAssessments: Assessment[],
+  followupIndex: number,
+): string {
+  const pg = PATIENT_GROUPS[patient.patient_group];
+
+  // Sort chronologically ascending so the AI understands trajectory
+  const sorted = [...priorAssessments].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+
+  const historyBlock = sorted.map((a, i) => {
+    const label = i === sorted.length - 1 ? `MOST RECENT ASSESSMENT (#${i + 1})` : `PRIOR ASSESSMENT #${i + 1}`;
+    return `--- ${label} — ${new Date(a.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })} ---
+Chief complaint: ${a.assessment_data.chiefComplaint || 'not recorded'}
+Triage: ${TRIAGE_CONFIG[a.triage_level].label}
+AI summary: ${a.ai_triage_summary?.slice(0, 600) || 'not available'}
+Follow-up notes on file: ${a.follow_up_notes || 'none'}`;
+  }).join('\n\n');
+
+  const baseAssessment = sorted[sorted.length - 1]; // most recent is what we're following up on
+
+  return `You are a clinical follow-up guide for a Community Health Navigator in Oloibiri, Bayelsa State, Nigeria. The navigator is conducting a follow-up visit for a patient whose previous case(s) are on file. Your job is to guide the navigator through asking the RIGHT follow-up questions — ONE at a time — based on the trajectory of this patient's condition.
+
+${CLINICAL_CONTEXT}
+
+PATIENT: ${patient.patient_name}, ${pg.label}, ${patient.village}
+
+CASE HISTORY (chronological — note how symptoms and triage have evolved):
+${historyBlock}
+
+THIS IS FOLLOW-UP #${followupIndex + 1} on the most recent case above.
+
+YOUR ROLE — GUIDED FOLLOW-UP COACH:
+- Ask ONE focused follow-up question at a time that the navigator can read directly to the patient or caregiver
+- Base each question on what we already know: look for improvement, deterioration, new symptoms, treatment adherence
+- Consider the disease trajectory for this Bayelsa context: has the malaria resolved? Is fever gone? Did they make the referral? Are danger signs still present?
+- After each answer from the navigator, decide what to ask next
+- When you have enough to summarise the follow-up, produce a brief structured UPDATE SUMMARY (changes since last assessment, new triage recommendation if different, actions needed)
+- Keep language very simple — the navigator may translate to Ijaw or Yoruba
+- When the follow-up is complete, end with: "✅ Follow-up complete. Review the summary above and save your notes."
+
+Start with your FIRST question, which should determine the most critical thing: has the patient's primary presenting concern (${baseAssessment.assessment_data.chiefComplaint || 'the chief complaint'}) improved, worsened, or stayed the same?`;
+}
+
+// ─── Build NEW ASSESSMENT RAG context prompt ───────────────────────────────────
+
+function buildNewAssessmentContextBlock(priorAssessments: Assessment[]): string {
+  if (!priorAssessments || priorAssessments.length === 0) return '';
+  const sorted = [...priorAssessments].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+  const summaries = sorted.map((a, i) =>
+    `[Case ${i + 1} — ${new Date(a.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })} — ${TRIAGE_CONFIG[a.triage_level].label}]\nChief complaint: ${a.assessment_data.chiefComplaint || 'not recorded'}\n${a.ai_triage_summary?.slice(0, 500) || ''}`
+  ).join('\n\n');
+  return `\n\nPATIENT HISTORY CONTEXT (${sorted.length} prior case(s) — consider these when interpreting the current presentation):\n${summaries}`;
 }
 
 // ─── Healthcare background (preserved from original) ─────────────────────────
@@ -471,12 +545,13 @@ const HealthBackground: React.FC = () => {
           </filter>
         </defs>
       </svg>
-      <div className="fixed top-16 left-64 right-0 bottom-0" style={{ backgroundImage: img, backgroundSize: 'cover', backgroundPosition: 'center', zIndex: 0 }}>
+      {/* Desktop: offset for sidebar (left-64) + top bar (top-16). Mobile: full bleed from top bar (top-16, left-0) */}
+      <div className="fixed top-16 left-0 md:left-64 right-0 bottom-0" style={{ backgroundImage: img, backgroundSize: 'cover', backgroundPosition: 'center', zIndex: 0 }}>
         <div className="absolute inset-0 bg-gradient-to-br from-blue-900/70 via-indigo-900/60 to-teal-900/65" />
         <div className="absolute inset-0 bg-black/10" />
       </div>
       {moving && (
-        <div className="fixed top-16 left-64 right-0 bottom-0 pointer-events-none" style={{ backgroundImage: img, backgroundSize: 'cover', backgroundPosition: 'center', zIndex: 1, filter: 'url(#health-distortion)', WebkitMaskImage: `radial-gradient(circle 160px at ${mouse.x}px ${mouse.y}px, black 0%, black 45%, transparent 100%)`, maskImage: `radial-gradient(circle 160px at ${mouse.x}px ${mouse.y}px, black 0%, black 45%, transparent 100%)` }}>
+        <div className="fixed top-16 left-0 md:left-64 right-0 bottom-0 pointer-events-none" style={{ backgroundImage: img, backgroundSize: 'cover', backgroundPosition: 'center', zIndex: 1, filter: 'url(#health-distortion)', WebkitMaskImage: `radial-gradient(circle 160px at ${mouse.x}px ${mouse.y}px, black 0%, black 45%, transparent 100%)`, maskImage: `radial-gradient(circle 160px at ${mouse.x}px ${mouse.y}px, black 0%, black 45%, transparent 100%)` }}>
           <div className="absolute inset-0 bg-gradient-to-br from-blue-900/70 via-indigo-900/60 to-teal-900/65" />
         </div>
       )}
@@ -506,7 +581,7 @@ const InfoTooltip: React.FC<{ id: string; text: string; open: boolean; onToggle:
       <Lightbulb size={13}/>
     </button>
     {open && (
-      <div className="absolute z-50 left-0 top-6 w-64 bg-blue-900 text-blue-50 text-xs rounded-xl px-3 py-2.5 shadow-xl leading-relaxed">
+      <div className="absolute z-50 left-0 top-6 w-64 max-w-[calc(100vw-2rem)] bg-blue-900 text-blue-50 text-xs rounded-xl px-3 py-2.5 shadow-xl leading-relaxed">
         {text}
         <button onClick={onToggle} className="absolute top-1.5 right-2 text-blue-300 hover:text-white"><X size={11}/></button>
       </div>
@@ -566,7 +641,7 @@ const ProbePanel: React.FC<ProbePanelProps> = ({
   symptom, messages, loading, done, input, onInputChange, onSend, onClose, chatEndRef
 }) => (
   <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm px-2 pb-2">
-    <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: '85vh' }}>
+    <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: '90dvh' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b bg-indigo-50 rounded-t-2xl">
         <div>
@@ -585,7 +660,7 @@ const ProbePanel: React.FC<ProbePanelProps> = ({
       </div>
 
       {/* Chat messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
         {messages.map(msg => (
           <div key={msg.id} className={classNames('flex items-start gap-2', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
             {msg.role === 'assistant' && (
@@ -618,7 +693,7 @@ const ProbePanel: React.FC<ProbePanelProps> = ({
         </div>
       )}
 
-      {/* Input */}
+      {/* Input — text-base prevents iOS auto-zoom */}
       <div className="border-t px-3 py-3 rounded-b-2xl">
         <div className="flex gap-2">
           <input
@@ -627,7 +702,7 @@ const ProbePanel: React.FC<ProbePanelProps> = ({
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onSend(); } }}
             placeholder="Type patient's answer…"
             disabled={loading}
-            className="flex-1 px-3 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
+            className="flex-1 px-3 py-2.5 text-base border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
           />
           <button onClick={onSend} disabled={!input.trim() || loading}
             className="px-3 py-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40">
@@ -695,13 +770,24 @@ const HealthcareNavigatorPage: React.FC = () => {
   // ── Tooltip visibility
   const [openTooltip, setOpenTooltip] = useState<string | null>(null);
 
-  // ── Follow-up chat
+  // ── Follow-up chat (evaluate case history)
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [speechOn, setSpeechOn] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+
+  // ── Prior follow-up chat state (guided clinical follow-up)
+  const [priorFollowupMessages, setPriorFollowupMessages] = useState<ChatMessage[]>([]);
+  const [priorFollowupInput, setPriorFollowupInput] = useState('');
+  const [priorFollowupSending, setPriorFollowupSending] = useState(false);
+  const [priorFollowupIndex, setPriorFollowupIndex] = useState(0);
+  const [priorFollowupComplete, setPriorFollowupComplete] = useState(false);
+  const priorFollowupEndRef = useRef<HTMLDivElement>(null);
+
+  // ── Patient prior history (for RAG in new assessments and follow-up)
+  const [patientPriorHistory, setPatientPriorHistory] = useState<Assessment[]>([]);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -726,6 +812,7 @@ const HealthcareNavigatorPage: React.FC = () => {
   }, [speechOn, voices]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isSending]);
+  useEffect(() => { priorFollowupEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [priorFollowupMessages, priorFollowupSending]);
 
   // ─── Load patients ────────────────────────────────────────────────────────
   const loadPatients = useCallback(async () => {
@@ -756,10 +843,12 @@ const HealthcareNavigatorPage: React.FC = () => {
         .order('created_at', { ascending: false });
       if (!error && data) {
         // Normalise probe_notes: pre-migration rows return null
-        setAssessments(data.map(row => ({
+        const normalised = data.map(row => ({
           ...row,
           probe_notes: row.probe_notes ?? {},
-        })) as Assessment[]);
+        })) as Assessment[];
+        setAssessments(normalised);
+        setPatientPriorHistory(normalised);
       }
     } finally { setLoadingAssessments(false); }
   }, []);
@@ -844,7 +933,8 @@ const HealthcareNavigatorPage: React.FC = () => {
     if (!selectedPatient || isTriaging) return;
     setIsTriaging(true);
     try {
-      const systemPrompt = buildTriagePrompt(selectedPatient, assessment, probeNotes);
+      const priorHistoryContext = buildNewAssessmentContextBlock(patientPriorHistory);
+      const systemPrompt = buildTriagePrompt(selectedPatient, assessment, probeNotes, priorHistoryContext);
       const reply = await chatText({ page: 'HealthcareNavigatorPage', messages: [{ role: 'user', content: 'Please analyse this patient assessment and provide your triage classification.' }], system: systemPrompt, max_tokens: 800 });
       const level = detectTriage(reply);
       setTriageResult({ level, summary: reply });
@@ -963,15 +1053,75 @@ const HealthcareNavigatorPage: React.FC = () => {
     setInputText('');
     setMode('followup-chat');
     if ((assess.conversation_history || []).length === 0) {
-      const tc = TRIAGE_CONFIG[assess.triage_level];
       const opener: ChatMessage = {
         id: crypto.randomUUID(), role: 'assistant',
-        content: `Ready to help with follow-up questions for **${patient.patient_name}** (classified **${tc.label}**).\n\nYou can ask about the triage, how to explain the situation to the patient/caregiver, referral logistics, or any clinical questions within your navigator scope.`,
+        content: `Let's review your assessment of **${patient.patient_name}** together.\n\nLooking back at this case, what do you feel went well — and what would you do differently?`,
         timestamp: new Date(),
       };
       setMessages([opener]);
     }
   };
+
+  // ─── Open prior follow-up (guided clinical follow-up questions) ───────────
+  const openPriorFollowupChat = (patient: Patient, assess: Assessment) => {
+    setSelectedPatient(patient);
+    setSelectedAssessment(assess);
+    setPriorFollowupMessages([]);
+    setPriorFollowupInput('');
+    setPriorFollowupSending(false);
+    setPriorFollowupComplete(false);
+    // How many follow-ups have already happened on this case?
+    const followupCount = (assess.follow_up_notes || '').split('---FOLLOWUP---').filter(Boolean).length;
+    setPriorFollowupIndex(followupCount);
+    setMode('prior-followup-chat');
+    // Kick off the first AI question
+    const allCasesForPatient = patientPriorHistory.filter(a => a.patient_id === assess.patient_id || true);
+    const systemPrompt = buildPriorFollowupPrompt(patient, allCasesForPatient, followupCount);
+    setPriorFollowupSending(true);
+    chatText({
+      page: 'HealthcareNavigatorPage',
+      messages: [{ role: 'user', content: 'Begin the follow-up assessment.' }],
+      system: systemPrompt,
+      max_tokens: 400,
+    }).then(reply => {
+      const done = reply.includes('✅ Follow-up complete');
+      setPriorFollowupComplete(done);
+      setPriorFollowupMessages([{ id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() }]);
+    }).finally(() => setPriorFollowupSending(false));
+  };
+
+  // ─── Send prior follow-up message ─────────────────────────────────────────
+  const sendPriorFollowupMessage = useCallback(async () => {
+    if (!priorFollowupInput.trim() || priorFollowupSending || !selectedPatient || !selectedAssessment) return;
+    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: priorFollowupInput.trim(), timestamp: new Date() };
+    const updated = [...priorFollowupMessages, userMsg];
+    setPriorFollowupMessages(updated);
+    setPriorFollowupInput('');
+    setPriorFollowupSending(true);
+    try {
+      const allCases = patientPriorHistory;
+      const systemPrompt = buildPriorFollowupPrompt(selectedPatient, allCases, priorFollowupIndex);
+      const reply = await chatText({
+        page: 'HealthcareNavigatorPage',
+        messages: updated.map(m => ({ role: m.role, content: m.content })),
+        system: systemPrompt,
+        max_tokens: 500,
+      });
+      const done = reply.includes('✅ Follow-up complete');
+      setPriorFollowupComplete(done);
+      const aiMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() };
+      const finalMsgs = [...updated, aiMsg];
+      setPriorFollowupMessages(finalMsgs);
+      // Save follow-up notes appended to the same assessment row
+      const newNoteBlock = `---FOLLOWUP---\n${new Date().toISOString()}\n${finalMsgs.map(m => `${m.role === 'assistant' ? 'AI' : 'Navigator'}: ${m.content.slice(0, 400)}`).join('\n')}`;
+      const updatedNotes = ((selectedAssessment.follow_up_notes || '') + '\n' + newNoteBlock).trim();
+      await supabase.from('health_assessments')
+        .update({ follow_up_notes: updatedNotes, conversation_history: finalMsgs })
+        .eq('id', selectedAssessment.id);
+    } catch {
+      setPriorFollowupMessages(p => [...p, { id: crypto.randomUUID(), role: 'assistant', content: 'Technical issue — please try again.', timestamp: new Date() }]);
+    } finally { setPriorFollowupSending(false); }
+  }, [priorFollowupInput, priorFollowupSending, priorFollowupMessages, selectedPatient, selectedAssessment, patientPriorHistory, priorFollowupIndex]);
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
   const formatDate = (iso: string) =>
@@ -1005,34 +1155,36 @@ const HealthcareNavigatorPage: React.FC = () => {
     return (
       <AppLayout>
         <HealthBackground />
-        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6">
-          <div className="bg-black/40 backdrop-blur-sm rounded-2xl p-5 mb-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-2xl">🏥</div>
-                <div>
-                  <h1 className="text-xl font-bold text-white">Health Navigator</h1>
-                  <p className="text-sm text-blue-200">Your patient casebook · Oloibiri & Ibiade</p>
+        <div className="relative z-10 max-w-2xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+          {/* Header bar */}
+          <div className="bg-black/40 backdrop-blur-sm rounded-2xl p-4 mb-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-xl sm:text-2xl">🏥</div>
+                <div className="min-w-0">
+                  <h1 className="text-lg sm:text-xl font-bold text-white leading-tight">Health Navigator</h1>
+                  <p className="text-xs text-blue-200 truncate">Your patient casebook · Oloibiri & Ibiade</p>
                 </div>
               </div>
               <button onClick={() => { resetAddPatient(); setMode('add-patient'); }}
-                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold text-sm hover:opacity-90">
-                <Plus size={16}/> Add Patient
+                className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold text-sm hover:opacity-90">
+                <Plus size={16}/> <span className="hidden xs:inline">Add</span> Patient
               </button>
             </div>
           </div>
 
+          {/* Stats */}
           {patients.length > 0 && (
-            <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-4">
               {[
                 { label: 'Patients', value: patients.length, icon: '👥' },
                 { label: 'Open Cases', value: patients.reduce((s, p) => s + (p.open_cases ?? 0), 0), icon: '📋' },
                 { label: 'This Month', value: patients.filter(p => p.last_assessment_at && new Date(p.last_assessment_at) > new Date(Date.now() - 30*24*60*60*1000)).length, icon: '📅' },
               ].map(stat => (
-                <div key={stat.label} className="bg-white/90 backdrop-blur-sm rounded-xl p-4 text-center">
-                  <div className="text-2xl mb-1">{stat.icon}</div>
-                  <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                  <p className="text-xs text-gray-500">{stat.label}</p>
+                <div key={stat.label} className="bg-white/90 backdrop-blur-sm rounded-xl p-3 sm:p-4 text-center">
+                  <div className="text-xl sm:text-2xl mb-0.5">{stat.icon}</div>
+                  <p className="text-xl sm:text-2xl font-bold text-gray-900">{stat.value}</p>
+                  <p className="text-xs text-gray-500 leading-tight">{stat.label}</p>
                 </div>
               ))}
             </div>
@@ -1041,7 +1193,7 @@ const HealthcareNavigatorPage: React.FC = () => {
           {loadingPatients ? (
             <div className="flex justify-center py-12"><Loader2 size={28} className="animate-spin text-blue-300"/></div>
           ) : patients.length === 0 ? (
-            <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-10 text-center">
+            <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-8 sm:p-10 text-center">
               <div className="text-5xl mb-4">🏥</div>
               <h2 className="text-lg font-bold text-gray-800 mb-2">No patients registered yet</h2>
               <p className="text-sm text-gray-500 mb-5">Register your first community patient to start your casebook.</p>
@@ -1057,12 +1209,12 @@ const HealthcareNavigatorPage: React.FC = () => {
                 return (
                   <button key={patient.id}
                     onClick={() => { setSelectedPatient(patient); loadAssessments(patient.id); setMode('patient-detail'); }}
-                    className="w-full bg-white/90 backdrop-blur-sm rounded-2xl p-4 text-left hover:bg-white transition-colors border border-transparent hover:border-blue-300">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center text-lg">{pg.emoji}</div>
-                        <div>
-                          <p className="font-bold text-gray-900">{patient.patient_name}</p>
+                    className="w-full bg-white/90 backdrop-blur-sm rounded-2xl p-4 text-left hover:bg-white active:bg-white transition-colors border border-transparent hover:border-blue-300 active:border-blue-300">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-10 h-10 flex-shrink-0 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center text-lg">{pg.emoji}</div>
+                        <div className="min-w-0">
+                          <p className="font-bold text-gray-900 truncate">{patient.patient_name}</p>
                           <p className="text-sm text-gray-500">{patient.village}</p>
                           <div className="flex flex-wrap gap-1 mt-1.5">
                             <span className={classNames('text-xs rounded-full px-2 py-0.5 font-medium border', pg.bgLight, pg.border, pg.textColour)}>
@@ -1076,7 +1228,7 @@ const HealthcareNavigatorPage: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="flex flex-col items-end gap-1.5">
+                      <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                         <ChevronRight size={17} className="text-gray-400"/>
                         {(patient.open_cases ?? 0) > 0 && (
                           <span className="text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5 font-semibold">{patient.open_cases} open</span>
@@ -1105,8 +1257,8 @@ const HealthcareNavigatorPage: React.FC = () => {
     return (
       <AppLayout>
         <HealthBackground />
-        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6">
-          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+        <div className="relative z-10 max-w-2xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4 sm:p-5">
             <div className="flex items-center gap-3 mb-5">
               <button onClick={() => setMode('dashboard')} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
               <div><h2 className="text-xl font-bold text-gray-900">Register Patient</h2><p className="text-sm text-gray-500">Add to your casebook</p></div>
@@ -1159,14 +1311,14 @@ const HealthcareNavigatorPage: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Phone (optional)</label>
-                <input value={newPhone} onChange={e => setNewPhone(e.target.value)} placeholder="+234 801 234 5678"
+                <input value={newPhone} onChange={e => setNewPhone(e.target.value)} placeholder="+234 801 234 5678" type="tel"
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-base"/>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Notes (optional)</label>
                 <textarea value={newNotes} onChange={e => setNewNotes(e.target.value)} rows={2}
                   placeholder="Chronic conditions, allergies, previous serious illness…"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm resize-none"/>
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 text-base resize-none"/>
               </div>
               <button onClick={savePatient} disabled={!newName.trim() || !newVillage || savingPatient}
                 className={classNames('w-full py-3.5 rounded-xl font-bold text-white text-base transition-opacity',
@@ -1190,14 +1342,14 @@ const HealthcareNavigatorPage: React.FC = () => {
     return (
       <AppLayout>
         <HealthBackground />
-        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6 space-y-4">
-          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+        <div className="relative z-10 max-w-2xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4 sm:p-5">
             <div className="flex items-center gap-3 mb-4">
-              <button onClick={() => setMode('dashboard')} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center text-2xl">{pg.emoji}</div>
-              <div className="flex-1">
-                <h2 className="text-xl font-bold text-gray-900">{patient.patient_name}</h2>
-                <p className="text-sm text-gray-500">{patient.village}{patient.phone ? ` · ${patient.phone}` : ''}</p>
+              <button onClick={() => setMode('dashboard')} className="text-gray-400 hover:text-gray-700 p-1 flex-shrink-0"><ArrowLeft size={20}/></button>
+              <div className="w-11 h-11 flex-shrink-0 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center text-2xl">{pg.emoji}</div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900 truncate">{patient.patient_name}</h2>
+                <p className="text-sm text-gray-500 truncate">{patient.village}{patient.phone ? ` · ${patient.phone}` : ''}</p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2 mb-4">
@@ -1216,18 +1368,25 @@ const HealthcareNavigatorPage: React.FC = () => {
               )}
             </div>
             {patient.notes && <p className="text-sm text-gray-600 italic bg-gray-50 rounded-lg px-3 py-2 mb-4">{patient.notes}</p>}
+            {/* Follow-up Prior Assessment — only shown when there's an open/prior case */}
+            {assessments.length > 0 && !assessments[0].resolved && (
+              <button onClick={() => openPriorFollowupChat(patient, assessments[0])}
+                className="w-full mb-2 py-3 rounded-xl font-bold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 active:bg-blue-100 flex items-center justify-center gap-2 text-sm sm:text-base">
+                <Calendar size={17}/> Follow-up Prior Assessment
+              </button>
+            )}
             <button onClick={() => startAssessment(patient)}
-              className="w-full py-3.5 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90 flex items-center justify-center gap-2">
+              className="w-full py-3.5 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90 active:opacity-90 flex items-center justify-center gap-2 text-sm sm:text-base">
               <Stethoscope size={18}/> Start New Assessment
             </button>
           </div>
 
-          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4 sm:p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
                 <ClipboardList size={16} className="text-blue-600"/> Assessment History
               </h3>
-              <button onClick={() => loadAssessments(patient.id)} className="text-gray-400 hover:text-gray-700"><RefreshCw size={14}/></button>
+              <button onClick={() => loadAssessments(patient.id)} className="text-gray-400 hover:text-gray-700 p-1"><RefreshCw size={14}/></button>
             </div>
             {loadingAssessments ? (
               <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-blue-600"/></div>
@@ -1236,13 +1395,13 @@ const HealthcareNavigatorPage: React.FC = () => {
             ) : (
               <div className="space-y-3">
                 {assessments.map(a => (
-                  <div key={a.id} className="border border-gray-200 rounded-xl p-4 hover:border-blue-300 transition-colors">
+                  <div key={a.id} className="border border-gray-200 rounded-xl p-3 sm:p-4 hover:border-blue-300 transition-colors">
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-semibold text-gray-900 text-sm">{a.assessment_data.chiefComplaint || 'Assessment'}</p>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-900 text-sm truncate">{a.assessment_data.chiefComplaint || 'Assessment'}</p>
                         <p className="text-xs text-gray-500">{formatDate(a.created_at)}</p>
                       </div>
-                      <div className="flex flex-col items-end gap-1">
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
                         {triageBadge(a.triage_level)}
                         {a.resolved
                           ? <span className="text-xs text-green-600 font-semibold flex items-center gap-1"><CheckCircle size={11}/> Resolved</span>
@@ -1254,14 +1413,15 @@ const HealthcareNavigatorPage: React.FC = () => {
                         <Calendar size={11}/> Follow-up: {formatDate(a.follow_up_date)}
                       </p>
                     )}
-                    <div className="flex gap-2 mt-3">
+                    {/* Buttons stack on very small screens */}
+                    <div className="flex flex-col xs:flex-row gap-2 mt-3">
                       <button onClick={() => { setSelectedAssessment(a); setMode('case-detail'); }}
-                        className="flex-1 py-2 text-xs font-semibold rounded-lg border border-gray-200 text-gray-700 hover:border-blue-300 hover:text-blue-700">
+                        className="flex-1 py-2.5 text-xs font-semibold rounded-lg border border-gray-200 text-gray-700 hover:border-blue-300 hover:text-blue-700 active:border-blue-300">
                         View Case
                       </button>
                       <button onClick={() => openFollowupChat(patient, a)}
-                        className="flex-1 py-2 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">
-                        Ask AI Follow-up
+                        className="flex-1 py-2.5 text-xs font-semibold rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 active:bg-indigo-100">
+                        Evaluate My Case History
                       </button>
                     </div>
                   </div>
@@ -1303,7 +1463,7 @@ const HealthcareNavigatorPage: React.FC = () => {
           />
         )}
 
-        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6 space-y-4">
+        <div className="relative z-10 max-w-2xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4">
 
           {/* Header */}
           <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4">
@@ -1329,61 +1489,61 @@ const HealthcareNavigatorPage: React.FC = () => {
           )}
 
           {/* Chief complaint */}
-          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4 sm:p-5">
             <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2"><FileText size={15} className="text-blue-600"/> Chief Complaint</h3>
             <textarea value={assessment.chiefComplaint} onChange={e => setField('chiefComplaint', e.target.value)} rows={2}
               placeholder="Main reason for this visit — what the patient/caregiver says in their own words…"
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-base resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"/>
           </div>
 
           {/* Vitals */}
-          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4 sm:p-5">
             <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2"><Thermometer size={15} className="text-blue-600"/> Vital Signs</h3>
             <div className="space-y-3">
               {/* Temp */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-start gap-2">
                 <div className="flex-1">
                   <label className="text-xs font-semibold text-gray-600 flex items-center mb-1">
                     Temperature (°C)
                     <InfoTooltip id="tempC" text={VITAL_TOOLTIPS.tempC} open={openTooltip === 'tempC'} onToggle={() => setOpenTooltip(openTooltip === 'tempC' ? null : 'tempC')}/>
                   </label>
-                  <input type="number" step="0.1" value={assessment.tempC} onChange={e => setField('tempC', e.target.value)} placeholder="e.g. 38.2"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                  <input type="number" inputMode="decimal" step="0.1" value={assessment.tempC} onChange={e => setField('tempC', e.target.value)} placeholder="e.g. 38.2"
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                 </div>
-                <div>
+                <div className="flex-shrink-0">
                   <label className="text-xs font-semibold text-gray-600 block mb-1">Method</label>
                   <select value={assessment.tempMethod} onChange={e => setField('tempMethod', e.target.value as AssessmentData['tempMethod'])}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+                    className="px-3 py-2.5 border border-gray-300 rounded-lg text-base bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
                     <option value="axillary">Axillary</option>
                     <option value="oral">Oral</option>
                     <option value="rectal">Rectal</option>
                   </select>
                 </div>
                 {assessment.tempC && (
-                  <div className="text-xs font-bold mt-4 px-2 py-1 rounded-lg">
-                    {Number(assessment.tempC) >= 39.0 ? <span className="text-red-600">🔴 High</span>
-                      : Number(assessment.tempC) >= 37.5 ? <span className="text-yellow-600">🟡 Fever</span>
-                      : <span className="text-green-600">🟢 Normal</span>}
+                  <div className="text-xs font-bold pt-7 px-1">
+                    {Number(assessment.tempC) >= 39.0 ? <span className="text-red-600">🔴</span>
+                      : Number(assessment.tempC) >= 37.5 ? <span className="text-yellow-600">🟡</span>
+                      : <span className="text-green-600">🟢</span>}
                   </div>
                 )}
               </div>
-              {/* RR */}
+              {/* RR + Pulse */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-gray-600 flex items-center mb-1">
-                    Respiratory Rate (breaths/min)
+                    Resp. Rate (/min)
                     <InfoTooltip id="rr" text={VITAL_TOOLTIPS.respiratoryRate} open={openTooltip === 'rr'} onToggle={() => setOpenTooltip(openTooltip === 'rr' ? null : 'rr')}/>
                   </label>
-                  <input type="number" value={assessment.respiratoryRate} onChange={e => setField('respiratoryRate', e.target.value)} placeholder="Count 60 sec"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                  <input type="number" inputMode="numeric" value={assessment.respiratoryRate} onChange={e => setField('respiratoryRate', e.target.value)} placeholder="Count 60s"
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-gray-600 flex items-center mb-1">
                     Pulse (bpm)
                     <InfoTooltip id="pulse" text={VITAL_TOOLTIPS.pulseRate} open={openTooltip === 'pulse'} onToggle={() => setOpenTooltip(openTooltip === 'pulse' ? null : 'pulse')}/>
                   </label>
-                  <input type="number" value={assessment.pulseRate} onChange={e => setField('pulseRate', e.target.value)} placeholder="e.g. 96"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                  <input type="number" inputMode="numeric" value={assessment.pulseRate} onChange={e => setField('pulseRate', e.target.value)} placeholder="e.g. 96"
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                 </div>
               </div>
               {/* BP */}
@@ -1394,16 +1554,16 @@ const HealthcareNavigatorPage: React.FC = () => {
                       BP Systolic (mmHg)
                       <InfoTooltip id="bpSys" text={VITAL_TOOLTIPS.bpSystolic} open={openTooltip === 'bpSys'} onToggle={() => setOpenTooltip(openTooltip === 'bpSys' ? null : 'bpSys')}/>
                     </label>
-                    <input type="number" value={assessment.bpSystolic} onChange={e => setField('bpSystolic', e.target.value)} placeholder="e.g. 130"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                    <input type="number" inputMode="numeric" value={assessment.bpSystolic} onChange={e => setField('bpSystolic', e.target.value)} placeholder="e.g. 130"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                   </div>
                   <div>
                     <label className="text-xs font-semibold text-gray-600 flex items-center mb-1">
                       BP Diastolic (mmHg)
                       <InfoTooltip id="bpDia" text={VITAL_TOOLTIPS.bpDiastolic} open={openTooltip === 'bpDia'} onToggle={() => setOpenTooltip(openTooltip === 'bpDia' ? null : 'bpDia')}/>
                     </label>
-                    <input type="number" value={assessment.bpDiastolic} onChange={e => setField('bpDiastolic', e.target.value)} placeholder="e.g. 85"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                    <input type="number" inputMode="numeric" value={assessment.bpDiastolic} onChange={e => setField('bpDiastolic', e.target.value)} placeholder="e.g. 85"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                   </div>
                 </div>
               )}
@@ -1411,24 +1571,24 @@ const HealthcareNavigatorPage: React.FC = () => {
           </div>
 
           {/* Anthropometry */}
-          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4 sm:p-5">
             <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2"><Activity size={15} className="text-blue-600"/> Measurements</h3>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
                 <label className="text-xs font-semibold text-gray-600 block mb-1">Weight (kg)</label>
-                <input type="number" step="0.1" value={assessment.weightKg} onChange={e => setField('weightKg', e.target.value)} placeholder="e.g. 12.5"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                <input type="number" inputMode="decimal" step="0.1" value={assessment.weightKg} onChange={e => setField('weightKg', e.target.value)} placeholder="e.g. 12.5"
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
               </div>
               <div>
                 <label className="text-xs font-semibold text-gray-600 block mb-1">Height (cm)</label>
-                <input type="number" step="0.1" value={assessment.heightCm} onChange={e => setField('heightCm', e.target.value)} placeholder="e.g. 95"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                <input type="number" inputMode="decimal" step="0.1" value={assessment.heightCm} onChange={e => setField('heightCm', e.target.value)} placeholder="e.g. 95"
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
               </div>
-              <div>
+              <div className="col-span-2 sm:col-span-1">
                 <label className="text-xs font-semibold text-gray-600 block mb-1">MUAC (cm)</label>
                 <div className="relative">
-                  <input type="number" step="0.1" value={assessment.muacCm} onChange={e => setField('muacCm', e.target.value)} placeholder="e.g. 13.0"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                  <input type="number" inputMode="decimal" step="0.1" value={assessment.muacCm} onChange={e => setField('muacCm', e.target.value)} placeholder="e.g. 13.0"
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                   {assessment.muacCm && isChild && (
                     <div className="text-xs font-bold mt-1 text-center">
                       {Number(assessment.muacCm) < 11.5 ? <span className="text-red-600">🔴 SAM</span>
@@ -1461,11 +1621,11 @@ const HealthcareNavigatorPage: React.FC = () => {
               <CheckRow label="Fever" checked={assessment.fever} onChange={v => setField('fever', v)}
                 tooltip={SYMPTOM_TOOLTIPS.fever} tooltipOpen={openTooltip === 'fever'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'fever' ? null : 'fever')}
                 onProbe={() => openProbe('fever', 'Fever')} probeActive={probeSymptom === 'Fever'}
-                subField={<input type="text" value={assessment.feverDays} onChange={e => setField('feverDays', e.target.value)} placeholder="Days of fever" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>}/>
+                subField={<input type="text" value={assessment.feverDays} onChange={e => setField('feverDays', e.target.value)} placeholder="Days of fever" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>}/>
               <CheckRow label="Cough" checked={assessment.cough} onChange={v => setField('cough', v)}
                 tooltip={SYMPTOM_TOOLTIPS.cough} tooltipOpen={openTooltip === 'cough'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'cough' ? null : 'cough')}
                 onProbe={() => openProbe('cough', 'Cough')} probeActive={probeSymptom === 'Cough'}
-                subField={<input type="text" value={assessment.coughDays} onChange={e => setField('coughDays', e.target.value)} placeholder="Days of cough" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>}/>
+                subField={<input type="text" value={assessment.coughDays} onChange={e => setField('coughDays', e.target.value)} placeholder="Days of cough" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>}/>
               <CheckRow label="Chest indrawing (lower chest pulls in when breathing)" checked={assessment.chestIndrawing} onChange={v => setField('chestIndrawing', v)} danger
                 tooltip={SYMPTOM_TOOLTIPS.chestIndrawing} tooltipOpen={openTooltip === 'chestIndrawing'} onTooltipToggle={() => setOpenTooltip(openTooltip === 'chestIndrawing' ? null : 'chestIndrawing')}
                 onProbe={() => openProbe('chestIndrawing', 'Chest Indrawing')} probeActive={probeSymptom === 'Chest Indrawing'}/>
@@ -1474,7 +1634,7 @@ const HealthcareNavigatorPage: React.FC = () => {
                 onProbe={() => openProbe('diarrhoea', 'Diarrhoea')} probeActive={probeSymptom === 'Diarrhoea'}
                 subField={
                   <div className="space-y-1">
-                    <input type="text" value={assessment.diarrhoeaDays} onChange={e => setField('diarrhoeaDays', e.target.value)} placeholder="Days of diarrhoea" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                    <input type="text" value={assessment.diarrhoeaDays} onChange={e => setField('diarrhoeaDays', e.target.value)} placeholder="Days of diarrhoea" className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                     <label className="flex items-center gap-2 text-xs text-gray-700">
                       <input type="checkbox" checked={assessment.bloodInStool} onChange={e => setField('bloodInStool', e.target.checked)} className="accent-blue-600"/>
                       Blood in stool
@@ -1531,7 +1691,7 @@ const HealthcareNavigatorPage: React.FC = () => {
                     placeholder={obs.prompt}
                     value={assessment[obs.key]}
                     onChange={e => setField(obs.key, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
                   />
                   {probeNotes[obs.label] && (
                     <p className="text-xs text-indigo-600 mt-1 italic">✓ Probed — detail captured in additional notes</p>
@@ -1570,7 +1730,7 @@ const HealthcareNavigatorPage: React.FC = () => {
             <h3 className="text-sm font-bold text-gray-800 mb-2">Additional Notes</h3>
             <textarea value={assessment.additionalNotes} onChange={e => setField('additionalNotes', e.target.value)} rows={3}
               placeholder="Any other observations, caregiver history, context…"
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-base resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"/>
           </div>
 
           {/* AI Triage */}
@@ -1602,7 +1762,7 @@ const HealthcareNavigatorPage: React.FC = () => {
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Actions taken by navigator</label>
                   <textarea value={navigatorActions} onChange={e => setNavigatorActions(e.target.value)} rows={2}
                     placeholder="e.g. Gave ORS, explained referral plan to caregiver, wrote referral note…"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-base resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                 </div>
                 <div className="flex items-center gap-3">
                   <input type="checkbox" id="followup" checked={followUpNeeded} onChange={e => setFollowUpNeeded(e.target.checked)} className="w-4 h-4 accent-blue-600"/>
@@ -1613,12 +1773,12 @@ const HealthcareNavigatorPage: React.FC = () => {
                     <div>
                       <label className="block text-xs font-semibold text-gray-600 mb-1">Follow-up date</label>
                       <input type="date" value={followUpDate} onChange={e => setFollowUpDate(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-gray-600 mb-1">What to check</label>
                       <input value={followUpNotes} onChange={e => setFollowUpNotes(e.target.value)} placeholder="e.g. Check fever resolved"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-400"/>
                     </div>
                   </div>
                 )}
@@ -1659,14 +1819,14 @@ const HealthcareNavigatorPage: React.FC = () => {
     return (
       <AppLayout>
         <HealthBackground />
-        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6">
+        <div className="relative z-10 max-w-2xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
           <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4 mb-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-3">
                 <button onClick={() => { window.speechSynthesis.cancel(); setMode('patient-detail'); }} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-lg">🏥</div>
                 <div>
-                  <h2 className="text-base font-bold text-gray-900">Follow-up Questions</h2>
+                  <h2 className="text-base font-bold text-gray-900">Evaluate My Case History</h2>
                   <p className="text-xs text-gray-500">{patient.patient_name} · {triageBadge(assess.triage_level)}</p>
                 </div>
               </div>
@@ -1678,37 +1838,38 @@ const HealthcareNavigatorPage: React.FC = () => {
           </div>
 
           <div className="bg-white/80 backdrop-blur-sm rounded-xl px-4 py-2.5 mb-4 flex items-center gap-2">
-            <Lightbulb size={14} className="text-blue-700 flex-shrink-0"/>
-            <p className="text-xs text-gray-700">Ask about the triage, how to explain it to the patient, referral logistics, or any clinical question within your navigator scope.</p>
+            <Lightbulb size={14} className="text-indigo-700 flex-shrink-0"/>
+            <p className="text-xs text-gray-700">Reflect on this assessment with your AI supervisor. Consider what you did well, what you missed, and what you'd do differently next time.</p>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-lg mb-4 flex flex-col" style={{ height: '460px' }}>
+          {/* Chat panel — flex column, fills available vertical space without overflowing */}
+          <div className="bg-white rounded-2xl shadow-lg mb-4 flex flex-col" style={{ height: 'min(460px, calc(100dvh - 260px))' }}>
             <div className="flex items-center justify-between px-5 py-3 border-b bg-gray-50 rounded-t-2xl text-xs text-gray-500">
               <span className="font-semibold text-gray-700 flex items-center gap-1.5">🏥 Clinical AI Advisor</span>
               <span>{userTurns} exchange{userTurns !== 1 ? 's' : ''}</span>
             </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 min-h-0">
               {messages.map(msg => (
                 <div key={msg.id} className={classNames('flex items-start gap-3', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
                   {msg.role === 'assistant' && (
-                    <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-lg">🏥</div>
+                    <div className="flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-base sm:text-lg">🏥</div>
                   )}
-                  <div className={classNames('max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
+                  <div className={classNames('max-w-[82%] rounded-2xl px-3 sm:px-4 py-3 text-sm leading-relaxed',
                     msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-gray-100 text-gray-900 rounded-tl-sm')}>
                     {msg.role === 'assistant' && <p className="text-xs font-bold mb-1 opacity-50">AI Clinical Advisor</p>}
                     {msg.role === 'user' && <p className="text-xs font-bold mb-1 opacity-75">You (Navigator)</p>}
                     <MarkdownText text={msg.content}/>
                   </div>
                   {msg.role === 'user' && (
-                    <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center">
-                      <User size={15} className="text-white"/>
+                    <div className="flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-blue-600 flex items-center justify-center">
+                      <User size={14} className="text-white"/>
                     </div>
                   )}
                 </div>
               ))}
               {isSending && (
                 <div className="flex items-start gap-3">
-                  <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-lg">🏥</div>
+                  <div className="flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-base">🏥</div>
                   <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
                     <div className="flex gap-1.5 items-center h-4">{[0, 150, 300].map(d => <div key={d} className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: `${d}ms` }}/>)}</div>
                   </div>
@@ -1716,12 +1877,12 @@ const HealthcareNavigatorPage: React.FC = () => {
               )}
               <div ref={chatEndRef}/>
             </div>
-            <div className="border-t p-4 rounded-b-2xl">
+            <div className="border-t p-3 sm:p-4 rounded-b-2xl">
               <div className="flex items-end gap-2">
                 <textarea ref={inputRef} value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={handleKeyDown} rows={2}
-                  placeholder="Ask a follow-up clinical question…"
+                  placeholder="Share your thoughts on the assessment…"
                   disabled={isSending}
-                  className="flex-1 px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none leading-relaxed disabled:opacity-50"/>
+                  className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 text-base border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none leading-relaxed disabled:opacity-50"/>
                 <div className="flex flex-col gap-2">
                   <button onClick={toggleListening}
                     className={classNames('p-2.5 rounded-xl transition-all', isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 text-gray-500 hover:bg-gray-200')}>
@@ -1742,6 +1903,102 @@ const HealthcareNavigatorPage: React.FC = () => {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: PRIOR FOLLOW-UP CHAT (guided clinical follow-up questions)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  if (mode === 'prior-followup-chat' && selectedPatient && selectedAssessment) {
+    const patient = selectedPatient;
+    const assess = selectedAssessment;
+    const userTurns = priorFollowupMessages.filter(m => m.role === 'user').length;
+
+    return (
+      <AppLayout>
+        <HealthBackground />
+        <div className="relative z-10 max-w-2xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-4 mb-4">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setMode('patient-detail')} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-blue-600 flex items-center justify-center text-lg">🔄</div>
+              <div>
+                <h2 className="text-base font-bold text-gray-900">Follow-up Prior Assessment</h2>
+                <p className="text-xs text-gray-500">{patient.patient_name} · Follow-up #{priorFollowupIndex + 1}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white/80 backdrop-blur-sm rounded-xl px-4 py-2.5 mb-4 flex items-center gap-2">
+            <Calendar size={14} className="text-teal-700 flex-shrink-0"/>
+            <p className="text-xs text-gray-700">The AI will guide you through follow-up questions one at a time. Answer each question with what the patient tells you. Your responses are saved to the existing case record.</p>
+          </div>
+
+          {priorFollowupComplete && (
+            <div className="bg-green-50 border border-green-300 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-green-800 text-sm font-semibold">
+              <CheckCircle size={16} className="text-green-600 flex-shrink-0"/>
+              Follow-up complete. Notes saved to the case record.
+            </div>
+          )}
+
+          <div className="bg-white rounded-2xl shadow-lg mb-4 flex flex-col" style={{ height: 'min(460px, calc(100dvh - 300px))' }}>
+            <div className="flex items-center justify-between px-5 py-3 border-b bg-teal-50 rounded-t-2xl text-xs text-gray-500">
+              <span className="font-semibold text-teal-800 flex items-center gap-1.5">🔄 AI Follow-up Guide</span>
+              <span>{userTurns} answer{userTurns !== 1 ? 's' : ''} recorded</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 min-h-0">
+              {priorFollowupMessages.map(msg => (
+                <div key={msg.id} className={classNames('flex items-start gap-3', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                  {msg.role === 'assistant' && (
+                    <div className="flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-teal-500 to-blue-600 flex items-center justify-center text-base">🔄</div>
+                  )}
+                  <div className={classNames('max-w-[82%] rounded-2xl px-3 sm:px-4 py-3 text-sm leading-relaxed',
+                    msg.role === 'user' ? 'bg-teal-600 text-white rounded-tr-sm' : 'bg-gray-100 text-gray-900 rounded-tl-sm')}>
+                    {msg.role === 'assistant' && <p className="text-xs font-bold mb-1 opacity-50">AI Follow-up Guide</p>}
+                    {msg.role === 'user' && <p className="text-xs font-bold mb-1 opacity-75">You (Navigator)</p>}
+                    <MarkdownText text={msg.content}/>
+                  </div>
+                  {msg.role === 'user' && (
+                    <div className="flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-teal-600 flex items-center justify-center">
+                      <User size={14} className="text-white"/>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {priorFollowupSending && (
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-teal-500 to-blue-600 flex items-center justify-center text-base">🔄</div>
+                  <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
+                    <div className="flex gap-1.5 items-center h-4">{[0, 150, 300].map(d => <div key={d} className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: `${d}ms` }}/>)}</div>
+                  </div>
+                </div>
+              )}
+              <div ref={priorFollowupEndRef}/>
+            </div>
+            <div className="border-t p-3 sm:p-4 rounded-b-2xl">
+              <div className="flex items-end gap-2">
+                <textarea
+                  value={priorFollowupInput}
+                  onChange={e => setPriorFollowupInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPriorFollowupMessage(); } }}
+                  rows={2}
+                  placeholder={priorFollowupComplete ? 'Follow-up complete — notes saved.' : "Type patient's response here…"}
+                  disabled={priorFollowupSending || priorFollowupComplete}
+                  className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 text-base border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none leading-relaxed disabled:opacity-50"/>
+                <button onClick={sendPriorFollowupMessage}
+                  disabled={!priorFollowupInput.trim() || priorFollowupSending || priorFollowupComplete}
+                  className={classNames('p-2.5 rounded-xl transition-all',
+                    priorFollowupInput.trim() && !priorFollowupSending && !priorFollowupComplete
+                      ? 'bg-gradient-to-br from-teal-600 to-blue-600 text-white hover:opacity-90'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed')}>
+                  <Send size={16}/>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
   // RENDER: CASE DETAIL
   // ════════════════════════════════════════════════════════════════════════════
 
@@ -1751,7 +2008,7 @@ const HealthcareNavigatorPage: React.FC = () => {
     return (
       <AppLayout>
         <HealthBackground />
-        <div className="relative z-10 max-w-2xl mx-auto px-4 py-6 space-y-4">
+        <div className="relative z-10 max-w-2xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4">
           <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5">
             <div className="flex items-center gap-3 mb-4">
               <button onClick={() => setMode('patient-detail')} className="text-gray-400 hover:text-gray-700 p-1"><ArrowLeft size={20}/></button>
@@ -1833,8 +2090,8 @@ const HealthcareNavigatorPage: React.FC = () => {
               )}
               <div className="flex gap-2">
                 <button onClick={() => openFollowupChat(selectedPatient, a)}
-                  className="flex-1 py-2.5 text-sm font-bold rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100">
-                  Ask AI Follow-up
+                  className="flex-1 py-2.5 text-sm font-bold rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+                  Evaluate My Case History
                 </button>
                 {!a.resolved && (
                   <button onClick={async () => { await markResolved(a.id); setSelectedAssessment({ ...a, resolved: true }); }}
