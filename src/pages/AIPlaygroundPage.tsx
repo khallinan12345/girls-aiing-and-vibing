@@ -514,7 +514,7 @@ async function* streamPlayground(
   maxTokens: number,
   temperature: number,
   userId?: string,
-): AsyncGenerator<{ chunk?: string; done?: boolean; fullText?: string }> {
+): AsyncGenerator<{ chunk?: string; done?: boolean; fullText?: string; usedModel?: string; taskType?: string }> {
   const res = await fetch('/api/chat-stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -543,7 +543,15 @@ async function* streamPlayground(
       try {
         const evt = JSON.parse(line.slice(6).trim());
         if (evt.chunk) { fullText += evt.chunk; yield { chunk: evt.chunk }; }
-        if (evt.done)  { yield { done: true, fullText: evt.fullText ?? fullText }; return; }
+        if (evt.done)  {
+          yield {
+            done: true,
+            fullText:  evt.fullText ?? fullText,
+            usedModel: evt.usedModel,   // set by chat-stream for non-coding (Groq/Haiku)
+            taskType:  evt.taskType,    // 'coding' | 'non-coding'
+          };
+          return;
+        }
       } catch { /* skip malformed lines */ }
     }
   }
@@ -587,8 +595,10 @@ const getModelDisplayName = (modelId: string): string => {
   const trimmed = (modelId || '').trim();
   const match = MODEL_OPTIONS.find(m => m.value === trimmed);
   if (match) return match.label;
-  if (trimmed.includes('sonnet')) return 'Claude Sonnet 4.6';
-  if (trimmed.includes('haiku'))  return 'Claude Haiku';
+  if (trimmed.includes('sonnet'))          return 'Claude Sonnet 4.6';
+  if (trimmed.includes('haiku'))           return 'Claude Haiku 4.5';
+  if (trimmed.includes('llama-3.3-70b'))   return 'Llama 3.3 70B';
+  if (trimmed.includes('llama3.1-8b'))     return 'Llama 3.1 8B';
   return trimmed || 'Claude';
 };
 
@@ -658,6 +668,9 @@ const AIPlaygroundPage: React.FC = () => {
   const [quotaUsed, setQuotaUsed]         = useState(0);
   const [quotaWindowStart, setQuotaWindowStart] = useState<Date | null>(null);
   const [playgroundModel, setPlaygroundModel]     = useState<string>('claude-haiku-4-5-20251001'); // default Haiku — overridden by profile
+  // Tracks the model actually used for the last response (may differ from playgroundModel
+  // because chat-stream routes non-coding turns to Groq/Haiku automatically).
+  const [activeModel, setActiveModel]             = useState<string>('');   // '' = not yet sent
   const [modelLoaded, setModelLoaded]             = useState(false);
   const [showReflection, setShowReflection]       = useState(false);
   const [isDragging, setIsDragging]               = useState(false);
@@ -800,6 +813,7 @@ const AIPlaygroundPage: React.FC = () => {
     setArtifact(null);
     setShowReflection(false);
     setSessionCodeHistory([]);
+    setActiveModel('');
   };
 
   // ── Generate title ────────────────────────────────────────────────────────────
@@ -967,10 +981,11 @@ const AIPlaygroundPage: React.FC = () => {
     let estTokensOut = 0; // updated after stream completes
 
     try {
-      // ── Route by model: Sonnet → streaming Edge function, others → free-tier chain ──
-      const streamGen = playgroundModel === 'claude-sonnet-4-6'
-        ? streamPlayground(apiMessages, SYSTEM_PROMPT, playgroundModel, 32000, 0.3, user?.id)
-        : chatPlaygroundFree(apiMessages, SYSTEM_PROMPT, 32000, 0.3, user?.id);
+      // ── Always route through chat-stream, which classifies and picks the model ──
+      // chat-stream.js handles: coding → Sonnet, non-coding → Groq → Haiku.
+      // We still pass playgroundModel so the user's explicit Sonnet preference is respected.
+      setActiveModel('…');  // show spinner label while waiting
+      const streamGen = streamPlayground(apiMessages, SYSTEM_PROMPT, playgroundModel, 32000, 0.3, user?.id);
 
       // ── Consume stream: prose → chat bubble, code → artifact panel ────────────
       let lineBuffer = '';
@@ -1014,6 +1029,10 @@ const AIPlaygroundPage: React.FC = () => {
       for await (const evt of streamGen) {
         if (evt.done) {
           fullText = evt.fullText ?? fullText;
+          // Update active model label from what chat-stream actually used
+          if (evt.usedModel) setActiveModel(evt.usedModel);
+          else if (evt.taskType === 'coding') setActiveModel('claude-sonnet-4-6');
+          else setActiveModel(playgroundModel);
           // Re-extract codeText from fullText as authoritative source
           // (streaming line-by-line can miss content if stream was batched)
           const fenceOpen  = fullText.indexOf('\n```');
@@ -1125,6 +1144,8 @@ const AIPlaygroundPage: React.FC = () => {
       if (activeChatId) setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...updatedMessages, errorMsg] } : c));
     } finally {
       setSending(false);
+      // If activeModel is still '…' (e.g. error before done event), reset to configured model
+      setActiveModel(prev => prev === '…' ? playgroundModel : prev);
       // Update quota optimistically from local estimates, then sync from DB after a delay
       setQuotaUsed(prev => prev + estTokensIn + estTokensOut);
       setTimeout(() => fetchQuota(), 8000); // DB write may lag — sync after 8s
@@ -1473,14 +1494,23 @@ const AIPlaygroundPage: React.FC = () => {
                 placeholder={quotaUsed >= QUOTA_TOKENS ? 'Quota reached — please wait for reset' : 'Message Claude...'} rows={1} disabled={sending || !modelLoaded || quotaUsed >= QUOTA_TOKENS}
                 className="flex-1 resize-none outline-none text-base text-gray-800 placeholder-gray-400 bg-transparent min-h-[24px] max-h-[200px] leading-6" />
               <span
-                className={`flex-shrink-0 text-xs mb-0.5 pr-1 font-medium ${
-                  playgroundModel === 'claude-sonnet-4-6'
+                className={`flex-shrink-0 text-xs mb-0.5 pr-1 font-medium transition-colors ${
+                  (activeModel || playgroundModel) === 'claude-sonnet-4-6'
                     ? 'text-violet-600'
-                    : 'text-gray-400'
+                    : (activeModel || playgroundModel).includes('llama') || (activeModel || playgroundModel).includes('groq')
+                      ? 'text-emerald-600'
+                      : 'text-gray-400'
                 }`}
-                title={`model: ${playgroundModel} | loaded: ${modelLoaded}`}
+                title={`active: ${activeModel || playgroundModel} | configured: ${playgroundModel} | loaded: ${modelLoaded}`}
               >
-                {modelLoaded ? getModelDisplayName(playgroundModel) : '…'}
+                {!modelLoaded
+                  ? '…'
+                  : activeModel === '…'
+                    ? '…'
+                    : activeModel
+                      ? getModelDisplayName(activeModel)
+                      : getModelDisplayName(playgroundModel)
+                }
               </span>
               <button onClick={toggleVoiceInput} disabled={sending}
                 className={`flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all mb-0.5 ${isListening ? 'bg-red-500 text-white animate-pulse' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}>
