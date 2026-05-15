@@ -7,10 +7,13 @@
 //
 //   page = 'VibeCodingPage' | 'WebDevelopmentPage' |
 //          'FullStackDevelopmentPage' | 'AIWorkflowDevPage'
-//     → taskType === 'coding'
+//     → taskType === 'coding'  (code generation, debugging, refactoring)
 //         → Anthropic claude-haiku-4-5-20251001 (cost-efficient for code tasks)
-//     → taskType !== 'coding' (explanations, planning, general Q&A)
+//     → taskType !== 'coding'  (evaluation, planning, help popup, critique, task instructions, Q&A)
 //         → Groq (primary) → Gemini → Cloudflare → OpenRouter → Mistral → DeepSeek → Anthropic Haiku (final)
+//         NOTE: This now applies to WebDevelopmentPage too — evaluation, help, and
+//         task-instruction calls from WebDevelopmentPage all go through the free-tier
+//         chain with Haiku as the final fallback, not Haiku as the primary.
 //
 //   page = 'AIPlaygroundPage'
 //     → Anthropic claude-haiku-4-5-20251001 (default)
@@ -190,13 +193,20 @@ function resolveRoute(page, playgroundModel, taskType) {
     return { provider: 'groq', model: GROQ_MODEL };
   }
 
-  // Hybrid coding pages → Haiku for coding, free-tier for everything else
+  // Hybrid coding pages:
+  //   taskType === 'coding'     → Haiku (code generation needs reliability)
+  //   taskType === 'non-coding' → free-tier chain, Haiku as final fallback
+  //   taskType omitted          → 'non-coding' for WebDevelopmentPage
+  //                               (evaluation, help popup, task instructions omit taskType)
+  //                             → 'coding' for all other hybrid pages (safe default)
   if (HYBRID_CODING_PAGES.has(page)) {
-    if (taskType === 'non-coding') {
-      return { provider: 'groq', model: GROQ_MODEL };
+    const isCoding = taskType === 'coding'
+      || (taskType == null && page !== 'WebDevelopmentPage');
+    if (isCoding) {
+      return { provider: 'anthropic', model: ANTHROPIC_HAIKU };
     }
-    // Default to Haiku (coding) if taskType is 'coding' or omitted
-    return { provider: 'anthropic', model: ANTHROPIC_HAIKU };
+    // non-coding (or WebDevelopmentPage with no taskType) → free-tier chain
+    return { provider: 'groq', model: GROQ_MODEL };
   }
 
   // AIPlaygroundPage → Sonnet if profile set, otherwise free-tier chain
