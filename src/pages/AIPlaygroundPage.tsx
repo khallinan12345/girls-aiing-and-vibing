@@ -1040,6 +1040,59 @@ const AIPlaygroundPage: React.FC = () => {
   };
 
 
+  // ── Request scope check: is the first message in a chat too broad? ─────────────
+  // Returns true if the request asks for multiple changes / a full build.
+  // Only called on the very first user turn (messages.length === 0).
+  const checkRequestScope = async (userText: string): Promise<boolean> => {
+    if (userText.length < 80) return false; // short messages are always focused
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page: 'AIPlaygroundPage',
+          messages: [{
+            role: 'user',
+            content: `Is this request asking for multiple changes, a full build, or is it vague/broad? Reply ONLY "broad" or "focused".\n\nRequest: "${userText.slice(0, 400)}"`,
+          }],
+          max_tokens: 5,
+          temperature: 0,
+        }),
+      });
+      const data = await res.json();
+      const label = (data?.content?.[0]?.text ?? data?.choices?.[0]?.message?.content ?? '').trim().toLowerCase();
+      return label.startsWith('broad');
+    } catch { return false; }
+  };
+
+  // ── Topic drift check: has the user shifted to a new subject mid-chat? ─────────
+  // Returns true if the latest user message is clearly about a different topic
+  // than the first message in the conversation.
+  // Only called when there are already ≥ 2 messages (i.e. mid-conversation).
+  const checkTopicDrift = async (currentMessages: ChatMessage[], newUserText: string): Promise<boolean> => {
+    if (currentMessages.length < 2) return false;
+    const firstUserMsg = currentMessages.find(m => m.role === 'user')?.content ?? '';
+    if (!firstUserMsg || firstUserMsg === newUserText) return false;
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page: 'AIPlaygroundPage',
+          messages: [{
+            role: 'user',
+            content: `Original topic: "${firstUserMsg.slice(0, 200)}"\n\nNew message: "${newUserText.slice(0, 200)}"\n\nAre these about the same topic? Reply ONLY "same" or "new".`,
+          }],
+          max_tokens: 5,
+          temperature: 0,
+        }),
+      });
+      const data = await res.json();
+      const label = (data?.content?.[0]?.text ?? data?.choices?.[0]?.message?.content ?? '').trim().toLowerCase();
+      return label.startsWith('new');
+    } catch { return false; }
+  };
+
   const handleSend = async () => {
     if ((!userInput.trim() && !attachments.length) || sending || !user?.id) return;
     const userMsg: ChatMessage = {
@@ -1055,6 +1108,52 @@ const AIPlaygroundPage: React.FC = () => {
     setShowReflection(false);
 
     const updatedMessages = [...messages, userMsg];
+
+    // ── Scope check (first turn only) ────────────────────────────────────────
+    // If the very first message is too broad, return a coaching message immediately
+    // without hitting Sonnet. Cost: one tiny Haiku call via /api/chat.
+    if (messages.length === 0) {
+      const isBroad = await checkRequestScope(currentInput);
+      if (isBroad) {
+        const coachMsg: ChatMessage = {
+          role: 'assistant',
+          content: "That sounds like a big project! 🙌 To keep things focused — and to help make AI affordable for everyone on this platform — let's tackle **one specific thing at a time**.\n\nWhat's the single most important change or question you want to start with?",
+          timestamp: new Date().toISOString(),
+        };
+        // Show coaching inline without creating a DB chat
+        const { data: newChat } = await supabase
+          .from('ai_playground_chats')
+          .insert({ user_id: user.id, title: currentInput.slice(0, 40) || 'New Chat', messages: [userMsg, coachMsg], model: playgroundModel, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .select().single();
+        if (newChat) {
+          setChats(prev => [newChat, ...prev]);
+          justCreatedChatRef.current = true;
+          setActiveChatId(newChat.id);
+        }
+        setSending(false);
+        return;
+      }
+    }
+
+    // ── Topic drift check (mid-conversation) ─────────────────────────────────
+    // If the user has shifted to a new topic, close this chat and prompt a new one.
+    if (messages.length >= 2) {
+      const isDrift = await checkTopicDrift(messages, currentInput);
+      if (isDrift) {
+        const driftMsg: ChatMessage = {
+          role: 'assistant',
+          content: "It looks like you're moving on to a new topic — great progress on this one! 🎉\n\nTo keep AI costs down so this platform can reach more people, please **start a fresh chat** for your new request. Just click **New Chat** in the sidebar.\n\nYour conversation here is saved and you can come back to it anytime.",
+          timestamp: new Date().toISOString(),
+        };
+        const finalMessages = [...updatedMessages, driftMsg];
+        if (activeChatId) {
+          await supabase.from('ai_playground_chats').update({ messages: finalMessages, updated_at: new Date().toISOString() }).eq('id', activeChatId);
+          setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: finalMessages } : c));
+        }
+        setSending(false);
+        return;
+      }
+    }
 
     // ── Token-aware message preparation ─────────────────────────────────────
     // 1. Expand attachments into content strings
@@ -1508,6 +1607,13 @@ const AIPlaygroundPage: React.FC = () => {
                   Ask anything — code help, research, writing, math, business ideas, or just exploring.<br />
                   I'll help you think it through and understand, not just give you the answer.
                 </p>
+                {/* Focused-request instruction */}
+                <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 max-w-sm text-left">
+                  <p className="text-xs font-semibold text-amber-800 mb-1">💡 To keep AI affordable for everyone</p>
+                  <p className="text-xs text-amber-700 leading-relaxed">
+                    Keep each chat focused on <strong>one change or question</strong>. If you want to work on something new, start a fresh chat — it keeps things clear and helps the platform reach more people.
+                  </p>
+                </div>
                 {branding.isReady && (
                   <p className="mt-3 text-xs italic text-purple-600 max-w-xs">
                     Built for the young people using {branding.institutionName}.
