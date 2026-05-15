@@ -38,7 +38,7 @@
 // followed by ":" or "—") so it handles the natural free-text format learners use.
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { logApiCost } from '../lib/api-cost-logger';
+import { logApiCost } from '../lib/api-cost-logger.js';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL_SONNET      = 'claude-sonnet-4-5-20251001'
