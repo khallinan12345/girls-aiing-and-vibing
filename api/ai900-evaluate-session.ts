@@ -7,6 +7,36 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL             = 'claude-sonnet-4-6';
 
+// ─── Cost logger (fire-and-forget) ───────────────────────────────────────────
+function logCost(action: string, inputTokens: number, outputTokens: number) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey || (!inputTokens && !outputTokens)) return;
+  const MTok = 1_000_000;
+  const estimatedCost = (inputTokens / MTok) * 3.00 + (outputTokens / MTok) * 15.00;
+  fetch(`${supabaseUrl}/rest/v1/api_cost_log`, {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'apikey':        supabaseKey,
+      'Authorization': `Bearer ${supabaseKey}`,
+      'Prefer':        'return=minimal',
+    },
+    body: JSON.stringify({
+      page:               'AI900Page',
+      provider:           'anthropic',
+      model:              MODEL,
+      action,
+      input_tokens:       inputTokens,
+      output_tokens:      outputTokens,
+      cache_hit_tokens:   0,
+      cache_write_tokens: 0,
+      estimated_cost_usd: estimatedCost,
+      logged_at:          new Date().toISOString(),
+    }),
+  }).catch(() => {});
+}
+
 async function callClaude(system: string, user: string, maxTokens = 1800): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
@@ -33,6 +63,7 @@ async function callClaude(system: string, user: string, maxTokens = 1800): Promi
   }
 
   const data = await res.json();
+  logCost('evaluate', data.usage?.input_tokens ?? 0, data.usage?.output_tokens ?? 0);
   return data.content?.[0]?.text ?? '';
 }
 
