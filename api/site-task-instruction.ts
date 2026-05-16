@@ -8,6 +8,43 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 const ANTHROPIC_URL   = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 
+// ─── Cost logger (fire-and-forget, mirrors chat.js pattern) ──────────────────
+function logCost(inputTokens: number, outputTokens: number, cacheHitTokens = 0, cacheWriteTokens = 0) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey || (!inputTokens && !outputTokens)) return;
+
+  const MTok = 1_000_000;
+  const standardInput = Math.max(0, inputTokens - cacheHitTokens - cacheWriteTokens);
+  const estimatedCost =
+    (standardInput    / MTok) * 3.00  +
+    (cacheWriteTokens / MTok) * 3.75  +
+    (cacheHitTokens   / MTok) * 0.30  +
+    (outputTokens     / MTok) * 15.00;
+
+  fetch(`${supabaseUrl}/rest/v1/api_cost_log`, {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'apikey':        supabaseKey,
+      'Authorization': `Bearer ${supabaseKey}`,
+      'Prefer':        'return=minimal',
+    },
+    body: JSON.stringify({
+      page:               'WebDevelopmentPage',
+      provider:           'anthropic',
+      model:              ANTHROPIC_MODEL,
+      action:             'generate',
+      input_tokens:       inputTokens,
+      output_tokens:      outputTokens,
+      cache_hit_tokens:   cacheHitTokens,
+      cache_write_tokens: cacheWriteTokens,
+      estimated_cost_usd: estimatedCost,
+      logged_at:          new Date().toISOString(),
+    }),
+  }).catch(() => {}); // never block the response for logging
+}
+
 interface SubTaskSeed { teaching: string; question: string; }
 interface TaskSeed { focus: string; steps: [SubTaskSeed, SubTaskSeed, SubTaskSeed]; }
 
@@ -269,6 +306,12 @@ Write the full instruction with teaching commentary for all 3 steps.`;
       throw new Error(`Anthropic API error (${_response.status}): ${(_err as any)?.error?.message || 'Unknown'}`);
     }
     const _completion = await _response.json();
+    logCost(
+      _completion.usage?.input_tokens                ?? 0,
+      _completion.usage?.output_tokens               ?? 0,
+      _completion.usage?.cache_read_input_tokens     ?? 0,
+      _completion.usage?.cache_creation_input_tokens ?? 0,
+    );
     const raw     = _completion.content?.[0]?.text || '{}';
     const cleaned = raw.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
 
