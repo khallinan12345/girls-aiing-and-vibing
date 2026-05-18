@@ -85,7 +85,7 @@ import AnimalHusbandryPage from './pages/community-impact/AnimalHusbandryPage';
 
 // Research Pages
 import ResearchAILearningLab from './pages/research/ResearchAILearningLab';
-import IGiTREEResearchPage from './pages/research/IGiTREEResearchPage';
+import IGiTREEResearchPage from './pages/research/ResearchIGiTREE';
 
 const AppContent: React.FC = () => {
   const location = useLocation();
