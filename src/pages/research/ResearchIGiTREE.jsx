@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 
 // ─── DESIGN TOKENS — iGiTREE palette ─────────────────────────────────────────
 const C = {
@@ -170,7 +171,7 @@ const IGTREE_PROJECT = {
           id: "g3_2", name: "Population Genomics Data Exploration",
           status: "locked", due: "Month 11–13",
           validation: "Supervised data exploration report reviewed by co-PI",
-          description: "Explore anonymized population genomic datasets. Identify population clusters, allele frequency distributions, and variants of potential clinical significance under bioinformatics supervision.",
+          description: "Explore anonymized population genomic datasets. Identify population clusters, allele frequency distributions, and variants of potential clinical significance.",
           aiRole: "scaffold",
           outputs: ["Exploratory analysis report", "Annotated visualizations"],
           supervisionLevel: "indirect",
@@ -188,7 +189,7 @@ const IGTREE_PROJECT = {
           id: "g3_4", name: "Database Contribution — NCBI / H3Africa",
           status: "locked", due: "Month 15–16",
           validation: "Submission confirmation + accession numbers logged",
-          description: "Assist with preparation of environmental and biodiversity eDNA datasets for deposit to NCBI and African genomic repositories. Understand open science data standards.",
+          description: "Assist with preparation of environmental and biodiversity eDNA datasets for deposit to NCBI and African genomic repositories.",
           aiRole: "scaffold",
           outputs: ["Submission documentation", "Accession number log"],
           supervisionLevel: "indirect",
@@ -197,7 +198,7 @@ const IGTREE_PROJECT = {
           id: "g3_5", name: "Manuscript Contribution — Methods & Youth Section",
           status: "locked", due: "Month 16–18",
           validation: "Co-author attribution confirmed by PI + draft section submitted",
-          description: "Draft the methods section describing youth researcher contributions and the capacity-building model. This section is publishable as a standalone paper in Global Health Education.",
+          description: "Draft the methods section describing youth researcher contributions and the capacity-building model.",
           aiRole: "scaffold",
           outputs: ["Draft methods section", "Capacity-building narrative"],
           supervisionLevel: "indirect",
@@ -207,14 +208,10 @@ const IGTREE_PROJECT = {
   ]
 };
 
-// ─── PLATFORM CONTEXT ────────────────────────────────────────────────────────
+// ─── PLATFORM CONTEXT ─────────────────────────────────────────────────────────
 const PLATFORM_CONTEXT = {
   siteActive: "Kigali, Rwanda",
   pilotCohortSize: 12,
-  samplesCollectedHuman: 0,
-  samplesCollectedLivestock: 0,
-  ednaSamplesCollected: 0,
-  qaPassRate: null,
   phaseStatus: "Phase 1 active — consent and protocol training",
   keyPartners: "iGiTREE (Kigali), Roslin Institute, Rwanda Biomedical Centre, Rwanda Agricultural Board",
   illuminaPlatform: "iScan genotyping arrays",
@@ -237,6 +234,7 @@ const css = `
     font-family: 'Cormorant Garamond', Georgia, serif;
   }
 
+  /* ── TOPBAR ── */
   .ig-topbar {
     background: ${C.ink};
     padding: 0 28px;
@@ -257,6 +255,23 @@ const css = `
     font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
     color: ${C.sage}; font-weight: 500;
   }
+  .ig-topbar-right {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .ig-back-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 6px;
+    background: ${C.forestLt}22; border: 1px solid ${C.forestLt}44;
+    color: ${C.sage}; font-size: 12px; font-weight: 500;
+    cursor: pointer; transition: all 0.2s;
+    font-family: 'DM Sans', sans-serif; white-space: nowrap;
+    text-decoration: none;
+  }
+  .ig-back-btn:hover {
+    background: ${C.forestLt}44; color: ${C.white};
+    border-color: ${C.forestLt}88;
+  }
+  .ig-back-arrow { font-size: 14px; line-height: 1; }
   .ig-user {
     display: flex; align-items: center; gap: 8px;
     font-size: 12px; color: rgba(255,255,255,0.6);
@@ -268,6 +283,7 @@ const css = `
     font-size: 10px; color: ${C.sage}; font-weight: 700;
   }
 
+  /* ── BREADCRUMB ── */
   .ig-breadcrumb {
     display: flex; align-items: center; gap: 6px;
     padding: 10px 28px; background: ${C.forest}11;
@@ -281,6 +297,7 @@ const css = `
   }
   .ig-bc-btn:hover { background: ${C.forestLt}18; }
 
+  /* ── SUPERVISION BADGE ── */
   .supervision-badge {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 3px 10px; border-radius: 10px; font-size: 10px;
@@ -295,6 +312,7 @@ const css = `
     border: 1px solid ${C.amber}44;
   }
 
+  /* ── AI ROLE BADGE ── */
   .ai-role-badge {
     display: inline-flex; align-items: center; gap: 4px;
     padding: 2px 8px; border-radius: 8px; font-size: 10px;
@@ -303,6 +321,7 @@ const css = `
     border: 1px solid ${C.slate}22;
   }
 
+  /* ── HERO ── */
   .ig-hero {
     background: linear-gradient(150deg, ${C.ink} 0%, ${C.forest} 55%, ${C.forestMd}99 100%);
     padding: 52px 28px 44px; position: relative; overflow: hidden;
@@ -320,21 +339,21 @@ const css = `
   }
   .ig-eyebrow {
     font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
-    color: ${C.amber}; font-weight: 600; margin-bottom: 14px;
+    color: ${C.amberLt}; font-weight: 600; margin-bottom: 14px;
   }
   .ig-hero-title {
     font-size: 36px; font-weight: 700; color: ${C.white};
     line-height: 1.1; max-width: 600px; margin-bottom: 8px;
   }
-  .ig-hero-title span { color: ${C.amber}; font-style: italic; }
+  .ig-hero-title span { color: ${C.amberLt}; font-style: italic; }
   .ig-hero-tagline {
-    font-size: 13px; color: ${C.sage}; margin-bottom: 20px;
-    letter-spacing: 0.5px;
+    font-size: 14px; color: ${C.sage}; margin-bottom: 20px;
+    letter-spacing: 0.5px; font-weight: 500;
   }
   .ig-hero-desc {
-    font-size: 14px; color: rgba(255,255,255,0.6);
-    max-width: 560px; line-height: 1.65; margin-bottom: 28px;
-    font-weight: 300;
+    font-size: 15px; color: rgba(255,255,255,0.88);
+    max-width: 560px; line-height: 1.7; margin-bottom: 28px;
+    font-weight: 400;
   }
   .ig-hero-stats { display: flex; gap: 28px; flex-wrap: wrap; }
   .ig-stat-val {
@@ -346,17 +365,19 @@ const css = `
     text-transform: uppercase; margin-top: 3px;
   }
 
+  /* ── SUPERVISION WARNING BANNER ── */
   .supervision-banner {
     background: ${C.forest}18; border: 1px solid ${C.forestLt}33;
-    border-left: 4px solid ${C.amber};
+    border-left: 4px solid ${C.amber}; border-radius: 0;
     padding: 12px 28px; font-size: 13px; color: ${C.forest};
     display: flex; align-items: center; gap: 10px;
   }
 
+  /* ── PARTNER STRIP ── */
   .partner-strip {
     background: ${C.parchment}; border-bottom: 1px solid ${C.sand};
     padding: 10px 28px; display: flex; gap: 8px; align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: wrap; overflow-x: auto;
   }
   .partner-chip {
     font-size: 11px; padding: 3px 10px; border-radius: 10px;
@@ -368,6 +389,7 @@ const css = `
     color: ${C.muted}; font-weight: 600; margin-right: 4px;
   }
 
+  /* ── PHASE RAIL ── */
   .ig-phase-rail {
     display: flex; overflow-x: auto;
     border-bottom: 1px solid ${C.sand};
@@ -384,13 +406,17 @@ const css = `
     color: ${C.forest}; border-bottom-color: ${C.amber}; font-weight: 600;
   }
   .ig-phase-tab.locked { opacity: 0.35; cursor: not-allowed; }
-  .ig-phase-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .ig-phase-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+  }
   .ig-phase-dot.complete { background: ${C.success}; }
   .ig-phase-dot.active   { background: ${C.amber}; box-shadow: 0 0 0 3px ${C.amber}33; }
   .ig-phase-dot.locked   { background: ${C.sandDk}; }
 
+  /* ── MAIN BODY ── */
   .ig-body { display: flex; min-height: calc(100vh - 300px); }
 
+  /* ── TASK LIST ── */
   .ig-task-list {
     width: 300px; flex-shrink: 0; border-right: 1px solid ${C.sand};
     background: ${C.white}; overflow-y: auto;
@@ -405,22 +431,28 @@ const css = `
     border-left: 3px solid transparent;
   }
   .ig-task-item:hover { background: ${C.cream}; }
-  .ig-task-item.active { background: ${C.parchment}; border-left-color: ${C.amber}; }
+  .ig-task-item.active {
+    background: ${C.parchment}; border-left-color: ${C.amber};
+  }
   .ig-task-item.locked { opacity: 0.4; cursor: not-allowed; }
   .ig-task-name { font-size: 13px; font-weight: 600; color: ${C.forest}; margin-bottom: 4px; }
   .ig-task-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  .ig-task-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .ig-task-dot {
+    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  }
   .ig-task-dot.complete { background: ${C.success}; }
   .ig-task-dot.active   { background: ${C.amber}; }
   .ig-task-dot.pending  { background: ${C.sandDk}; }
   .ig-task-dot.locked   { background: ${C.sand}; }
 
+  /* ── TASK DETAIL ── */
   .ig-detail { flex: 1; padding: 24px 28px; background: ${C.cream}; overflow-y: auto; }
   .ig-detail-empty {
     display: flex; flex-direction: column; align-items: center;
     justify-content: center; height: 300px; color: ${C.muted};
     text-align: center; gap: 10px;
   }
+
   .ig-detail-phase {
     font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
     color: ${C.amber}; font-weight: 600; margin-bottom: 6px;
@@ -435,6 +467,7 @@ const css = `
     border: 1px solid ${C.sand}; color: ${C.mid}; background: ${C.white};
   }
 
+  /* ── SAFETY NOTICE ── */
   .safety-notice {
     padding: 10px 14px; border-radius: 8px; margin-bottom: 14px;
     background: ${C.warn}14; border: 1px solid ${C.amber}44;
@@ -442,6 +475,7 @@ const css = `
     display: flex; gap: 8px; align-items: flex-start;
   }
 
+  /* ── INFO GRID ── */
   .ig-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
   .ig-info-card {
     background: ${C.white}; border: 1px solid ${C.sand};
@@ -454,6 +488,7 @@ const css = `
   }
   .ig-info-body { font-size: 12px; color: ${C.charcoal}; line-height: 1.55; }
 
+  /* ── OUTPUTS LIST ── */
   .output-list { margin: 0 0 14px; padding: 0; list-style: none; }
   .output-item {
     display: flex; align-items: center; gap: 7px;
@@ -463,6 +498,7 @@ const css = `
   .output-item:last-child { border-bottom: none; }
   .output-dot { width: 5px; height: 5px; border-radius: 50%; background: ${C.amber}; flex-shrink: 0; }
 
+  /* ── AI DISCLAIMER ── */
   .ai-scope-notice {
     background: ${C.slate}08; border: 1px solid ${C.slate}22;
     border-left: 3px solid ${C.slate}; border-radius: 6px;
@@ -471,6 +507,7 @@ const css = `
   }
   .ai-scope-notice strong { color: ${C.forest}; }
 
+  /* ── PRIOR ENTRIES ── */
   .prior-entry {
     background: ${C.white}; border: 1px solid ${C.sand};
     border-radius: 7px; padding: 11px 13px; margin-bottom: 7px;
@@ -481,6 +518,7 @@ const css = `
     font-size: 10px; color: ${C.muted};
   }
 
+  /* ── FIELD LOG BOX ── */
   .field-log-box {
     background: ${C.white}; border: 1.5px solid ${C.sand};
     border-radius: 8px; overflow: hidden; margin-top: 14px;
@@ -510,6 +548,7 @@ const css = `
   .save-btn:hover { background: ${C.forestMd}; }
   .save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+  /* ── AI PANEL ── */
   .ig-ai-panel {
     background: ${C.white}; border: 1px solid ${C.sand};
     border-radius: 10px; overflow: hidden; margin-top: 16px;
@@ -600,6 +639,7 @@ const css = `
   .ig-send-btn:hover { background: ${C.forestMd}; }
   .ig-send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
+  /* ── TOAST ── */
   .ig-toast {
     position: fixed; bottom: 20px; right: 20px;
     background: ${C.forest}; color: white; padding: 10px 16px;
@@ -611,7 +651,7 @@ const css = `
   @keyframes igSlideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 `;
 
-// ─── AI ROLE DESCRIPTIONS ────────────────────────────────────────────────────
+// ─── AI ROLE DESCRIPTIONS ─────────────────────────────────────────────────────
 const AI_ROLE_LABELS = {
   explain:   { label: "Explain only",        desc: "AI explains concepts and background. No procedural guidance — all process decisions go to your supervisor." },
   document:  { label: "Document help",       desc: "AI helps you structure and write field logs and records. AI does not guide sample handling or consent decisions." },
@@ -631,9 +671,9 @@ function useIGAI(taskContext) {
 
     const boundaryInstructions = {
       explain: `Your role is EXPLAIN ONLY. You can explain scientific concepts, terminology, and background. You CANNOT guide specific procedural steps in sample collection or consent. Always remind the researcher to verify procedural questions with their supervisor.`,
-      document: `Your role is DOCUMENTATION HELP. You can help structure field log entries and draft text the researcher can edit. You CANNOT guide consent conversations or sample handling steps. Note that required fields should be confirmed with the supervisor.`,
-      assist_qa: `Your role is QA PATTERN DETECTION SUPPORT. You can explain what makes a good vs. anomalous data record and help draft anomaly flag reports. You CANNOT make final QA decisions. All flagging decisions must go to the bioinformatics lead.`,
-      scaffold: `Your role is SCAFFOLD & DRAFT. You can walk the researcher through analysis steps, explain bioinformatic methods, and generate clearly marked draft text. Note when a question exceeds your scope and needs the PI or bioinformatics lead.`,
+      document: `Your role is DOCUMENTATION HELP. You can help structure field log entries and draft text the researcher can edit. You CANNOT guide consent conversations or sample handling steps.`,
+      assist_qa: `Your role is QA PATTERN DETECTION SUPPORT. You can explain what makes a good vs. anomalous data record and help draft anomaly flag reports. All flagging decisions must go to the bioinformatics lead.`,
+      scaffold: `Your role is SCAFFOLD & DRAFT. You can walk the researcher through analysis steps, explain bioinformatic methods, and generate clearly marked draft text. Note when a question needs the PI or bioinformatics lead.`,
     };
 
     return `You are a research assistant for the iGiTREE Genomics & Biodiversity Platform, supporting youth researchers (ages 18–26) in Kigali, Rwanda.
@@ -643,7 +683,7 @@ THIS IS SUPERVISED SCIENTIFIC RESEARCH. Youth work under direct scientific super
 CURRENT TASK CONTEXT:
 - Phase: ${taskContext?.phaseName}
 - Task: ${taskContext?.taskName}
-- Supervision level: ${taskContext?.supervisionLevel === "direct" ? "DIRECT — supervisor must be physically present" : "Indirect — supervisor available by communication"}
+- Supervision level: ${taskContext?.supervisionLevel === 'direct' ? 'DIRECT — supervisor must be physically present' : 'Indirect — supervisor available by communication'}
 - Validation required: ${taskContext?.validation}
 
 YOUR SPECIFIC ROLE FOR THIS TASK:
@@ -656,12 +696,8 @@ STUDY CONTEXT:
 - Partners: ${ctx.keyPartners}
 - Technology: Illumina ${ctx.illuminaPlatform}
 
-KEY SCIENTIFIC BACKGROUND:
-- Less than 3% of GWAS participants are of African ancestry — this research directly fills that gap
-- Inyambo cattle are genetically under-characterized; data supports food security and conservation goals
-- Rwanda retains national data sovereignty over all genomic data generated in-country
-
-TONE: Clear and accessible (researchers are 18–26, new to genomics). Encouraging but precise. When generating draft text, mark it: <<DRAFT START>> ... <<DRAFT END>>. Keep responses to 2–4 paragraphs unless more detail is requested.`;
+When generating draft text, mark it clearly: <<DRAFT START>> ... <<DRAFT END>>
+Keep responses focused: 2–4 short paragraphs unless more detail is explicitly needed.`;
   }, [taskContext]);
 
   const initConversation = useCallback(async () => {
@@ -687,17 +723,14 @@ TONE: Clear and accessible (researchers are 18–26, new to genomics). Encouragi
       const text = data.content?.find(b => b.type === "text")?.text || "";
       setMessages([{ role: "ai", text, ts: Date.now() }]);
     } catch {
-      setMessages([{ role: "ai", text: `Hi — I'm your research assistant for the iGiTREE study. For this task (${taskContext?.taskName}), I can help you ${AI_ROLE_LABELS[taskContext?.aiRole]?.desc?.toLowerCase() || "understand the background"}. Where would you like to start?`, ts: Date.now() }]);
+      setMessages([{ role: "ai", text: `Hi — I'm your research assistant for the iGiTREE study. For this task (${taskContext?.taskName}), I can help you ${AI_ROLE_LABELS[taskContext?.aiRole]?.desc?.toLowerCase() || 'understand the background'}. Where would you like to start?`, ts: Date.now() }]);
     }
     setLoading(false);
   }, [systemPrompt, taskContext]);
 
   const send = useCallback(async (userMsg, history) => {
     setLoading(true);
-    const msgs = [
-      ...history.map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text })),
-      { role: "user", content: userMsg },
-    ];
+    const msgs = [...history.map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text })), { role: "user", content: userMsg }];
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -762,9 +795,7 @@ function IGAIPanel({ task, phase, onUseDraft }) {
   const msgsRef = useRef(null);
 
   useEffect(() => { if (task) initConversation(); }, [task?.id]);
-  useEffect(() => {
-    if (msgsRef.current) msgsRef.current.scrollTop = msgsRef.current.scrollHeight;
-  }, [messages]);
+  useEffect(() => { if (msgsRef.current) msgsRef.current.scrollTop = msgsRef.current.scrollHeight; }, [messages]);
 
   const handleSend = () => {
     if (!input.trim() || loading) return;
@@ -844,7 +875,6 @@ function IGTaskDetail({ task, phase }) {
 
   return (
     <div className="ig-detail">
-      {/* Header */}
       <div style={{ marginBottom: 16, paddingBottom: 14, borderBottom: `1px solid ${C.sand}` }}>
         <div className="ig-detail-phase">{phase?.name} · iGiTREE Genomics</div>
         <div className="ig-detail-title">{task?.name}</div>
@@ -925,11 +955,7 @@ function IGTaskDetail({ task, phase }) {
           <span className="field-log-note">
             {task?.supervisionLevel === "direct" ? "Supervisor countersignature required for final submission." : "Faculty review before badge issuance."}
           </span>
-          <button
-            className="save-btn"
-            onClick={() => { setSaved(true); showToast("Field log saved ✓"); setTimeout(() => setSaved(false), 2000); }}
-            disabled={!log.trim()}
-          >
+          <button className="save-btn" onClick={() => { setSaved(true); showToast("Field log saved ✓"); setTimeout(() => setSaved(false), 2000); }} disabled={!log.trim()}>
             {saved ? "Saved ✓" : "Save Log"}
           </button>
         </div>
@@ -945,6 +971,7 @@ function IGTaskDetail({ task, phase }) {
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function IGiTREEResearchPage() {
   const proj = IGTREE_PROJECT;
+  const navigate = useNavigate();
   const [activePhaseId, setActivePhaseId] = useState(1);
   const [activeTaskId, setActiveTaskId] = useState(null);
 
@@ -962,15 +989,24 @@ export default function IGiTREEResearchPage() {
           <div className="ig-divider" />
           <span className="ig-section">Genomics Research</span>
         </div>
-        <div className="ig-user">
-          <div className="ig-avatar">KM</div>
-          <span>Kagiso M.</span>
-          <span style={{ color: C.amber, fontSize: 11, marginLeft: 4 }}>Kigali</span>
+        <div className="ig-topbar-right">
+          {/* ── Return to Research button ── */}
+          <button className="ig-back-btn" onClick={() => navigate("/research/ai-learning-lab")}>
+            <span className="ig-back-arrow">←</span>
+            Return to Research
+          </button>
+          <div className="ig-user">
+            <div className="ig-avatar">KM</div>
+            <span>Kagiso M.</span>
+            <span style={{ color: C.amber, fontSize: 11, marginLeft: 4 }}>Kigali</span>
+          </div>
         </div>
       </div>
 
       {/* Breadcrumb */}
       <div className="ig-breadcrumb">
+        <button className="ig-bc-btn" onClick={() => navigate("/research/ai-learning-lab")}>Research</button>
+        <span style={{ color: C.sandDk }}>›</span>
         <span style={{ color: C.charcoal, fontWeight: 500 }}>iGiTREE Genomics</span>
         {activeTask && (
           <>
@@ -982,10 +1018,10 @@ export default function IGiTREEResearchPage() {
         )}
       </div>
 
-      {/* Hero */}
+      {/* Hero — fixed contrast */}
       <div className="ig-hero">
         <div className="ig-hero-dna">🧬</div>
-        <div style={{ maxWidth: 900 }}>
+        <div style={{ maxWidth: 900, position: "relative", zIndex: 1 }}>
           <div className="ig-eyebrow">Unova Labs · iGiTREE Platform · Supervised Scientific Research</div>
           <h1 className="ig-hero-title">
             African <span>Genomics</span> &amp;<br />Biodiversity Research
@@ -993,17 +1029,22 @@ export default function IGiTREEResearchPage() {
           <div className="ig-hero-tagline">{proj.tagline}</div>
           <p className="ig-hero-desc">{proj.description}</p>
           <div className="ig-hero-stats">
-            {[
-              { val: "18 mo", lbl: "Pilot Program" },
-              { val: "3",     lbl: "Research Domains" },
-              { val: "5",     lbl: "Partner Institutions" },
-              { val: "5+",    lbl: "Target Publications" },
-            ].map(s => (
-              <div key={s.lbl}>
-                <div className="ig-stat-val">{s.val}</div>
-                <div className="ig-stat-lbl">{s.lbl}</div>
-              </div>
-            ))}
+            <div>
+              <div className="ig-stat-val">18 mo</div>
+              <div className="ig-stat-lbl">Pilot Program</div>
+            </div>
+            <div>
+              <div className="ig-stat-val">3</div>
+              <div className="ig-stat-lbl">Research Domains</div>
+            </div>
+            <div>
+              <div className="ig-stat-val">5</div>
+              <div className="ig-stat-lbl">Partner Institutions</div>
+            </div>
+            <div>
+              <div className="ig-stat-val">5+</div>
+              <div className="ig-stat-lbl">Target Publications</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1011,16 +1052,14 @@ export default function IGiTREEResearchPage() {
       {/* Supervision banner */}
       <div className="supervision-banner">
         <span>🔬</span>
-        <span>
-          <strong>Supervised scientific research.</strong> All biological sample handling and human subject interactions require direct supervisor presence. This platform supports documentation, learning, and field logging — not independent procedural decisions.
-        </span>
+        <span><strong>Supervised scientific research.</strong> All biological sample handling and human subject interactions require direct supervisor presence. This platform supports documentation, learning, and field logging — not independent procedural decisions.</span>
       </div>
 
       {/* Partner strip */}
       <div className="partner-strip">
         <span className="partner-label">Partners</span>
         {proj.partners.map(p => <span key={p} className="partner-chip">{p}</span>)}
-        <span className="partner-chip" style={{ background: C.parchment, color: C.forestLt, fontWeight: 600 }}>
+        <span className="partner-chip" style={{ background: "#F4F1EB", color: C.forestLt, fontWeight: 600 }}>
           Credential: {proj.credentialPartner}
         </span>
       </div>
@@ -1059,7 +1098,6 @@ export default function IGiTREEResearchPage() {
 
       {/* Body */}
       <div className="ig-body">
-        {/* Task list */}
         <div className="ig-task-list">
           <div className="ig-task-list-hdr">Sub-Tasks — {activePhase?.name}</div>
           {activePhase?.tasks?.map(task => (
@@ -1090,16 +1128,13 @@ export default function IGiTREEResearchPage() {
           </div>
         </div>
 
-        {/* Task detail or empty state */}
         {activeTask ? (
           <IGTaskDetail task={activeTask} phase={activePhase} />
         ) : (
           <div className="ig-detail">
             <div className="ig-detail-empty">
               <div style={{ fontSize: 40, opacity: 0.35 }}>🧬</div>
-              <div style={{ fontSize: 15, fontWeight: 600, color: C.forest, fontFamily: "'Cormorant Garamond', serif" }}>
-                Select a sub-task
-              </div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: C.forest, fontFamily: "'Cormorant Garamond', serif" }}>Select a sub-task</div>
               <div style={{ fontSize: 13, color: C.muted, maxWidth: 240 }}>
                 Choose a task to see requirements, prior progress, and your AI research assistant.
               </div>
