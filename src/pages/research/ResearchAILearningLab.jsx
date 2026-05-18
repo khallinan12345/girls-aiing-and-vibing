@@ -639,11 +639,172 @@ const css = `
     border-left: 3px solid ${C.gold};
   }
   @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ── SIDEBAR ── */
+  .rp-shell {
+    display: flex; min-height: 100vh;
+  }
+  .sidebar {
+    width: 220px; flex-shrink: 0;
+    background: ${C.navyDk};
+    border-right: 1px solid rgba(255,255,255,0.06);
+    display: flex; flex-direction: column;
+    position: sticky; top: 0; height: 100vh;
+    overflow-y: auto; z-index: 90;
+  }
+  .sidebar-logo-row {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sidebar-logo {
+    font-family: 'Playfair Display', serif;
+    font-size: 18px; font-weight: 700; color: ${C.white};
+    letter-spacing: 0.5px;
+  }
+  .sidebar-tagline {
+    font-size: 9px; color: ${C.gold}; letter-spacing: 1.5px;
+    text-transform: uppercase; font-weight: 600;
+    font-family: 'Source Serif 4', serif;
+  }
+
+  /* Home button */
+  .sidebar-home-btn {
+    display: flex; align-items: center; gap: 10px;
+    margin: 14px 12px 4px;
+    padding: 9px 12px; border-radius: 8px;
+    background: ${C.gold}18; border: 1px solid ${C.gold}44;
+    color: ${C.gold}; font-size: 12px; font-weight: 700;
+    font-family: 'Source Serif 4', serif;
+    cursor: pointer; text-decoration: none;
+    letter-spacing: 0.3px;
+    transition: background 0.18s, border-color 0.18s;
+  }
+  .sidebar-home-btn:hover {
+    background: ${C.gold}30; border-color: ${C.gold}88;
+  }
+  .sidebar-home-icon { font-size: 14px; flex-shrink: 0; }
+
+  .sidebar-section-label {
+    padding: 16px 20px 6px;
+    font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
+    color: rgba(255,255,255,0.3); font-weight: 600;
+    font-family: 'Source Serif 4', serif;
+  }
+  .sidebar-nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 20px; cursor: pointer;
+    font-size: 13px; color: rgba(255,255,255,0.58);
+    font-family: 'Source Serif 4', serif;
+    border-left: 3px solid transparent;
+    transition: all 0.15s; text-decoration: none;
+    background: none; border-top: none; border-right: none; border-bottom: none;
+    width: 100%; text-align: left;
+  }
+  .sidebar-nav-item:hover {
+    color: ${C.white}; background: rgba(255,255,255,0.05);
+  }
+  .sidebar-nav-item.active {
+    color: ${C.white}; background: rgba(255,255,255,0.07);
+    border-left-color: ${C.gold};
+    font-weight: 600;
+  }
+  .sidebar-nav-icon { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
+
+  .sidebar-divider {
+    margin: 10px 20px;
+    border: none; border-top: 1px solid rgba(255,255,255,0.07);
+  }
+  .sidebar-footer {
+    margin-top: auto; padding: 14px 20px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+  .sidebar-user-row {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sidebar-avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: ${C.gold}33; border: 1px solid ${C.gold}55;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: ${C.gold}; font-weight: 700; flex-shrink: 0;
+  }
+  .sidebar-user-name { font-size: 12px; color: rgba(255,255,255,0.7); font-weight: 500; }
+  .sidebar-user-site { font-size: 10px; color: ${C.gold}; margin-top: 1px; }
+
+  /* Main content area beside sidebar */
+  .rp-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 `;
+
 
 // ─── INJECT STYLES ──────────────────────────────────────────────────────────────
 function StyleTag() {
   return <style>{css}</style>;
+}
+
+// ─── SIDEBAR ─────────────────────────────────────────────────────────────────────
+// src/components/layout/Sidebar
+const SIDEBAR_NAV = [
+  { icon: "🔬", label: "Research",    key: "research",   href: null },
+  { icon: "🧠", label: "AI Playground", key: "playground", href: "/playground" },
+  { icon: "📋", label: "Assessments",  key: "assess",     href: "/assessments" },
+  { icon: "🏅", label: "Certifications", key: "certs",    href: "/certifications" },
+  { icon: "📊", label: "Dashboard",   key: "dashboard",  href: "/dashboard" },
+  { icon: "❤️", label: "Health",      key: "health",     href: "/health" },
+];
+
+function Sidebar({ activeKey = "research", user }) {
+  const handleNav = (href) => {
+    if (href) window.location.href = href;
+  };
+
+  return (
+    <aside className="sidebar">
+      {/* Logo */}
+      <div className="sidebar-logo-row">
+        <div>
+          <div className="sidebar-logo">vAI</div>
+          <div className="sidebar-tagline">Next Village</div>
+        </div>
+      </div>
+
+      {/* Home Button */}
+      <a
+        className="sidebar-home-btn"
+        href="https://nextvillage.community/home"
+      >
+        <span className="sidebar-home-icon">🏠</span>
+        Home
+      </a>
+
+      <hr className="sidebar-divider" />
+
+      {/* Nav */}
+      <div className="sidebar-section-label">Platform</div>
+      {SIDEBAR_NAV.map(item => (
+        <button
+          key={item.key}
+          className={`sidebar-nav-item${activeKey === item.key ? " active" : ""}`}
+          onClick={() => handleNav(item.href)}
+        >
+          <span className="sidebar-nav-icon">{item.icon}</span>
+          {item.label}
+        </button>
+      ))}
+
+      {/* Footer / User */}
+      {user && (
+        <div className="sidebar-footer">
+          <div className="sidebar-user-row">
+            <div className="sidebar-avatar">{user.initials}</div>
+            <div>
+              <div className="sidebar-user-name">{user.name}</div>
+              <div className="sidebar-user-site">{user.site}</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </aside>
+  );
 }
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────────
@@ -1272,63 +1433,82 @@ export default function ResearchPlatform() {
     <div className="rp-root">
       <StyleTag />
 
-      {/* Topbar */}
-      <div className="topbar">
-        <div className="topbar-brand">
-          <span className="topbar-logo">vAI</span>
-          <div className="topbar-divider" />
-          <span className="topbar-section">Research Program</span>
-        </div>
-        <div className="topbar-user">
-          <div className="topbar-avatar">{mockUser.initials}</div>
-          <span>{mockUser.name}</span>
-          <span style={{ color: C.gold, fontSize: 11, marginLeft: 4 }}>{mockUser.site}</span>
-        </div>
-      </div>
+      <div className="rp-shell">
+        {/* ── Sidebar ── */}
+        <Sidebar activeKey="research" user={mockUser} />
 
-      {/* Breadcrumb */}
-      <div className="breadcrumb">
-        {getBreadcrumbs().map((crumb, i) => (
-          <span key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {i > 0 && <span className="breadcrumb-sep">›</span>}
-            {crumb.action ? (
-              <button className="breadcrumb-btn" onClick={crumb.action}>{crumb.label}</button>
-            ) : (
-              <span style={{ color: C.charcoal, fontWeight: 500 }}>{crumb.label}</span>
-            )}
-          </span>
-        ))}
-      </div>
+        {/* ── Main content ── */}
+        <div className="rp-main">
 
-      {/* Views */}
-      {view === "landing" && (
-        <ResearchLanding onSelectProject={handleSelectProject} onSignup={handleSignup} />
-      )}
+          {/* Topbar */}
+          <div className="topbar">
+            <div className="topbar-brand">
+              <span className="topbar-logo">vAI</span>
+              <div className="topbar-divider" />
+              <span className="topbar-section">Research Program</span>
+            </div>
+            {/* Home button in topbar (mirrors sidebar, visible on narrow viewports) */}
+            <a
+              href="https://nextvillage.community/home"
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "5px 12px", borderRadius: 6,
+                background: `${C.gold}18`, border: `1px solid ${C.gold}44`,
+                color: C.gold, fontSize: 12, fontWeight: 700,
+                fontFamily: "'Source Serif 4', serif",
+                textDecoration: "none", letterSpacing: 0.3,
+              }}
+            >
+              🏠 Home
+            </a>
+          </div>
 
-      {view === "project" && selectedProject && (
-        <ProjectPage project={selectedProject} onBack={() => setView("landing")} />
-      )}
+          {/* Breadcrumb */}
+          <div className="breadcrumb">
+            {getBreadcrumbs().map((crumb, i) => (
+              <span key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {i > 0 && <span className="breadcrumb-sep">›</span>}
+                {crumb.action ? (
+                  <button className="breadcrumb-btn" onClick={crumb.action}>{crumb.label}</button>
+                ) : (
+                  <span style={{ color: C.charcoal, fontWeight: 500 }}>{crumb.label}</span>
+                )}
+              </span>
+            ))}
+          </div>
 
-      {view === "signup" && signupProject && (
-        <SignupForm
-          project={signupProject}
-          onSuccess={handleSignupSuccess}
-          onCancel={() => setView("landing")}
-        />
-      )}
+          {/* Views */}
+          {view === "landing" && (
+            <ResearchLanding onSelectProject={handleSelectProject} onSignup={handleSignup} />
+          )}
 
-      {view === "success" && (
-        <div style={{ padding: "80px 32px", textAlign: "center", maxWidth: 500, margin: "0 auto" }}>
-          <div style={{ fontSize: 56, marginBottom: 16 }}>🎉</div>
-          <h2 style={{ fontSize: 26, color: C.navy, marginBottom: 10 }}>You're on the research team!</h2>
-          <p style={{ fontSize: 15, color: C.mid, marginBottom: 28, lineHeight: 1.6, fontStyle: "italic" }}>
-            Your team has been registered. You can now access all active phases and begin working with the AI research assistant.
-          </p>
-          <button className="primary-btn" style={{ maxWidth: 300, margin: "0 auto" }} onClick={() => setView("landing")}>
-            Go to Research Dashboard
-          </button>
-        </div>
-      )}
+          {view === "project" && selectedProject && (
+            <ProjectPage project={selectedProject} onBack={() => setView("landing")} />
+          )}
+
+          {view === "signup" && signupProject && (
+            <SignupForm
+              project={signupProject}
+              onSuccess={handleSignupSuccess}
+              onCancel={() => setView("landing")}
+            />
+          )}
+
+          {view === "success" && (
+            <div style={{ padding: "80px 32px", textAlign: "center", maxWidth: 500, margin: "0 auto" }}>
+              <div style={{ fontSize: 56, marginBottom: 16 }}>🎉</div>
+              <h2 style={{ fontSize: 26, color: C.navy, marginBottom: 10 }}>You're on the research team!</h2>
+              <p style={{ fontSize: 15, color: C.mid, marginBottom: 28, lineHeight: 1.6, fontStyle: "italic" }}>
+                Your team has been registered. You can now access all active phases and begin working with the AI research assistant.
+              </p>
+              <button className="primary-btn" style={{ maxWidth: 300, margin: "0 auto" }} onClick={() => setView("landing")}>
+                Go to Research Dashboard
+              </button>
+            </div>
+          )}
+
+        </div>{/* /rp-main */}
+      </div>{/* /rp-shell */}
     </div>
   );
 }
