@@ -6,7 +6,7 @@ import {
   Code, Database, Layers, ImagePlus, Video, Mic, PenLine, Zap,
   Briefcase, Code2, Film, ImagePlus as ImagePlusIcon, Mic as MicIcon,
   Cpu, Wand2, ChevronDown, ChevronUp, ShieldCheck, Users, Sprout, Fish, Heart,
-  GitBranch, PawPrint,
+  GitBranch, PawPrint, FlaskConical,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -134,16 +134,30 @@ const Sidebar: React.FC = () => {
       headerText: 'text-green-700',
       items: [
         { name: 'AI Ambassadors',                  path: '/community-impact/ai-ambassadors',                icon: <Users size={20} />     },
-        { name: 'AI Ambassadors Certification',    path: '/community-impact/ai-ambassadors/certification',  icon: <Award size={20} />     },
+        { name: 'AI Ambassadors Cert',             path: '/community-impact/ai-ambassadors/certification',  icon: <Award size={20} />     },
         { name: 'Agriculture Consultant',          path: '/community-impact/agriculture',                   icon: <Sprout size={20} />    },
-        { name: 'Agriculture Certification',       path: '/community-impact/agriculture/certification',     icon: <Award size={20} />     },
+        { name: 'Agriculture Cert',                path: '/community-impact/agriculture/certification',     icon: <Award size={20} />     },
         { name: 'Fishing Consultant',              path: '/community-impact/fishing',                       icon: <Fish size={20} />      },
-        { name: 'Fishing Certification',           path: '/community-impact/fishing/certification',         icon: <Award size={20} />     },
+        { name: 'Fishing Cert',                    path: '/community-impact/fishing/certification',         icon: <Award size={20} />     },
         { name: 'Healthcare Navigator',            path: '/community-impact/healthcare',                    icon: <Heart size={20} />     },
-        { name: 'Healthcare Certification',        path: '/community-impact/healthcare/certification',      icon: <Award size={20} />     },
+        { name: 'Healthcare Cert',                 path: '/community-impact/healthcare/certification',      icon: <Award size={20} />     },
         { name: 'Entrepreneurship Consultant',     path: '/community-impact/entrepreneurship',              icon: <Briefcase size={20} /> },
-        { name: 'Entrepreneurship Certification',  path: '/community-impact/entrepreneurship/certification',icon: <Award size={20} />     },
+        { name: 'Entrepreneurship Cert',           path: '/community-impact/entrepreneurship/certification',icon: <Award size={20} />     },
         { name: 'Animal Husbandry Advisor',        path: '/community-impact/animal-husbandry',             icon: <PawPrint size={20} />  },
+      ],
+    },
+    {
+      id: 'research',
+      label: 'Research',
+      emoji: '🔬',
+      fromGradient: 'from-teal-400',
+      toGradient: 'to-cyan-400',
+      activeBg: 'bg-teal-100',
+      activeText: 'text-teal-700',
+      sectionBg: 'bg-teal-50/40',
+      headerText: 'text-teal-600',
+      items: [
+        { name: 'AI Learning Lab', path: '/research/ai-learning-lab', icon: <FlaskConical size={20} /> },
       ],
     },
   ];

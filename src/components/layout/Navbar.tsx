@@ -96,6 +96,13 @@ const Navbar: React.FC = () => {
         { name: 'Animal Husbandry Advisor', path: '/community-impact/animal-husbandry' },
       ],
     },
+    {
+      name: 'Research',
+      shorthand: 'Research',
+      dropdown: [
+        { name: 'Research AI Learning Lab', path: '/research/ai-learning-lab' },
+      ],
+    },
     { name: 'Dashboard', path: '/dashboard', shorthand: 'Dashboard' },
     { name: 'AI Playground', path: '/playground', shorthand: 'Claude' },
     { name: 'About', path: '/about', shorthand: 'About' },
@@ -145,6 +152,14 @@ const Navbar: React.FC = () => {
                   const isAnyActive = link.dropdown.some((item) =>
                     isActivePath(item.path)
                   );
+                  // Research gets a distinct teal accent to signal it's a new section
+                  const isResearch = link.name === 'Research';
+                  const activeStyle = isResearch
+                    ? 'text-teal-700 border-b-2 border-teal-600'
+                    : navItemActive;
+                  const idleStyle = isResearch
+                    ? 'text-teal-600 hover:text-teal-700 border-b-2 border-transparent hover:border-teal-300'
+                    : navItemIdle;
                   return (
                     <div
                       key={link.name}
@@ -157,8 +172,8 @@ const Navbar: React.FC = () => {
                           navItemBase,
                           'gap-1',
                           openDropdown === link.name || isAnyActive
-                            ? navItemActive
-                            : navItemIdle
+                            ? activeStyle
+                            : idleStyle
                         )}
                       >
                         {link.shorthand}
@@ -185,8 +200,12 @@ const Navbar: React.FC = () => {
                                 className={classNames(
                                   'block px-4 py-2 text-sm font-medium transition-colors',
                                   isActivePath(item.path)
-                                    ? 'bg-purple-50 text-purple-700'
-                                    : 'text-gray-700 hover:bg-purple-50 hover:text-purple-700'
+                                    ? isResearch
+                                      ? 'bg-teal-50 text-teal-700'
+                                      : 'bg-purple-50 text-purple-700'
+                                    : isResearch
+                                      ? 'text-gray-700 hover:bg-teal-50 hover:text-teal-700'
+                                      : 'text-gray-700 hover:bg-purple-50 hover:text-purple-700'
                                 )}
                               >
                                 {item.name}
@@ -274,9 +293,13 @@ const Navbar: React.FC = () => {
           <div className="px-2 pt-2 pb-3 space-y-0.5">
             {navigationLinks.map((link) => {
               if (link.dropdown) {
+                const isResearch = link.name === 'Research';
                 return (
                   <div key={link.name}>
-                    <div className="px-3 py-1.5 text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    <div className={classNames(
+                      'px-3 py-1.5 text-xs font-bold uppercase tracking-wider',
+                      isResearch ? 'text-teal-500' : 'text-gray-400'
+                    )}>
                       {link.shorthand}
                     </div>
                     {link.dropdown.map((item) => (
@@ -286,8 +309,12 @@ const Navbar: React.FC = () => {
                         className={classNames(
                           'block px-5 py-2 rounded-md text-sm font-medium transition-colors',
                           isActivePath(item.path)
-                            ? 'bg-purple-50 text-purple-700'
-                            : 'text-gray-600 hover:bg-purple-50 hover:text-purple-700'
+                            ? isResearch
+                              ? 'bg-teal-50 text-teal-700'
+                              : 'bg-purple-50 text-purple-700'
+                            : isResearch
+                              ? 'text-gray-600 hover:bg-teal-50 hover:text-teal-700'
+                              : 'text-gray-600 hover:bg-purple-50 hover:text-purple-700'
                         )}
                         onClick={() => setIsOpen(false)}
                       >

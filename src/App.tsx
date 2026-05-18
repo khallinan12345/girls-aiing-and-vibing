@@ -88,6 +88,9 @@ import EntrepreneurshipConsultantPage from './pages/community-impact/Entrepreneu
 import EntrepreneurshipConsultantCertificationPage from './pages/community-impact/EntrepreneurshipConsultantCertificationPage';
 import AnimalHusbandryPage from './pages/community-impact/AnimalHusbandryPage';
 
+// Research Pages
+import ResearchAILearningLab from './pages/research/ResearchAILearningLab';
+
 const AppContent: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -238,6 +241,9 @@ const AppContent: React.FC = () => {
         <Route path="/community-impact/entrepreneurship" element={<EntrepreneurshipConsultantPage />} />
         <Route path="/community-impact/entrepreneurship/certification" element={<EntrepreneurshipConsultantCertificationPage />} />
         <Route path="/community-impact/animal-husbandry" element={<AnimalHusbandryPage />} />
+
+        {/* Research Routes */}
+        <Route path="/research/ai-learning-lab" element={<ResearchAILearningLab />} />
 
         {/* Legacy Route Redirects */}
         <Route path="/ai-proficiency" element={<Navigate to="/certifications/ai-proficiency" replace />} />
