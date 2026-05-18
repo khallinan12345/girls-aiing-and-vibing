@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ─── DESIGN TOKENS — iGiTREE palette (distinct from vAI warm tones) ──────────
+// ─── DESIGN TOKENS — iGiTREE palette ─────────────────────────────────────────
 const C = {
-  forest:   "#1A3A2A",   // deep forest green — primary
+  forest:   "#1A3A2A",
   forestMd: "#2A5A3F",
   forestLt: "#3D7A57",
   moss:     "#6B8F5E",
   sage:     "#A8C5A0",
-  amber:    "#D4A843",   // DNA gold
+  amber:    "#D4A843",
   amberLt:  "#E8C878",
   teal:     "#2A7B7B",
   tealLt:   "#3D9E9E",
@@ -27,7 +27,7 @@ const C = {
   error:    "#C62828",
 };
 
-// ─── iGiTREE RESEARCH STRUCTURE ─────────────────────────────────────────────
+// ─── iGiTREE RESEARCH STRUCTURE ──────────────────────────────────────────────
 const IGTREE_PROJECT = {
   id: "igitree",
   title: "iGiTREE Genomics & Biodiversity Platform",
@@ -40,7 +40,7 @@ const IGTREE_PROJECT = {
   partners: ["iGiTREE (Kigali)", "Roslin Institute (Edinburgh)", "Rwanda Biomedical Centre", "Rwanda Agricultural Board", "Illumina"],
   credentialPartner: "University of Dayton / Temple University (proposed)",
   color: C.forestLt,
-  supervisedResearch: true, // key distinction from vAI PAR studies
+  supervisedResearch: true,
   phases: [
     {
       id: 1, phaseNum: 1, name: "Infrastructure & Consent", months: "1–3",
@@ -51,18 +51,16 @@ const IGTREE_PROJECT = {
       tasks: [
         {
           id: "g1_1", name: "IRB Protocol Orientation",
-          status: "complete",
-          due: "Week 2",
+          status: "complete", due: "Week 2",
           validation: "Completion quiz score ≥ 80% + supervisor sign-off",
           description: "Study the approved IRB protocol for the human genomics component. Understand the scope of review, what Temple's IRB covers vs. Rwanda National Ethics Committee.",
-          aiRole: "explain",  // explain concepts only — no procedural guidance
+          aiRole: "explain",
           outputs: ["IRB orientation quiz", "Protocol comprehension notes"],
           supervisionLevel: "direct",
         },
         {
           id: "g1_2", name: "Informed Consent Training",
-          status: "complete",
-          due: "Week 3",
+          status: "complete", due: "Week 3",
           validation: "Role-play assessment with supervisor + documentation",
           description: "Learn and practice the informed consent process: community sensitization, individual written consent, Kinyarwanda/English back-translation, right to withdraw.",
           aiRole: "explain",
@@ -71,8 +69,7 @@ const IGTREE_PROJECT = {
         },
         {
           id: "g1_3", name: "Sample Collection SOP Study",
-          status: "active",
-          due: "Week 4–6",
+          status: "active", due: "Week 4–6",
           validation: "SOP competency checklist signed by lab supervisor",
           description: "Study buccal swab and blood sample collection SOPs. Learn chain of custody, cold chain requirements, labeling protocols, and biohazard safety procedures.",
           aiRole: "explain",
@@ -81,8 +78,7 @@ const IGTREE_PROJECT = {
         },
         {
           id: "g1_4", name: "Data Governance Charter Review",
-          status: "pending",
-          due: "Week 6–8",
+          status: "pending", due: "Week 6–8",
           validation: "Written summary demonstrating understanding of data sovereignty provisions",
           description: "Review the data governance charter covering Rwanda national data sovereignty, permitted uses, embargo periods, and community benefit return channels.",
           aiRole: "explain",
@@ -91,11 +87,10 @@ const IGTREE_PROJECT = {
         },
         {
           id: "g1_5", name: "Community Sensitization Support",
-          status: "pending",
-          due: "Week 8–12",
+          status: "pending", due: "Week 8–12",
           validation: "Supervisor field observation + community feedback log",
           description: "Assist with community-level sensitization sessions under direct supervision. Document community questions, concerns, and consent rates.",
-          aiRole: "document",  // help document, not guide the interaction
+          aiRole: "document",
           outputs: ["Community sensitization log", "Enrollment baseline data"],
           supervisionLevel: "direct",
         },
@@ -110,8 +105,7 @@ const IGTREE_PROJECT = {
       tasks: [
         {
           id: "g2_1", name: "Buccal Swab Collection (supervised)",
-          status: "locked",
-          due: "Month 4–5",
+          status: "locked", due: "Month 4–5",
           validation: "Chain-of-custody log complete + supervisor countersignature on each sample batch",
           description: "Collect consented buccal swab samples under direct supervision. Apply SOP, complete chain-of-custody documentation, and maintain cold chain integrity.",
           aiRole: "document",
@@ -120,40 +114,36 @@ const IGTREE_PROJECT = {
         },
         {
           id: "g2_2", name: "Livestock Sample Collection — Inyambo Cattle",
-          status: "locked",
-          due: "Month 5–6",
+          status: "locked", due: "Month 5–6",
           validation: "RAB co-supervisor sign-off + genotyping submission confirmation",
-          description: "Assist with ear tissue collection from Inyambo cattle and crossbreeds under Rwanda Agricultural Board and Roslin Institute supervision. Apply Illumina array sample preparation procedures.",
+          description: "Assist with ear tissue collection from Inyambo cattle and crossbreeds under Rwanda Agricultural Board and Roslin Institute supervision.",
           aiRole: "document",
           outputs: ["Livestock sample log", "RAB documentation"],
           supervisionLevel: "direct",
         },
         {
           id: "g2_3", name: "Environmental DNA (eDNA) Sampling",
-          status: "locked",
-          due: "Month 6–7",
+          status: "locked", due: "Month 6–7",
           validation: "Sampling protocol adherence checklist + GPS coordinates logged",
           description: "Collect soil and water samples for environmental biodiversity eDNA analysis. Apply field sampling protocols; record GPS coordinates, collection conditions, and chain of custody.",
-          aiRole: "scaffold",  // AI can scaffold this more freely — lower risk
+          aiRole: "scaffold",
           outputs: ["eDNA field collection log", "GPS-tagged sample manifest"],
           supervisionLevel: "indirect",
         },
         {
           id: "g2_4", name: "Data Quality Assurance — Genotyping Inputs",
-          status: "locked",
-          due: "Month 7–8",
+          status: "locked", due: "Month 7–8",
           validation: "QA checklist reviewed by bioinformatics lead; error rate <2%",
-          description: "Review incoming Illumina array data for completeness, labeling accuracy, and sample-to-manifest matching. Flag anomalies. AI assists with pattern detection only — all flagging decisions go to the bioinformatics lead.",
+          description: "Review incoming Illumina array data for completeness, labeling accuracy, and sample-to-manifest matching. Flag anomalies for the bioinformatics lead.",
           aiRole: "assist_qa",
           outputs: ["QA checklist", "Anomaly flag report"],
           supervisionLevel: "indirect",
         },
         {
           id: "g2_5", name: "AI Training Dataset Labeling",
-          status: "locked",
-          due: "Month 8–9",
+          status: "locked", due: "Month 8–9",
           validation: "Inter-rater reliability ≥85% with reference labeler",
-          description: "Label environmental and demographic metadata to support AI surveillance model training. Work from defined taxonomies — do not create new categories without supervisor approval.",
+          description: "Label environmental and demographic metadata to support AI surveillance model training. Work from defined taxonomies.",
           aiRole: "scaffold",
           outputs: ["Labeled dataset contribution log", "Inter-rater reliability score"],
           supervisionLevel: "indirect",
@@ -169,8 +159,7 @@ const IGTREE_PROJECT = {
       tasks: [
         {
           id: "g3_1", name: "Bioinformatic Pipeline Walkthrough",
-          status: "locked",
-          due: "Month 10–11",
+          status: "locked", due: "Month 10–11",
           validation: "Pipeline comprehension assessment + documented run attempt",
           description: "Learn the bioinformatic analysis pipeline used for Illumina array data. Understand variant calling, QC filtering, and population stratification steps.",
           aiRole: "scaffold",
@@ -179,8 +168,7 @@ const IGTREE_PROJECT = {
         },
         {
           id: "g3_2", name: "Population Genomics Data Exploration",
-          status: "locked",
-          due: "Month 11–13",
+          status: "locked", due: "Month 11–13",
           validation: "Supervised data exploration report reviewed by co-PI",
           description: "Explore anonymized population genomic datasets. Identify population clusters, allele frequency distributions, and variants of potential clinical significance under bioinformatics supervision.",
           aiRole: "scaffold",
@@ -189,8 +177,7 @@ const IGTREE_PROJECT = {
         },
         {
           id: "g3_3", name: "AI Surveillance Model — Evaluation Support",
-          status: "locked",
-          due: "Month 13–15",
+          status: "locked", due: "Month 13–15",
           validation: "Evaluation metrics documented + reviewed by AI methods lead",
           description: "Support evaluation of AI infectious disease surveillance models. Learn precision/recall tradeoffs, subgroup performance analysis, and how to interpret model outputs responsibly.",
           aiRole: "scaffold",
@@ -199,8 +186,7 @@ const IGTREE_PROJECT = {
         },
         {
           id: "g3_4", name: "Database Contribution — NCBI / H3Africa",
-          status: "locked",
-          due: "Month 15–16",
+          status: "locked", due: "Month 15–16",
           validation: "Submission confirmation + accession numbers logged",
           description: "Assist with preparation of environmental and biodiversity eDNA datasets for deposit to NCBI and African genomic repositories. Understand open science data standards.",
           aiRole: "scaffold",
@@ -209,8 +195,7 @@ const IGTREE_PROJECT = {
         },
         {
           id: "g3_5", name: "Manuscript Contribution — Methods & Youth Section",
-          status: "locked",
-          due: "Month 16–18",
+          status: "locked", due: "Month 16–18",
           validation: "Co-author attribution confirmed by PI + draft section submitted",
           description: "Draft the methods section describing youth researcher contributions and the capacity-building model. This section is publishable as a standalone paper in Global Health Education.",
           aiRole: "scaffold",
@@ -222,7 +207,7 @@ const IGTREE_PROJECT = {
   ]
 };
 
-// ─── PLATFORM CONTEXT for AI ─────────────────────────────────────────────────
+// ─── PLATFORM CONTEXT ────────────────────────────────────────────────────────
 const PLATFORM_CONTEXT = {
   siteActive: "Kigali, Rwanda",
   pilotCohortSize: 12,
@@ -252,7 +237,6 @@ const css = `
     font-family: 'Cormorant Garamond', Georgia, serif;
   }
 
-  /* ── TOPBAR ── */
   .ig-topbar {
     background: ${C.ink};
     padding: 0 28px;
@@ -284,7 +268,6 @@ const css = `
     font-size: 10px; color: ${C.sage}; font-weight: 700;
   }
 
-  /* ── BREADCRUMB ── */
   .ig-breadcrumb {
     display: flex; align-items: center; gap: 6px;
     padding: 10px 28px; background: ${C.forest}11;
@@ -298,7 +281,6 @@ const css = `
   }
   .ig-bc-btn:hover { background: ${C.forestLt}18; }
 
-  /* ── SUPERVISION BADGE ── */
   .supervision-badge {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 3px 10px; border-radius: 10px; font-size: 10px;
@@ -313,7 +295,6 @@ const css = `
     border: 1px solid ${C.amber}44;
   }
 
-  /* ── AI ROLE BADGE ── */
   .ai-role-badge {
     display: inline-flex; align-items: center; gap: 4px;
     padding: 2px 8px; border-radius: 8px; font-size: 10px;
@@ -322,7 +303,6 @@ const css = `
     border: 1px solid ${C.slate}22;
   }
 
-  /* ── HERO ── */
   .ig-hero {
     background: linear-gradient(150deg, ${C.ink} 0%, ${C.forest} 55%, ${C.forestMd}99 100%);
     padding: 52px 28px 44px; position: relative; overflow: hidden;
@@ -366,19 +346,17 @@ const css = `
     text-transform: uppercase; margin-top: 3px;
   }
 
-  /* ── SUPERVISION WARNING BANNER ── */
   .supervision-banner {
     background: ${C.forest}18; border: 1px solid ${C.forestLt}33;
-    border-left: 4px solid ${C.amber}; border-radius: 0;
+    border-left: 4px solid ${C.amber};
     padding: 12px 28px; font-size: 13px; color: ${C.forest};
     display: flex; align-items: center; gap: 10px;
   }
 
-  /* ── PARTNER STRIP ── */
   .partner-strip {
     background: ${C.parchment}; border-bottom: 1px solid ${C.sand};
     padding: 10px 28px; display: flex; gap: 8px; align-items: center;
-    flex-wrap: wrap; overflow-x: auto;
+    flex-wrap: wrap;
   }
   .partner-chip {
     font-size: 11px; padding: 3px 10px; border-radius: 10px;
@@ -390,7 +368,6 @@ const css = `
     color: ${C.muted}; font-weight: 600; margin-right: 4px;
   }
 
-  /* ── PHASE RAIL ── */
   .ig-phase-rail {
     display: flex; overflow-x: auto;
     border-bottom: 1px solid ${C.sand};
@@ -407,17 +384,13 @@ const css = `
     color: ${C.forest}; border-bottom-color: ${C.amber}; font-weight: 600;
   }
   .ig-phase-tab.locked { opacity: 0.35; cursor: not-allowed; }
-  .ig-phase-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-  }
+  .ig-phase-dot { width: 7px; height: 7px; border-radius: 50%; }
   .ig-phase-dot.complete { background: ${C.success}; }
   .ig-phase-dot.active   { background: ${C.amber}; box-shadow: 0 0 0 3px ${C.amber}33; }
   .ig-phase-dot.locked   { background: ${C.sandDk}; }
 
-  /* ── MAIN BODY ── */
   .ig-body { display: flex; min-height: calc(100vh - 300px); }
 
-  /* ── TASK LIST ── */
   .ig-task-list {
     width: 300px; flex-shrink: 0; border-right: 1px solid ${C.sand};
     background: ${C.white}; overflow-y: auto;
@@ -432,28 +405,22 @@ const css = `
     border-left: 3px solid transparent;
   }
   .ig-task-item:hover { background: ${C.cream}; }
-  .ig-task-item.active {
-    background: ${C.parchment}; border-left-color: ${C.amber};
-  }
+  .ig-task-item.active { background: ${C.parchment}; border-left-color: ${C.amber}; }
   .ig-task-item.locked { opacity: 0.4; cursor: not-allowed; }
   .ig-task-name { font-size: 13px; font-weight: 600; color: ${C.forest}; margin-bottom: 4px; }
   .ig-task-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  .ig-task-dot {
-    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-  }
+  .ig-task-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
   .ig-task-dot.complete { background: ${C.success}; }
   .ig-task-dot.active   { background: ${C.amber}; }
   .ig-task-dot.pending  { background: ${C.sandDk}; }
   .ig-task-dot.locked   { background: ${C.sand}; }
 
-  /* ── TASK DETAIL ── */
   .ig-detail { flex: 1; padding: 24px 28px; background: ${C.cream}; overflow-y: auto; }
   .ig-detail-empty {
     display: flex; flex-direction: column; align-items: center;
     justify-content: center; height: 300px; color: ${C.muted};
     text-align: center; gap: 10px;
   }
-
   .ig-detail-phase {
     font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
     color: ${C.amber}; font-weight: 600; margin-bottom: 6px;
@@ -468,7 +435,6 @@ const css = `
     border: 1px solid ${C.sand}; color: ${C.mid}; background: ${C.white};
   }
 
-  /* ── SAFETY NOTICE ── */
   .safety-notice {
     padding: 10px 14px; border-radius: 8px; margin-bottom: 14px;
     background: ${C.warn}14; border: 1px solid ${C.amber}44;
@@ -476,7 +442,6 @@ const css = `
     display: flex; gap: 8px; align-items: flex-start;
   }
 
-  /* ── INFO GRID ── */
   .ig-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
   .ig-info-card {
     background: ${C.white}; border: 1px solid ${C.sand};
@@ -489,7 +454,6 @@ const css = `
   }
   .ig-info-body { font-size: 12px; color: ${C.charcoal}; line-height: 1.55; }
 
-  /* ── OUTPUTS LIST ── */
   .output-list { margin: 0 0 14px; padding: 0; list-style: none; }
   .output-item {
     display: flex; align-items: center; gap: 7px;
@@ -499,7 +463,6 @@ const css = `
   .output-item:last-child { border-bottom: none; }
   .output-dot { width: 5px; height: 5px; border-radius: 50%; background: ${C.amber}; flex-shrink: 0; }
 
-  /* ── AI DISCLAIMER (critical for supervised research) ── */
   .ai-scope-notice {
     background: ${C.slate}08; border: 1px solid ${C.slate}22;
     border-left: 3px solid ${C.slate}; border-radius: 6px;
@@ -508,17 +471,16 @@ const css = `
   }
   .ai-scope-notice strong { color: ${C.forest}; }
 
-  /* ── PRIOR ENTRIES ── */
   .prior-entry {
     background: ${C.white}; border: 1px solid ${C.sand};
-    border-radius: 7px; padding: 11px 13px; margin-bottom: 7px; font-size: 12px; line-height: 1.55;
+    border-radius: 7px; padding: 11px 13px; margin-bottom: 7px;
+    font-size: 12px; line-height: 1.55;
   }
   .prior-entry-head {
     display: flex; justify-content: space-between; margin-bottom: 3px;
     font-size: 10px; color: ${C.muted};
   }
 
-  /* ── FIELD LOG BOX ── */
   .field-log-box {
     background: ${C.white}; border: 1.5px solid ${C.sand};
     border-radius: 8px; overflow: hidden; margin-top: 14px;
@@ -548,7 +510,6 @@ const css = `
   .save-btn:hover { background: ${C.forestMd}; }
   .save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  /* ── AI PANEL ── */
   .ig-ai-panel {
     background: ${C.white}; border: 1px solid ${C.sand};
     border-radius: 10px; overflow: hidden; margin-top: 16px;
@@ -639,24 +600,23 @@ const css = `
   .ig-send-btn:hover { background: ${C.forestMd}; }
   .ig-send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-  /* ── TOAST ── */
   .ig-toast {
     position: fixed; bottom: 20px; right: 20px;
     background: ${C.forest}; color: white; padding: 10px 16px;
     border-radius: 8px; font-size: 13px; z-index: 1000;
     box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-    animation: slideUp 0.3s ease-out;
+    animation: igSlideUp 0.3s ease-out;
     border-left: 3px solid ${C.amber};
   }
-  @keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes igSlideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 `;
 
 // ─── AI ROLE DESCRIPTIONS ────────────────────────────────────────────────────
 const AI_ROLE_LABELS = {
-  explain:    { label: "Explain only", desc: "AI explains concepts and background. No procedural guidance — all process decisions go to your supervisor." },
-  document:   { label: "Document help", desc: "AI helps you structure and write field logs and records. AI does not guide sample handling or consent decisions." },
-  assist_qa:  { label: "QA pattern detection", desc: "AI can flag data patterns. All actual QA decisions must be reviewed by the bioinformatics lead." },
-  scaffold:   { label: "Scaffold & draft", desc: "AI can guide you through analysis steps, suggest drafts, and explain methods in depth." },
+  explain:   { label: "Explain only",        desc: "AI explains concepts and background. No procedural guidance — all process decisions go to your supervisor." },
+  document:  { label: "Document help",       desc: "AI helps you structure and write field logs and records. AI does not guide sample handling or consent decisions." },
+  assist_qa: { label: "QA pattern detection",desc: "AI can flag data patterns. All actual QA decisions must be reviewed by the bioinformatics lead." },
+  scaffold:  { label: "Scaffold & draft",    desc: "AI can guide you through analysis steps, suggest drafts, and explain methods in depth." },
 };
 
 // ─── AI HOOK ─────────────────────────────────────────────────────────────────
@@ -670,55 +630,20 @@ function useIGAI(taskContext) {
     const ctx = PLATFORM_CONTEXT;
 
     const boundaryInstructions = {
-      explain: `Your role is EXPLAIN ONLY. You can:
-- Explain scientific concepts, terminology, and background
-- Help the researcher understand protocols they are studying
-- Answer "what does this mean?" questions
-You CANNOT:
-- Guide specific procedural steps in sample collection or consent
-- Make any recommendation about handling biological samples
-- Substitute for supervisor instruction
-Always remind the researcher to verify procedural questions with their supervisor.`,
-
-      document: `Your role is DOCUMENTATION HELP. You can:
-- Help structure field log entries and records
-- Suggest what information to include in documentation
-- Draft text the researcher can edit
-You CANNOT:
-- Guide consent conversations or sample handling steps
-- Make decisions about data quality or sample validity
-- Provide advice that could influence how the researcher physically handles samples or interacts with participants
-Always note that documentation questions about required fields should be confirmed with the supervisor.`,
-
-      assist_qa: `Your role is QA PATTERN DETECTION SUPPORT. You can:
-- Explain what makes a good vs. anomalous data record
-- Help the researcher understand what patterns to look for
-- Help draft anomaly flag reports
-You CANNOT:
-- Make final QA decisions
-- Tell the researcher to approve or reject specific samples
-- Interpret clinical significance of any variant
-All flagging decisions must go to the bioinformatics lead.`,
-
-      scaffold: `Your role is SCAFFOLD & DRAFT. You can:
-- Walk the researcher through analysis steps in detail
-- Explain bioinformatic methods and AI surveillance concepts
-- Generate draft text clearly marked for editing
-- Pull in platform and study context to ground explanations
-You should still:
-- Note when a question exceeds your scope and needs the PI or bioinformatics lead
-- Be clear about the limits of AI interpretation of genomic data`,
+      explain: `Your role is EXPLAIN ONLY. You can explain scientific concepts, terminology, and background. You CANNOT guide specific procedural steps in sample collection or consent. Always remind the researcher to verify procedural questions with their supervisor.`,
+      document: `Your role is DOCUMENTATION HELP. You can help structure field log entries and draft text the researcher can edit. You CANNOT guide consent conversations or sample handling steps. Note that required fields should be confirmed with the supervisor.`,
+      assist_qa: `Your role is QA PATTERN DETECTION SUPPORT. You can explain what makes a good vs. anomalous data record and help draft anomaly flag reports. You CANNOT make final QA decisions. All flagging decisions must go to the bioinformatics lead.`,
+      scaffold: `Your role is SCAFFOLD & DRAFT. You can walk the researcher through analysis steps, explain bioinformatic methods, and generate clearly marked draft text. Note when a question exceeds your scope and needs the PI or bioinformatics lead.`,
     };
 
-    return `You are a research assistant for the iGiTREE Genomics & Biodiversity Platform, supporting youth researchers (ages 18–26) in Kigali, Rwanda contributing to supervised genomic research.
+    return `You are a research assistant for the iGiTREE Genomics & Biodiversity Platform, supporting youth researchers (ages 18–26) in Kigali, Rwanda.
 
-THIS IS SUPERVISED SCIENTIFIC RESEARCH — NOT PARTICIPATORY ACTION RESEARCH.
-Youth work under direct scientific supervision. Role boundaries are defined by IRB protocol.
+THIS IS SUPERVISED SCIENTIFIC RESEARCH. Youth work under direct scientific supervision. Role boundaries are defined by IRB protocol.
 
 CURRENT TASK CONTEXT:
 - Phase: ${taskContext?.phaseName}
 - Task: ${taskContext?.taskName}
-- Supervision level: ${taskContext?.supervisionLevel === 'direct' ? 'DIRECT — supervisor must be physically present' : 'Indirect — supervisor available by communication'}
+- Supervision level: ${taskContext?.supervisionLevel === "direct" ? "DIRECT — supervisor must be physically present" : "Indirect — supervisor available by communication"}
 - Validation required: ${taskContext?.validation}
 
 YOUR SPECIFIC ROLE FOR THIS TASK:
@@ -730,20 +655,13 @@ STUDY CONTEXT:
 - Current phase: ${ctx.phaseStatus}
 - Partners: ${ctx.keyPartners}
 - Technology: Illumina ${ctx.illuminaPlatform}
-- Target funding: ${ctx.targetMechanisms}
 
-KEY SCIENTIFIC BACKGROUND TO DRAW ON:
-- <3% of GWAS participants are of African ancestry — this research directly fills that gap
+KEY SCIENTIFIC BACKGROUND:
+- Less than 3% of GWAS participants are of African ancestry — this research directly fills that gap
 - Inyambo cattle are genetically under-characterized; data supports food security and conservation goals
-- AI surveillance models trained on local African population data are a high-impact, fundable approach to infectious disease early warning
 - Rwanda retains national data sovereignty over all genomic data generated in-country
 
-WRITING & TONE:
-- Write at a clear, accessible level — many researchers are 18–26 and new to genomics
-- Be encouraging but precise — this is real science with real consequences
-- When generating draft text, mark it clearly: <<DRAFT START>> ... <<DRAFT END>>
-- Keep responses focused: 2–4 short paragraphs unless more detail is explicitly needed
-- For Phase 1 tasks especially: reinforce that no data collection happens without completed consent and IRB approval`;
+TONE: Clear and accessible (researchers are 18–26, new to genomics). Encouraging but precise. When generating draft text, mark it: <<DRAFT START>> ... <<DRAFT END>>. Keep responses to 2–4 paragraphs unless more detail is requested.`;
   }, [taskContext]);
 
   const initConversation = useCallback(async () => {
@@ -752,9 +670,14 @@ WRITING & TONE:
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-calls": "true",
+        },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-5",
           max_tokens: 1000,
           system: systemPrompt(),
           messages: [{ role: "user", content: "I'm starting this task. Please introduce yourself, tell me what you can help with, and ask me one focused question to get started." }],
@@ -764,21 +687,31 @@ WRITING & TONE:
       const text = data.content?.find(b => b.type === "text")?.text || "";
       setMessages([{ role: "ai", text, ts: Date.now() }]);
     } catch {
-      setMessages([{ role: "ai", text: `Hi — I'm your research assistant for the iGiTREE study. For this task (${taskContext?.taskName}), I can help you ${AI_ROLE_LABELS[taskContext?.aiRole]?.desc?.toLowerCase() || 'understand the background'}. Where would you like to start?`, ts: Date.now() }]);
+      setMessages([{ role: "ai", text: `Hi — I'm your research assistant for the iGiTREE study. For this task (${taskContext?.taskName}), I can help you ${AI_ROLE_LABELS[taskContext?.aiRole]?.desc?.toLowerCase() || "understand the background"}. Where would you like to start?`, ts: Date.now() }]);
     }
     setLoading(false);
   }, [systemPrompt, taskContext]);
 
   const send = useCallback(async (userMsg, history) => {
     setLoading(true);
-    const msgs = [...history.map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text })), { role: "user", content: userMsg }];
+    const msgs = [
+      ...history.map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text })),
+      { role: "user", content: userMsg },
+    ];
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-calls": "true",
+        },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514", max_tokens: 1000,
-          system: systemPrompt(), messages: msgs,
+          model: "claude-sonnet-4-5",
+          max_tokens: 1000,
+          system: systemPrompt(),
+          messages: msgs,
         }),
       });
       const data = await res.json();
@@ -829,7 +762,9 @@ function IGAIPanel({ task, phase, onUseDraft }) {
   const msgsRef = useRef(null);
 
   useEffect(() => { if (task) initConversation(); }, [task?.id]);
-  useEffect(() => { if (msgsRef.current) msgsRef.current.scrollTop = msgsRef.current.scrollHeight; }, [messages]);
+  useEffect(() => {
+    if (msgsRef.current) msgsRef.current.scrollTop = msgsRef.current.scrollHeight;
+  }, [messages]);
 
   const handleSend = () => {
     if (!input.trim() || loading) return;
@@ -900,7 +835,6 @@ function IGTaskDetail({ task, phase }) {
     showToast("Draft added to your field log — review and edit.");
   };
 
-  // Mock prior entries for active/complete tasks
   const priorEntries = (task?.status === "active" || task?.status === "complete") ? [
     {
       date: "May 15, 2026", researcher: "Kagiso M.",
@@ -925,7 +859,6 @@ function IGTaskDetail({ task, phase }) {
         </div>
       </div>
 
-      {/* Safety notice if direct supervision */}
       {task?.supervisionLevel === "direct" && (
         <div className="safety-notice">
           <span>⚠️</span>
@@ -933,7 +866,6 @@ function IGTaskDetail({ task, phase }) {
         </div>
       )}
 
-      {/* Info cards */}
       <div className="ig-info-grid">
         <div className="ig-info-card">
           <div className="ig-info-lbl">Validation Required</div>
@@ -945,7 +877,6 @@ function IGTaskDetail({ task, phase }) {
         </div>
       </div>
 
-      {/* Outputs */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: C.forestLt, fontWeight: 600, marginBottom: 8 }}>
           Required Outputs
@@ -960,7 +891,6 @@ function IGTaskDetail({ task, phase }) {
         </ul>
       </div>
 
-      {/* Prior entries */}
       {priorEntries.length > 0 && (
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: C.forest, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
@@ -978,7 +908,6 @@ function IGTaskDetail({ task, phase }) {
         </div>
       )}
 
-      {/* Field log */}
       <div className="field-log-box">
         <div className="field-log-hdr">
           <span>Field Log / Documentation Entry</span>
@@ -990,19 +919,22 @@ function IGTaskDetail({ task, phase }) {
           className="field-log-area"
           value={log}
           onChange={e => setLog(e.target.value)}
-          placeholder="Document your work on this task. Include: what you did, when, who supervised, any issues encountered, and what you still need to complete. The AI assistant can help you draft this."
+          placeholder="Document your work on this task. Include: what you did, when, who supervised, any issues encountered, and what you still need to complete."
         />
         <div className="field-log-footer">
           <span className="field-log-note">
             {task?.supervisionLevel === "direct" ? "Supervisor countersignature required for final submission." : "Faculty review before badge issuance."}
           </span>
-          <button className="save-btn" onClick={() => { setSaved(true); showToast("Field log saved ✓"); setTimeout(() => setSaved(false), 2000); }} disabled={!log.trim()}>
+          <button
+            className="save-btn"
+            onClick={() => { setSaved(true); showToast("Field log saved ✓"); setTimeout(() => setSaved(false), 2000); }}
+            disabled={!log.trim()}
+          >
             {saved ? "Saved ✓" : "Save Log"}
           </button>
         </div>
       </div>
 
-      {/* AI Panel */}
       <IGAIPanel task={task} phase={phase} onUseDraft={handleUseDraft} />
 
       {toast && <div className="ig-toast">{toast}</div>}
@@ -1015,12 +947,9 @@ export default function IGiTREEResearchPage() {
   const proj = IGTREE_PROJECT;
   const [activePhaseId, setActivePhaseId] = useState(1);
   const [activeTaskId, setActiveTaskId] = useState(null);
-  const [view, setView] = useState("main"); // main | landing
 
   const activePhase = proj.phases.find(p => p.id === activePhaseId);
   const activeTask = activePhase?.tasks?.find(t => t.id === activeTaskId);
-
-  const doneCount = proj.phases.filter(p => p.status === "complete").length;
 
   return (
     <div className="ig-root">
@@ -1043,12 +972,14 @@ export default function IGiTREEResearchPage() {
       {/* Breadcrumb */}
       <div className="ig-breadcrumb">
         <span style={{ color: C.charcoal, fontWeight: 500 }}>iGiTREE Genomics</span>
-        {activeTask && <>
-          <span style={{ color: C.sandDk }}>›</span>
-          <span>{activePhase?.name}</span>
-          <span style={{ color: C.sandDk }}>›</span>
-          <span>{activeTask?.name}</span>
-        </>}
+        {activeTask && (
+          <>
+            <span style={{ color: C.sandDk }}>›</span>
+            <span>{activePhase?.name}</span>
+            <span style={{ color: C.sandDk }}>›</span>
+            <span>{activeTask?.name}</span>
+          </>
+        )}
       </div>
 
       {/* Hero */}
@@ -1057,27 +988,22 @@ export default function IGiTREEResearchPage() {
         <div style={{ maxWidth: 900 }}>
           <div className="ig-eyebrow">Unova Labs · iGiTREE Platform · Supervised Scientific Research</div>
           <h1 className="ig-hero-title">
-            African <span>Genomics</span> &<br />Biodiversity Research
+            African <span>Genomics</span> &amp;<br />Biodiversity Research
           </h1>
           <div className="ig-hero-tagline">{proj.tagline}</div>
           <p className="ig-hero-desc">{proj.description}</p>
           <div className="ig-hero-stats">
-            <div>
-              <div className="ig-stat-val">18 mo</div>
-              <div className="ig-stat-lbl">Pilot Program</div>
-            </div>
-            <div>
-              <div className="ig-stat-val">3</div>
-              <div className="ig-stat-lbl">Research Domains</div>
-            </div>
-            <div>
-              <div className="ig-stat-val">5</div>
-              <div className="ig-stat-lbl">Partner Institutions</div>
-            </div>
-            <div>
-              <div className="ig-stat-val">5+</div>
-              <div className="ig-stat-lbl">Target Publications</div>
-            </div>
+            {[
+              { val: "18 mo", lbl: "Pilot Program" },
+              { val: "3",     lbl: "Research Domains" },
+              { val: "5",     lbl: "Partner Institutions" },
+              { val: "5+",    lbl: "Target Publications" },
+            ].map(s => (
+              <div key={s.lbl}>
+                <div className="ig-stat-val">{s.val}</div>
+                <div className="ig-stat-lbl">{s.lbl}</div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -1085,14 +1011,16 @@ export default function IGiTREEResearchPage() {
       {/* Supervision banner */}
       <div className="supervision-banner">
         <span>🔬</span>
-        <span><strong>Supervised scientific research.</strong> All biological sample handling and human subject interactions require direct supervisor presence. This platform supports documentation, learning, and field logging — not independent procedural decisions.</span>
+        <span>
+          <strong>Supervised scientific research.</strong> All biological sample handling and human subject interactions require direct supervisor presence. This platform supports documentation, learning, and field logging — not independent procedural decisions.
+        </span>
       </div>
 
       {/* Partner strip */}
       <div className="partner-strip">
         <span className="partner-label">Partners</span>
         {proj.partners.map(p => <span key={p} className="partner-chip">{p}</span>)}
-        <span className="partner-chip" style={{ background: "#F4F1EB", color: C.forestLt, fontWeight: 600 }}>
+        <span className="partner-chip" style={{ background: C.parchment, color: C.forestLt, fontWeight: 600 }}>
           Credential: {proj.credentialPartner}
         </span>
       </div>
@@ -1155,7 +1083,6 @@ export default function IGiTREEResearchPage() {
             </div>
           ))}
 
-          {/* Badge info */}
           <div style={{ margin: "16px 14px 0", padding: "11px 13px", background: C.parchment, borderRadius: 7, border: `1px solid ${C.sand}` }}>
             <div style={{ fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", color: C.amber, fontWeight: 600, marginBottom: 3 }}>Phase Badge</div>
             <div style={{ fontSize: 13, color: C.forest, fontWeight: 600 }}>{activePhase?.badge}</div>
@@ -1163,14 +1090,16 @@ export default function IGiTREEResearchPage() {
           </div>
         </div>
 
-        {/* Task detail or empty */}
+        {/* Task detail or empty state */}
         {activeTask ? (
           <IGTaskDetail task={activeTask} phase={activePhase} />
         ) : (
           <div className="ig-detail">
             <div className="ig-detail-empty">
               <div style={{ fontSize: 40, opacity: 0.35 }}>🧬</div>
-              <div style={{ fontSize: 15, fontWeight: 600, color: C.forest, fontFamily: "'Cormorant Garamond', serif" }}>Select a sub-task</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: C.forest, fontFamily: "'Cormorant Garamond', serif" }}>
+                Select a sub-task
+              </div>
               <div style={{ fontSize: 13, color: C.muted, maxWidth: 240 }}>
                 Choose a task to see requirements, prior progress, and your AI research assistant.
               </div>
