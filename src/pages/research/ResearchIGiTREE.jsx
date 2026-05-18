@@ -181,7 +181,7 @@ const IGTREE_PROJECT = {
           id: "g3_3", name: "AI Surveillance Model — Evaluation Support",
           status: "locked", due: "Month 13–15",
           validation: "Evaluation metrics documented + reviewed by AI methods lead",
-          description: "Support evaluation of AI infectious disease surveillance models. Learn precision/recall tradeoffs, subgroup performance analysis, and how to interpret model outputs responsibly.",
+          description: "Support evaluation of AI infectious disease surveillance models. Learn precision/recall tradeoffs, subgroup performance analysis, and responsible model interpretation.",
           aiRole: "scaffold",
           outputs: ["Model evaluation summary", "Subgroup analysis contribution"],
           supervisionLevel: "indirect",
@@ -209,7 +209,6 @@ const IGTREE_PROJECT = {
   ]
 };
 
-// ─── PLATFORM CONTEXT ────────────────────────────────────────────────────────
 const PLATFORM_CONTEXT = {
   siteActive: "Kigali, Rwanda",
   pilotCohortSize: 12,
@@ -219,12 +218,11 @@ const PLATFORM_CONTEXT = {
   targetMechanisms: "NIH Fogarty D43, R21, NSF IRES, Wellcome Trust, Gates Grand Challenges",
 };
 
-// ─── AI ROLE DESCRIPTIONS ────────────────────────────────────────────────────
 const AI_ROLE_LABELS = {
-  explain:   { label: "Explain only", desc: "AI explains concepts and background. No procedural guidance — all process decisions go to your supervisor." },
-  document:  { label: "Document help", desc: "AI helps you structure and write field logs and records. AI does not guide sample handling or consent decisions." },
-  assist_qa: { label: "QA pattern detection", desc: "AI can flag data patterns. All actual QA decisions must be reviewed by the bioinformatics lead." },
-  scaffold:  { label: "Scaffold & draft", desc: "AI can guide you through analysis steps, suggest drafts, and explain methods in depth." },
+  explain:   { label: "Explain only",          desc: "AI explains concepts and background. No procedural guidance — all process decisions go to your supervisor." },
+  document:  { label: "Document help",          desc: "AI helps you structure and write field logs and records. AI does not guide sample handling or consent decisions." },
+  assist_qa: { label: "QA pattern detection",   desc: "AI can flag data patterns. All actual QA decisions must be reviewed by the bioinformatics lead." },
+  scaffold:  { label: "Scaffold & draft",        desc: "AI can guide you through analysis steps, suggest drafts, and explain methods in depth." },
 };
 
 // ─── STYLES ──────────────────────────────────────────────────────────────────
@@ -238,31 +236,33 @@ const css = `
     background: ${C.cream};
     min-height: 100vh;
     color: ${C.charcoal};
+    margin-left: 224px;
   }
   .ig-root h1, .ig-root h2, .ig-root h3 {
     font-family: 'Cormorant Garamond', Georgia, serif;
   }
 
-  /* ── LAYOUT SHELL ── */
-  .ig-shell {
-    display: flex;
-    min-height: 100vh;
+  /* ── CONTENT WIDTH CONSTRAINT ── */
+  /* Full-bleed sections get an inner wrapper capped at 900px */
+  .ig-page-inner {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 28px;
   }
-  .ig-main {
-    flex: 1;
-    min-width: 0;
-    margin-left: 224px; /* matches Sidebar w-56 = 224px */
-    display: flex;
-    flex-direction: column;
+
+  /* Full-bleed backgrounds (hero, banners) still span full width,
+     but their CONTENT is constrained via .ig-page-inner */
+  .ig-full-bleed {
+    width: 100%;
   }
 
   /* ── TOPBAR ── */
   .ig-topbar {
     background: ${C.ink};
-    padding: 0 24px;
+    padding: 0 28px;
     height: 52px;
     display: flex; align-items: center; justify-content: space-between;
-    position: sticky; top: 0; z-index: 50;
+    position: sticky; top: 0; z-index: 100;
     border-bottom: 1px solid ${C.forestLt}44;
   }
   .ig-brand { display: flex; align-items: center; gap: 10px; }
@@ -278,17 +278,17 @@ const css = `
     color: ${C.sage}; font-weight: 500;
   }
   .ig-topbar-right {
-    display: flex; align-items: center; gap: 12px;
+    display: flex; align-items: center; gap: 10px;
   }
   .ig-home-btn {
     display: flex; align-items: center; gap: 6px;
-    padding: 6px 14px; border-radius: 6px;
-    background: ${C.forestMd}; border: 1px solid ${C.forestLt}55;
+    padding: 6px 14px; border-radius: 7px;
+    background: ${C.forestLt}33; border: 1px solid ${C.forestLt}55;
     color: ${C.sage}; font-size: 12px; font-weight: 500;
     cursor: pointer; transition: all 0.2s;
-    font-family: 'DM Sans', sans-serif; text-decoration: none;
+    font-family: 'DM Sans', sans-serif;
   }
-  .ig-home-btn:hover { background: ${C.forestLt}; color: ${C.white}; }
+  .ig-home-btn:hover { background: ${C.forestLt}55; color: ${C.white}; }
   .ig-user {
     display: flex; align-items: center; gap: 8px;
     font-size: 12px; color: rgba(255,255,255,0.6);
@@ -302,9 +302,12 @@ const css = `
 
   /* ── BREADCRUMB ── */
   .ig-breadcrumb {
-    display: flex; align-items: center; gap: 6px;
-    padding: 10px 24px; background: ${C.forest}11;
+    background: ${C.forest}11;
     border-bottom: 1px solid ${C.sand};
+  }
+  .ig-breadcrumb-inner {
+    max-width: 900px; margin: 0 auto; padding: 10px 28px;
+    display: flex; align-items: center; gap: 6px;
     font-size: 12px; color: ${C.mid};
   }
   .ig-bc-btn {
@@ -317,7 +320,8 @@ const css = `
   /* ── HERO ── */
   .ig-hero {
     background: linear-gradient(150deg, ${C.ink} 0%, ${C.forest} 55%, ${C.forestMd}99 100%);
-    padding: 44px 24px 36px; position: relative; overflow: hidden;
+    padding: 52px 0 44px;
+    position: relative; overflow: hidden;
   }
   .ig-hero::after {
     content: '';
@@ -325,64 +329,80 @@ const css = `
     background: radial-gradient(ellipse at right center, ${C.amber}0B 0%, transparent 70%);
     pointer-events: none;
   }
-  .ig-hero-content { position: relative; z-index: 1; max-width: 800px; }
   .ig-hero-dna {
-    position: absolute; right: 24px; top: 50%; transform: translateY(-50%);
-    font-size: 100px; opacity: 0.04; pointer-events: none; user-select: none;
+    position: absolute; right: 5%; top: 50%; transform: translateY(-50%);
+    font-size: 120px; opacity: 0.04; pointer-events: none;
+    user-select: none; line-height: 1;
+  }
+  .ig-hero-content {
+    position: relative; z-index: 1;
+    max-width: 900px; margin: 0 auto; padding: 0 28px;
   }
   .ig-eyebrow {
     font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
-    color: ${C.amberLt}; font-weight: 600; margin-bottom: 12px;
+    color: ${C.amberLt}; font-weight: 600; margin-bottom: 14px;
   }
   .ig-hero-title {
-    font-size: 32px; font-weight: 700; color: ${C.white};
+    font-size: 36px; font-weight: 700; color: ${C.white};
     line-height: 1.1; max-width: 560px; margin-bottom: 8px;
   }
   .ig-hero-title span { color: ${C.amber}; font-style: italic; }
   .ig-hero-tagline {
-    font-size: 13px; color: ${C.sage}; margin-bottom: 14px;
-    letter-spacing: 0.5px; font-weight: 500;
+    font-size: 14px; color: ${C.sage}; margin-bottom: 16px;
+    letter-spacing: 0.3px; font-weight: 500;
   }
   .ig-hero-desc {
-    font-size: 14px; color: rgba(255,255,255,0.88);
-    max-width: 520px; line-height: 1.65; margin-bottom: 24px; font-weight: 400;
+    font-size: 15px; color: rgba(255,255,255,0.88);
+    max-width: 520px; line-height: 1.65; margin-bottom: 28px;
+    font-weight: 300;
   }
-  .ig-hero-stats { display: flex; gap: 24px; flex-wrap: wrap; }
+  .ig-hero-stats { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 28px; }
   .ig-stat-val {
-    font-size: 22px; font-weight: 700; color: ${C.white};
+    font-size: 24px; font-weight: 700; color: ${C.white};
     font-family: 'Cormorant Garamond', serif; line-height: 1;
   }
   .ig-stat-lbl {
     font-size: 10px; color: ${C.sage}; letter-spacing: 1px;
     text-transform: uppercase; margin-top: 3px;
   }
-
-  /* ── JOIN TEAM BUTTON in hero ── */
   .ig-join-hero-btn {
     display: inline-flex; align-items: center; gap: 8px;
-    padding: 10px 22px; border-radius: 8px;
-    background: ${C.amber}; color: ${C.ink};
-    font-size: 13px; font-weight: 700; border: none; cursor: pointer;
-    font-family: 'DM Sans', sans-serif; transition: all 0.2s;
-    margin-top: 20px;
+    padding: 13px 26px; border-radius: 8px;
+    background: ${C.amber}; border: none; cursor: pointer;
+    color: ${C.ink}; font-size: 14px; font-weight: 700;
+    font-family: 'DM Sans', sans-serif; letter-spacing: 0.3px;
+    transition: all 0.2s; box-shadow: 0 4px 16px ${C.amber}44;
   }
-  .ig-join-hero-btn:hover { background: ${C.amberLt}; transform: translateY(-1px); }
+  .ig-join-hero-btn:hover {
+    background: ${C.amberLt}; transform: translateY(-1px);
+    box-shadow: 0 6px 20px ${C.amber}55;
+  }
 
   /* ── SUPERVISION BANNER ── */
   .supervision-banner {
-    background: ${C.forest}18; border-left: 4px solid ${C.amber};
-    padding: 10px 24px; font-size: 13px; color: ${C.forest};
+    background: ${C.forest}18;
+    border-bottom: 1px solid ${C.forestLt}33;
+    border-left: none;
+  }
+  .supervision-banner-inner {
+    max-width: 900px; margin: 0 auto; padding: 12px 28px;
     display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: ${C.forest};
+    border-left: 4px solid ${C.amber};
   }
 
   /* ── PARTNER STRIP ── */
   .partner-strip {
     background: ${C.parchment}; border-bottom: 1px solid ${C.sand};
-    padding: 10px 24px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  }
+  .partner-strip-inner {
+    max-width: 900px; margin: 0 auto; padding: 10px 28px;
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   }
   .partner-chip {
     font-size: 11px; padding: 3px 10px; border-radius: 10px;
-    background: ${C.white}; border: 1px solid ${C.sand}; color: ${C.mid}; white-space: nowrap;
+    background: ${C.white}; border: 1px solid ${C.sand};
+    color: ${C.mid}; white-space: nowrap;
   }
   .partner-label {
     font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
@@ -391,25 +411,46 @@ const css = `
 
   /* ── PHASE RAIL ── */
   .ig-phase-rail {
-    display: flex; overflow-x: auto;
+    background: ${C.white};
     border-bottom: 1px solid ${C.sand};
-    background: ${C.white}; padding: 0 24px;
+  }
+  .ig-phase-rail-inner {
+    max-width: 900px; margin: 0 auto;
+    display: flex; overflow-x: auto; padding: 0 28px;
   }
   .ig-phase-tab {
-    padding: 13px 16px; cursor: pointer; border: none; background: none;
+    padding: 14px 18px; cursor: pointer; border: none; background: none;
     font-family: 'DM Sans', sans-serif; font-size: 13px; color: ${C.mid};
     border-bottom: 2px solid transparent; white-space: nowrap;
     transition: all 0.2s; display: flex; align-items: center; gap: 7px;
+    flex-shrink: 0;
   }
-  .ig-phase-tab.active { color: ${C.forest}; border-bottom-color: ${C.amber}; font-weight: 600; }
+  .ig-phase-tab.active {
+    color: ${C.forest}; border-bottom-color: ${C.amber}; font-weight: 600;
+  }
   .ig-phase-tab.locked { opacity: 0.35; cursor: not-allowed; }
   .ig-phase-dot { width: 7px; height: 7px; border-radius: 50%; }
   .ig-phase-dot.complete { background: ${C.success}; }
   .ig-phase-dot.active   { background: ${C.amber}; box-shadow: 0 0 0 3px ${C.amber}33; }
   .ig-phase-dot.locked   { background: ${C.sandDk}; }
 
-  /* ── BODY ── */
-  .ig-body { display: flex; min-height: calc(100vh - 340px); }
+  /* ── PHASE CONTEXT BAR ── */
+  .ig-phase-context {
+    background: ${C.white};
+    border-bottom: 1px solid ${C.sand};
+  }
+  .ig-phase-context-inner {
+    max-width: 900px; margin: 0 auto; padding: 10px 28px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  }
+
+  /* ── BODY — 2-col stays full width within the content area ── */
+  .ig-body {
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    min-height: calc(100vh - 300px);
+  }
 
   /* ── TASK LIST ── */
   .ig-task-list {
@@ -417,12 +458,12 @@ const css = `
     background: ${C.white}; overflow-y: auto;
   }
   .ig-task-list-hdr {
-    padding: 14px 16px 8px;
+    padding: 16px 18px 8px;
     font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
     color: ${C.muted}; font-weight: 600; border-bottom: 1px solid ${C.sand}99;
   }
   .ig-task-item {
-    padding: 12px 16px; cursor: pointer; transition: background 0.15s;
+    padding: 13px 18px; cursor: pointer; transition: background 0.15s;
     border-left: 3px solid transparent;
   }
   .ig-task-item:hover { background: ${C.cream}; }
@@ -439,7 +480,7 @@ const css = `
   /* ── SUPERVISION BADGE ── */
   .supervision-badge {
     display: inline-flex; align-items: center; gap: 5px;
-    padding: 2px 8px; border-radius: 10px; font-size: 10px;
+    padding: 3px 10px; border-radius: 10px; font-size: 10px;
     font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
   }
   .supervision-badge.direct {
@@ -448,19 +489,19 @@ const css = `
   .supervision-badge.indirect {
     background: ${C.amber}18; color: ${C.warn}; border: 1px solid ${C.amber}44;
   }
-
-  /* ── AI ROLE BADGE ── */
   .ai-role-badge {
     display: inline-flex; align-items: center; gap: 4px;
-    padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 600;
-    background: ${C.slate}18; color: ${C.slate}; border: 1px solid ${C.slate}22;
+    padding: 2px 8px; border-radius: 8px; font-size: 10px;
+    font-weight: 600; background: ${C.slate}18; color: ${C.slate};
+    border: 1px solid ${C.slate}22;
   }
 
   /* ── TASK DETAIL ── */
-  .ig-detail { flex: 1; padding: 22px 24px; background: ${C.cream}; overflow-y: auto; }
+  .ig-detail { flex: 1; padding: 24px 24px; background: ${C.cream}; overflow-y: auto; }
   .ig-detail-empty {
     display: flex; flex-direction: column; align-items: center;
-    justify-content: center; height: 300px; color: ${C.muted}; text-align: center; gap: 10px;
+    justify-content: center; height: 300px; color: ${C.muted};
+    text-align: center; gap: 10px;
   }
   .ig-detail-phase {
     font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
@@ -475,28 +516,23 @@ const css = `
     font-size: 11px; padding: 3px 10px; border-radius: 8px;
     border: 1px solid ${C.sand}; color: ${C.mid}; background: ${C.white};
   }
-
-  /* ── SAFETY NOTICE ── */
   .safety-notice {
     padding: 10px 14px; border-radius: 8px; margin-bottom: 14px;
     background: ${C.warn}14; border: 1px solid ${C.amber}44;
     font-size: 12px; color: ${C.warn}; line-height: 1.55;
     display: flex; gap: 8px; align-items: flex-start;
   }
-
-  /* ── INFO GRID ── */
   .ig-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
   .ig-info-card {
     background: ${C.white}; border: 1px solid ${C.sand};
-    border-radius: 8px; padding: 12px 14px; border-top: 2px solid ${C.amber}44;
+    border-radius: 8px; padding: 12px 14px;
+    border-top: 2px solid ${C.amber}44;
   }
   .ig-info-lbl {
     font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase;
     color: ${C.forestLt}; font-weight: 600; margin-bottom: 5px;
   }
   .ig-info-body { font-size: 12px; color: ${C.charcoal}; line-height: 1.55; }
-
-  /* ── OUTPUTS ── */
   .output-list { margin: 0 0 14px; padding: 0; list-style: none; }
   .output-item {
     display: flex; align-items: center; gap: 7px;
@@ -505,17 +541,12 @@ const css = `
   }
   .output-item:last-child { border-bottom: none; }
   .output-dot { width: 5px; height: 5px; border-radius: 50%; background: ${C.amber}; flex-shrink: 0; }
-
-  /* ── AI SCOPE NOTICE ── */
   .ai-scope-notice {
     background: ${C.slate}08; border: 1px solid ${C.slate}22;
     border-left: 3px solid ${C.slate}; border-radius: 6px;
     padding: 10px 12px; margin-bottom: 14px;
     font-size: 12px; color: ${C.slate}; line-height: 1.55;
   }
-  .ai-scope-notice strong { color: ${C.forest}; }
-
-  /* ── PRIOR ENTRIES ── */
   .prior-entry {
     background: ${C.white}; border: 1px solid ${C.sand};
     border-radius: 7px; padding: 11px 13px; margin-bottom: 7px;
@@ -525,8 +556,6 @@ const css = `
     display: flex; justify-content: space-between; margin-bottom: 3px;
     font-size: 10px; color: ${C.muted};
   }
-
-  /* ── FIELD LOG ── */
   .field-log-box {
     background: ${C.white}; border: 1.5px solid ${C.sand};
     border-radius: 8px; overflow: hidden; margin-top: 14px;
@@ -578,8 +607,9 @@ const css = `
     background: ${C.forestLt}22; border: 1px solid ${C.forestLt}33;
   }
   .ig-msgs {
-    max-height: 340px; overflow-y: auto; padding: 14px;
-    display: flex; flex-direction: column; gap: 10px; background: ${C.cream};
+    max-height: 360px; overflow-y: auto; padding: 14px;
+    display: flex; flex-direction: column; gap: 10px;
+    background: ${C.cream};
   }
   .ig-msg { display: flex; gap: 8px; align-items: flex-start; }
   .ig-msg.user { flex-direction: row-reverse; }
@@ -617,7 +647,8 @@ const css = `
   .ig-inp {
     flex: 1; padding: 8px 11px; border: 1.5px solid ${C.sand};
     border-radius: 7px; font-size: 13px; outline: none;
-    font-family: 'DM Sans', sans-serif; background: ${C.cream}; transition: border-color 0.2s;
+    font-family: 'DM Sans', sans-serif; background: ${C.cream};
+    transition: border-color 0.2s;
   }
   .ig-inp:focus { border-color: ${C.forestLt}; background: white; }
   .ig-send-btn {
@@ -629,12 +660,15 @@ const css = `
   .ig-send-btn:hover { background: ${C.forestMd}; }
   .ig-send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-  /* ── SIGNUP PANEL ── */
-  .ig-signup-wrap { padding: 32px 24px; max-width: 620px; margin: 0 auto; }
+  /* ── SIGNUP ── */
+  .ig-signup-wrap {
+    max-width: 900px; margin: 0 auto; padding: 40px 28px;
+  }
   .ig-signup-panel {
     background: ${C.white}; border: 1px solid ${C.sand};
-    border-radius: 14px; padding: 28px;
+    border-radius: 14px; padding: 32px;
     box-shadow: 0 4px 32px rgba(0,0,0,0.07);
+    max-width: 600px; margin: 0 auto;
   }
   .ig-signup-head { font-size: 24px; font-weight: 700; color: ${C.forest}; margin-bottom: 4px; font-family: 'Cormorant Garamond', serif; }
   .ig-signup-sub { font-size: 13px; color: ${C.mid}; margin-bottom: 24px; font-style: italic; }
@@ -642,24 +676,26 @@ const css = `
     font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
     color: ${C.mid}; font-weight: 600; margin-bottom: 8px; display: block;
   }
-  .ig-site-selector { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 18px; }
+  .ig-site-selector { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 20px; }
   .ig-site-chip {
-    padding: 6px 14px; border-radius: 20px; font-size: 13px; cursor: pointer;
+    padding: 7px 16px; border-radius: 20px; font-size: 13px; cursor: pointer;
     border: 1.5px solid ${C.sand}; background: none; color: ${C.mid};
     font-family: 'DM Sans', sans-serif; transition: all 0.2s;
   }
   .ig-site-chip.active {
-    border-color: ${C.forestLt}; background: ${C.forestLt}14; color: ${C.forestLt}; font-weight: 600;
+    border-color: ${C.forestLt}; background: ${C.forestLt}14;
+    color: ${C.forestLt}; font-weight: 600;
   }
-  .ig-member-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .ig-member-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
   .ig-inp-field {
-    flex: 1; padding: 9px 12px; border: 1.5px solid ${C.sand};
+    flex: 1; padding: 10px 13px; border: 1.5px solid ${C.sand};
     border-radius: 7px; font-size: 13px; font-family: 'DM Sans', sans-serif;
-    background: ${C.cream}; color: ${C.charcoal}; outline: none; transition: border-color 0.2s;
+    background: ${C.cream}; color: ${C.charcoal}; outline: none;
+    transition: border-color 0.2s;
   }
   .ig-inp-field:focus { border-color: ${C.forestLt}; background: white; }
   .ig-remove-btn {
-    width: 26px; height: 26px; border-radius: 50%;
+    width: 28px; height: 28px; border-radius: 50%;
     border: 1px solid ${C.sand}; background: none; cursor: pointer;
     color: ${C.muted}; font-size: 14px; display: flex; align-items: center; justify-content: center;
     transition: all 0.2s; flex-shrink: 0;
@@ -667,16 +703,16 @@ const css = `
   .ig-remove-btn:hover { border-color: ${C.error}; color: ${C.error}; }
   .ig-add-member-btn {
     background: none; border: 1.5px dashed ${C.sand};
-    border-radius: 7px; padding: 7px 12px; cursor: pointer;
-    color: ${C.forestLt}; font-size: 12px; font-family: 'DM Sans', sans-serif;
+    border-radius: 7px; padding: 8px 14px; cursor: pointer;
+    color: ${C.forestLt}; font-size: 13px; font-family: 'DM Sans', sans-serif;
     width: 100%; margin-top: 4px; transition: all 0.2s;
   }
   .ig-add-member-btn:hover { border-color: ${C.forestLt}; background: ${C.forestLt}08; }
   .ig-primary-btn {
-    width: 100%; padding: 12px; border-radius: 9px; font-size: 14px;
+    width: 100%; padding: 13px; border-radius: 8px; font-size: 15px;
     font-weight: 600; border: none; cursor: pointer;
     background: ${C.forest}; color: white;
-    font-family: 'Cormorant Garamond', serif; letter-spacing: 0.5px;
+    font-family: 'DM Sans', sans-serif; letter-spacing: 0.3px;
     transition: all 0.2s; margin-top: 8px;
   }
   .ig-primary-btn:hover { background: ${C.forestMd}; transform: translateY(-1px); }
@@ -688,7 +724,8 @@ const css = `
     background: ${C.forest}; color: white; padding: 10px 16px;
     border-radius: 8px; font-size: 13px; z-index: 1000;
     box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-    animation: igSlideUp 0.3s ease-out; border-left: 3px solid ${C.amber};
+    animation: igSlideUp 0.3s ease-out;
+    border-left: 3px solid ${C.amber};
   }
   @keyframes igSlideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 `;
@@ -701,29 +738,29 @@ function useIGAI(taskContext) {
   const systemPrompt = useCallback(() => {
     const role = taskContext?.aiRole || "explain";
     const ctx = PLATFORM_CONTEXT;
-    const boundaries = {
-      explain: `Your role is EXPLAIN ONLY. Explain concepts and background. Do NOT guide procedural steps or substitute for supervisor instruction.`,
-      document: `Your role is DOCUMENTATION HELP. Help structure field logs and records. Do NOT guide consent conversations or sample handling.`,
-      assist_qa: `Your role is QA PATTERN DETECTION. Help identify patterns. All flagging decisions go to the bioinformatics lead.`,
-      scaffold: `Your role is SCAFFOLD & DRAFT. Walk through analysis steps, generate clearly marked draft text, explain methods. Note when questions need the PI.`,
+    const boundaryInstructions = {
+      explain: `Your role is EXPLAIN ONLY. You can explain scientific concepts, terminology, and background. You CANNOT guide procedural steps or substitute for supervisor instruction.`,
+      document: `Your role is DOCUMENTATION HELP. You can help structure field log entries and draft text. You CANNOT guide consent conversations or sample handling.`,
+      assist_qa: `Your role is QA PATTERN DETECTION SUPPORT. You can explain what to look for and help draft anomaly reports. All flagging decisions must go to the bioinformatics lead.`,
+      scaffold: `Your role is SCAFFOLD & DRAFT. You can walk through analysis steps, explain methods, and generate clearly marked draft text.`,
     };
     return `You are a research assistant for the iGiTREE Genomics & Biodiversity Platform, supporting youth researchers (ages 18–26) in Kigali, Rwanda.
 
-THIS IS SUPERVISED SCIENTIFIC RESEARCH. Youth work under direct scientific supervision per IRB protocol.
+THIS IS SUPERVISED SCIENTIFIC RESEARCH. Youth work under direct scientific supervision.
 
 CURRENT TASK:
 - Phase: ${taskContext?.phaseName}
 - Task: ${taskContext?.taskName}
-- Supervision: ${taskContext?.supervisionLevel === 'direct' ? 'DIRECT — supervisor must be physically present' : 'Indirect'}
+- Supervision: ${taskContext?.supervisionLevel === 'direct' ? 'DIRECT — supervisor must be present' : 'Indirect'}
 - Validation: ${taskContext?.validation}
 
-YOUR ROLE: ${boundaries[role] || boundaries.explain}
+YOUR ROLE: ${boundaryInstructions[role] || boundaryInstructions.explain}
 
 STUDY CONTEXT: Site: ${ctx.siteActive} | Cohort: ${ctx.pilotCohortSize} researchers | ${ctx.phaseStatus}
 Partners: ${ctx.keyPartners} | Technology: Illumina ${ctx.illuminaPlatform}
 
 When generating draft text, mark it: <<DRAFT START>> ... <<DRAFT END>>
-Keep responses to 2–4 short paragraphs. Be encouraging but precise.`;
+Keep responses to 2–4 short paragraphs. Write accessibly for 18–26 year olds new to genomics.`;
   }, [taskContext]);
 
   const initConversation = useCallback(async () => {
@@ -734,7 +771,7 @@ Keep responses to 2–4 short paragraphs. Be encouraging but precise.`;
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY || "",
+          "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
           "anthropic-version": "2023-06-01",
           "anthropic-dangerous-direct-browser-calls": "true",
         },
@@ -749,7 +786,7 @@ Keep responses to 2–4 short paragraphs. Be encouraging but precise.`;
       const text = data.content?.find(b => b.type === "text")?.text || "";
       setMessages([{ role: "ai", text, ts: Date.now() }]);
     } catch {
-      setMessages([{ role: "ai", text: `Hi — I'm your research assistant for the iGiTREE study. I'm here to help with: ${AI_ROLE_LABELS[taskContext?.aiRole]?.desc || 'background concepts'}. Where would you like to start?`, ts: Date.now() }]);
+      setMessages([{ role: "ai", text: `Hi — I'm your iGiTREE research assistant. I'm here to help with: ${AI_ROLE_LABELS[taskContext?.aiRole]?.desc || "this task"}. Where would you like to start?`, ts: Date.now() }]);
     }
     setLoading(false);
   }, [systemPrompt, taskContext]);
@@ -762,13 +799,15 @@ Keep responses to 2–4 short paragraphs. Be encouraging but precise.`;
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY || "",
+          "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
           "anthropic-version": "2023-06-01",
           "anthropic-dangerous-direct-browser-calls": "true",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5", max_tokens: 1000,
-          system: systemPrompt(), messages: msgs,
+          model: "claude-sonnet-4-5",
+          max_tokens: 1000,
+          system: systemPrompt(),
+          messages: msgs,
         }),
       });
       const data = await res.json();
@@ -838,8 +877,8 @@ function IGAIPanel({ task, phase, onUseDraft }) {
         <span className="ig-ai-title">Research Assistant</span>
         <span className="ig-ai-scope-tag">{roleInfo.label}</span>
       </div>
-      <div className="ai-scope-notice" style={{ margin: "12px 12px 0", borderRadius: 6 }}>
-        <strong>AI scope for this task:</strong> {roleInfo.desc}
+      <div className="ai-scope-notice" style={{ margin: "12px 12px 0", borderRadius: 6, background: `${C.slate}08`, border: `1px solid ${C.slate}22`, borderLeft: `3px solid ${C.slate}`, padding: "10px 12px", fontSize: 12, color: C.slate, lineHeight: 1.55 }}>
+        <strong style={{ color: C.forest }}>AI scope for this task:</strong> {roleInfo.desc}
       </div>
       <div className="ig-msgs" ref={msgsRef}>
         {messages.length === 0 && !loading && (
@@ -998,11 +1037,11 @@ function IGSignupForm({ onSuccess, onCancel }) {
   return (
     <div className="ig-signup-wrap">
       <div className="ig-signup-panel">
-        <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 18 }}>
-          <div style={{ fontSize: 32 }}>{proj.icon}</div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 20 }}>
+          <div style={{ fontSize: 36 }}>🧬</div>
           <div>
             <div className="ig-signup-head">Join iGiTREE Research Team</div>
-            <div style={{ fontSize: 12, color: C.mid, fontStyle: "italic" }}>{proj.title}</div>
+            <div className="ig-signup-sub">{proj.title}</div>
           </div>
         </div>
 
@@ -1025,18 +1064,17 @@ function IGSignupForm({ onSuccess, onCancel }) {
             {members.length > 1 && <button className="ig-remove-btn" onClick={() => removeMember(i)}>×</button>}
           </div>
         ))}
-
         <button className="ig-add-member-btn" onClick={addMember}>+ Add team member</button>
 
-        <div style={{ marginTop: 18, padding: "11px 13px", background: C.parchment, borderRadius: 7, border: `1px solid ${C.sand}`, fontSize: 12, color: C.mid, lineHeight: 1.6 }}>
-          <strong style={{ color: C.forest }}>What you're signing up for:</strong> 18-month supervised genomics research program. All work earns a University of Dayton / Temple University credential on completion. Direct supervisor presence required for all sample handling.
+        <div style={{ marginTop: 20, padding: "12px 14px", background: C.parchment, borderRadius: 8, border: `1px solid ${C.sand}`, fontSize: 12, color: C.mid, lineHeight: 1.6 }}>
+          <strong style={{ color: C.forest }}>What you're signing up for:</strong> 18-month supervised genomics research program. All work earns a University of Dayton / Temple University credential on completion. Direct supervisor presence required for all biological sample handling.
         </div>
 
-        <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
           <button className="ig-primary-btn" onClick={handleSubmit} disabled={!valid || submitting} style={{ flex: 1 }}>
             {submitting ? "Registering…" : "Join Research Program"}
           </button>
-          <button onClick={onCancel} style={{ padding: "12px 16px", border: `1.5px solid ${C.sand}`, background: "none", borderRadius: 9, cursor: "pointer", fontSize: 13, color: C.mid, fontFamily: "'DM Sans', sans-serif" }}>
+          <button onClick={onCancel} style={{ padding: "13px 18px", border: `1.5px solid ${C.sand}`, background: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, color: C.mid, fontFamily: "'DM Sans', sans-serif" }}>
             Cancel
           </button>
         </div>
@@ -1047,8 +1085,8 @@ function IGSignupForm({ onSuccess, onCancel }) {
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function IGiTREEResearchPage() {
-  const navigate = useNavigate();
   const proj = IGTREE_PROJECT;
+  const navigate = useNavigate();
   const [activePhaseId, setActivePhaseId] = useState(1);
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [view, setView] = useState("main"); // main | signup | success
@@ -1056,199 +1094,205 @@ export default function IGiTREEResearchPage() {
   const activePhase = proj.phases.find(p => p.id === activePhaseId);
   const activeTask = activePhase?.tasks?.find(t => t.id === activeTaskId);
 
-  return (
-    <div className="ig-root">
-      <style>{css}</style>
-
-      <div className="ig-shell">
-        {/* Sidebar */}
+  if (view === "signup") {
+    return (
+      <div style={{ marginLeft: 224 }}>
         <Sidebar />
+        <style>{css}</style>
+        <div className="ig-topbar">
+          <div className="ig-brand">
+            <span className="ig-logo">i<span>Gi</span>TREE</span>
+            <div className="ig-divider" />
+            <span className="ig-section">Join Research Team</span>
+          </div>
+          <div className="ig-topbar-right">
+            <button className="ig-home-btn" onClick={() => setView("main")}>← Back</button>
+          </div>
+        </div>
+        <IGSignupForm onSuccess={() => setView("success")} onCancel={() => setView("main")} />
+      </div>
+    );
+  }
 
-        {/* Main content area */}
-        <div className="ig-main">
+  if (view === "success") {
+    return (
+      <div style={{ marginLeft: 224 }}>
+        <Sidebar />
+        <style>{css}</style>
+        <div style={{ maxWidth: 900, margin: "0 auto", padding: "80px 28px", textAlign: "center" }}>
+          <div style={{ fontSize: 56, marginBottom: 16 }}>🎉</div>
+          <h2 style={{ fontSize: 28, color: C.forest, marginBottom: 10, fontFamily: "'Cormorant Garamond', serif" }}>You're on the iGiTREE research team!</h2>
+          <p style={{ fontSize: 15, color: C.mid, marginBottom: 28, lineHeight: 1.6, fontStyle: "italic", maxWidth: 480, margin: "0 auto 28px" }}>
+            Your team has been registered. You can now access Phase 1 tasks and begin working with your research assistant.
+          </p>
+          <button className="ig-primary-btn" style={{ maxWidth: 280, margin: "0 auto" }} onClick={() => setView("main")}>
+            Go to Research Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-          {/* Topbar */}
-          <div className="ig-topbar">
-            <div className="ig-brand">
-              <span className="ig-logo">i<span>Gi</span>TREE</span>
-              <div className="ig-divider" />
-              <span className="ig-section">Genomics Research</span>
-            </div>
-            <div className="ig-topbar-right">
-              <button className="ig-home-btn" onClick={() => navigate("/home")}>
-                ← Home
-              </button>
-              <div className="ig-user">
-                <div className="ig-avatar">KM</div>
-                <span>Kagiso M.</span>
-                <span style={{ color: C.amber, fontSize: 11, marginLeft: 4 }}>Kigali</span>
-              </div>
+  return (
+    <>
+      <Sidebar />
+      <style>{css}</style>
+      <div className="ig-root">
+
+        {/* Topbar */}
+        <div className="ig-topbar">
+          <div className="ig-brand">
+            <span className="ig-logo">i<span>Gi</span>TREE</span>
+            <div className="ig-divider" />
+            <span className="ig-section">Genomics Research</span>
+          </div>
+          <div className="ig-topbar-right">
+            <button className="ig-home-btn" onClick={() => navigate("/home")}>⌂ Home</button>
+            <div className="ig-user">
+              <div className="ig-avatar">KM</div>
+              <span>Kagiso M.</span>
+              <span style={{ color: C.amber, fontSize: 11, marginLeft: 4 }}>Kigali</span>
             </div>
           </div>
+        </div>
 
-          {/* Breadcrumb */}
-          <div className="ig-breadcrumb">
-            <button className="ig-bc-btn" onClick={() => navigate("/home")}>Home</button>
-            <span style={{ color: C.sandDk }}>›</span>
+        {/* Breadcrumb */}
+        <div className="ig-breadcrumb">
+          <div className="ig-breadcrumb-inner">
             <span style={{ color: C.charcoal, fontWeight: 500 }}>iGiTREE Genomics</span>
-            {activeTask && (
-              <>
-                <span style={{ color: C.sandDk }}>›</span>
-                <span>{activePhase?.name}</span>
-                <span style={{ color: C.sandDk }}>›</span>
-                <span>{activeTask?.name}</span>
-              </>
-            )}
+            {activeTask && <>
+              <span style={{ color: C.sandDk }}>›</span>
+              <span>{activePhase?.name}</span>
+              <span style={{ color: C.sandDk }}>›</span>
+              <span>{activeTask?.name}</span>
+            </>}
           </div>
+        </div>
 
-          {view === "signup" ? (
-            <IGSignupForm
-              onSuccess={() => setView("success")}
-              onCancel={() => setView("main")}
-            />
-          ) : view === "success" ? (
-            <div style={{ padding: "72px 24px", textAlign: "center", maxWidth: 480, margin: "0 auto" }}>
-              <div style={{ fontSize: 52, marginBottom: 14 }}>🎉</div>
-              <h2 style={{ fontSize: 26, color: C.forest, marginBottom: 10, fontFamily: "'Cormorant Garamond', serif" }}>You're on the iGiTREE team!</h2>
-              <p style={{ fontSize: 14, color: C.mid, marginBottom: 24, lineHeight: 1.6, fontStyle: "italic" }}>
-                Your team has been registered. You can now access Phase 1 tasks and begin working with your research supervisor and AI assistant.
-              </p>
-              <button className="ig-primary-btn" style={{ maxWidth: 280, margin: "0 auto" }} onClick={() => setView("main")}>
-                Go to Research Dashboard
-              </button>
+        {/* Hero — full bleed background, constrained content */}
+        <div className="ig-hero ig-full-bleed">
+          <div className="ig-hero-dna">🧬</div>
+          <div className="ig-hero-content">
+            <div className="ig-eyebrow">Unova Labs · iGiTREE Platform · Supervised Scientific Research</div>
+            <h1 className="ig-hero-title">
+              African <span>Genomics</span> &amp;<br />Biodiversity Research
+            </h1>
+            <div className="ig-hero-tagline">{proj.tagline}</div>
+            <p className="ig-hero-desc">{proj.description}</p>
+            <div className="ig-hero-stats">
+              <div><div className="ig-stat-val">18 mo</div><div className="ig-stat-lbl">Pilot Program</div></div>
+              <div><div className="ig-stat-val">3</div><div className="ig-stat-lbl">Research Domains</div></div>
+              <div><div className="ig-stat-val">5</div><div className="ig-stat-lbl">Partner Institutions</div></div>
+              <div><div className="ig-stat-val">5+</div><div className="ig-stat-lbl">Target Publications</div></div>
             </div>
-          ) : (
-            <>
-              {/* Hero */}
-              <div className="ig-hero">
-                <div className="ig-hero-dna">🧬</div>
-                <div className="ig-hero-content">
-                  <div className="ig-eyebrow">Unova Labs · iGiTREE Platform · Supervised Scientific Research</div>
-                  <h1 className="ig-hero-title">
-                    African <span>Genomics</span> &amp;<br />Biodiversity Research
-                  </h1>
-                  <div className="ig-hero-tagline">{proj.tagline}</div>
-                  <p className="ig-hero-desc">{proj.description}</p>
-                  <div className="ig-hero-stats">
-                    <div><div className="ig-stat-val">18 mo</div><div className="ig-stat-lbl">Pilot Program</div></div>
-                    <div><div className="ig-stat-val">3</div><div className="ig-stat-lbl">Research Domains</div></div>
-                    <div><div className="ig-stat-val">5</div><div className="ig-stat-lbl">Partner Institutions</div></div>
-                    <div><div className="ig-stat-val">5+</div><div className="ig-stat-lbl">Target Publications</div></div>
-                  </div>
-                  <button className="ig-join-hero-btn" onClick={() => setView("signup")}>
-                    🧬 Join Research Team
-                  </button>
-                </div>
-              </div>
+            <button className="ig-join-hero-btn" onClick={() => setView("signup")}>
+              🚀 Join Research Team
+            </button>
+          </div>
+        </div>
 
-              {/* Supervision banner */}
-              <div className="supervision-banner">
-                <span>🔬</span>
-                <span><strong>Supervised scientific research.</strong> All biological sample handling and human subject interactions require direct supervisor presence. This platform supports documentation, learning, and field logging — not independent procedural decisions.</span>
-              </div>
+        {/* Supervision banner */}
+        <div className="supervision-banner ig-full-bleed">
+          <div className="supervision-banner-inner">
+            <span>🔬</span>
+            <span><strong>Supervised scientific research.</strong> All biological sample handling and human subject interactions require direct supervisor presence. This platform supports documentation, learning, and field logging — not independent procedural decisions.</span>
+          </div>
+        </div>
 
-              {/* Partner strip */}
-              <div className="partner-strip">
-                <span className="partner-label">Partners</span>
-                {proj.partners.map(p => <span key={p} className="partner-chip">{p}</span>)}
-                <span className="partner-chip" style={{ background: C.parchment, color: C.forestLt, fontWeight: 600 }}>
-                  Credential: {proj.credentialPartner}
-                </span>
-              </div>
+        {/* Partner strip */}
+        <div className="partner-strip ig-full-bleed">
+          <div className="partner-strip-inner">
+            <span className="partner-label">Partners</span>
+            {proj.partners.map(p => <span key={p} className="partner-chip">{p}</span>)}
+            <span className="partner-chip" style={{ background: C.parchment, color: C.forestLt, fontWeight: 600 }}>
+              Credential: {proj.credentialPartner}
+            </span>
+          </div>
+        </div>
 
-              {/* Phase Tabs */}
-              <div className="ig-phase-rail">
-                {proj.phases.map(ph => (
-                  <button
-                    key={ph.id}
-                    className={`ig-phase-tab ${ph.id === activePhaseId ? "active" : ""} ${ph.status === "locked" ? "locked" : ""}`}
-                    onClick={() => { if (ph.status !== "locked") { setActivePhaseId(ph.id); setActiveTaskId(null); } }}
-                  >
-                    <div className={`ig-phase-dot ${ph.status}`} />
-                    Phase {ph.phaseNum}: {ph.name}
-                    {ph.status === "complete" && (
-                      <span style={{ fontSize: 10, background: C.success, color: "white", padding: "1px 5px", borderRadius: 7, fontWeight: 700 }}>✓</span>
-                    )}
-                  </button>
-                ))}
-              </div>
+        {/* Phase Tabs */}
+        <div className="ig-phase-rail ig-full-bleed">
+          <div className="ig-phase-rail-inner">
+            {proj.phases.map(ph => (
+              <button
+                key={ph.id}
+                className={`ig-phase-tab ${ph.id === activePhaseId ? "active" : ""} ${ph.status === "locked" ? "locked" : ""}`}
+                onClick={() => { if (ph.status !== "locked") { setActivePhaseId(ph.id); setActiveTaskId(null); } }}
+              >
+                <div className={`ig-phase-dot ${ph.status}`} />
+                Phase {ph.phaseNum}: {ph.name}
+                {ph.status === "complete" && (
+                  <span style={{ fontSize: 10, background: C.success, color: "white", padding: "1px 5px", borderRadius: 7, fontWeight: 700 }}>✓</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
 
-              {/* Phase context bar */}
-              {activePhase && (
-                <div style={{ padding: "10px 24px", background: C.white, borderBottom: `1px solid ${C.sand}`, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={{ fontSize: 12, color: C.mid, flex: 1, fontStyle: "italic" }}>{activePhase.description}</div>
-                  {activePhase.safetyNote && (
-                    <div style={{ fontSize: 11, color: C.warn, background: C.warnLt, padding: "4px 10px", borderRadius: 6, border: `1px solid ${C.amber}44` }}>
-                      {activePhase.safetyNote}
-                    </div>
-                  )}
+        {/* Phase context bar */}
+        {activePhase && (
+          <div className="ig-phase-context ig-full-bleed">
+            <div className="ig-phase-context-inner">
+              <div style={{ fontSize: 12, color: C.mid, flex: 1, fontStyle: "italic" }}>{activePhase.description}</div>
+              {activePhase.safetyNote && (
+                <div style={{ fontSize: 11, color: C.warn, background: C.warnLt, padding: "4px 10px", borderRadius: 6, border: `1px solid ${C.amber}44`, flexShrink: 0 }}>
+                  {activePhase.safetyNote}
                 </div>
               )}
+            </div>
+          </div>
+        )}
 
-              {/* Body */}
-              <div className="ig-body">
-                {/* Task list */}
-                <div className="ig-task-list">
-                  <div className="ig-task-list-hdr">Sub-Tasks — {activePhase?.name}</div>
-                  {activePhase?.tasks?.map(task => (
-                    <div
-                      key={task.id}
-                      className={`ig-task-item ${task.id === activeTaskId ? "active" : ""} ${task.status === "locked" ? "locked" : ""}`}
-                      onClick={() => { if (task.status !== "locked") setActiveTaskId(task.id === activeTaskId ? null : task.id); }}
-                    >
-                      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                        <div className={`ig-task-dot ${task.status}`} style={{ marginTop: 5 }} />
-                        <div>
-                          <div className="ig-task-name">{task.name}</div>
-                          <div className="ig-task-meta">
-                            <span style={{ fontSize: 11, color: C.muted }}>Due: {task.due}</span>
-                            <span className={`supervision-badge ${task.supervisionLevel}`} style={{ fontSize: 9, padding: "1px 5px" }}>
-                              {task.supervisionLevel === "direct" ? "Direct" : "Indirect"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+        {/* Body — 2-col, constrained */}
+        <div className="ig-body">
+          {/* Task list */}
+          <div className="ig-task-list">
+            <div className="ig-task-list-hdr">Sub-Tasks — {activePhase?.name}</div>
+            {activePhase?.tasks?.map(task => (
+              <div
+                key={task.id}
+                className={`ig-task-item ${task.id === activeTaskId ? "active" : ""} ${task.status === "locked" ? "locked" : ""}`}
+                onClick={() => { if (task.status !== "locked") setActiveTaskId(task.id === activeTaskId ? null : task.id); }}
+              >
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <div className={`ig-task-dot ${task.status}`} style={{ marginTop: 5 }} />
+                  <div>
+                    <div className="ig-task-name">{task.name}</div>
+                    <div className="ig-task-meta">
+                      <span style={{ fontSize: 11, color: C.muted }}>Due: {task.due}</span>
+                      <span className={`supervision-badge ${task.supervisionLevel}`} style={{ fontSize: 9, padding: "1px 5px" }}>
+                        {task.supervisionLevel === "direct" ? "Direct" : "Indirect"}
+                      </span>
                     </div>
-                  ))}
-
-                  {/* Badge info */}
-                  <div style={{ margin: "16px 14px 0", padding: "11px 13px", background: C.parchment, borderRadius: 7, border: `1px solid ${C.sand}` }}>
-                    <div style={{ fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", color: C.amber, fontWeight: 600, marginBottom: 3 }}>Phase Badge</div>
-                    <div style={{ fontSize: 13, color: C.forest, fontWeight: 600 }}>{activePhase?.badge}</div>
-                    <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>Credentialed by UD / Temple</div>
-                  </div>
-
-                  {/* Join team CTA in sidebar */}
-                  <div style={{ margin: "12px 14px 0", padding: "11px 13px", background: C.amber + "14", borderRadius: 7, border: `1px solid ${C.amber}44` }}>
-                    <div style={{ fontSize: 12, color: C.forest, fontWeight: 600, marginBottom: 6 }}>Not yet registered?</div>
-                    <button
-                      onClick={() => setView("signup")}
-                      style={{ width: "100%", padding: "7px", borderRadius: 6, background: C.amber, color: C.ink, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'DM Sans', sans-serif" }}
-                    >
-                      Join Research Team
-                    </button>
                   </div>
                 </div>
-
-                {/* Task detail or empty */}
-                {activeTask ? (
-                  <IGTaskDetail task={activeTask} phase={activePhase} />
-                ) : (
-                  <div className="ig-detail">
-                    <div className="ig-detail-empty">
-                      <div style={{ fontSize: 40, opacity: 0.35 }}>🧬</div>
-                      <div style={{ fontSize: 15, fontWeight: 600, color: C.forest, fontFamily: "'Cormorant Garamond', serif" }}>Select a sub-task</div>
-                      <div style={{ fontSize: 13, color: C.muted, maxWidth: 240 }}>
-                        Choose a task to see requirements, prior progress, and your AI research assistant.
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
-            </>
+            ))}
+
+            {/* Badge info */}
+            <div style={{ margin: "16px 14px 0", padding: "11px 13px", background: C.parchment, borderRadius: 7, border: `1px solid ${C.sand}` }}>
+              <div style={{ fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", color: C.amber, fontWeight: 600, marginBottom: 3 }}>Phase Badge</div>
+              <div style={{ fontSize: 13, color: C.forest, fontWeight: 600 }}>{activePhase?.badge}</div>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>Credentialed by UD / Temple</div>
+            </div>
+          </div>
+
+          {/* Task detail or empty */}
+          {activeTask ? (
+            <IGTaskDetail task={activeTask} phase={activePhase} />
+          ) : (
+            <div className="ig-detail">
+              <div className="ig-detail-empty">
+                <div style={{ fontSize: 40, opacity: 0.35 }}>🧬</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: C.forest, fontFamily: "'Cormorant Garamond', serif" }}>Select a sub-task</div>
+                <div style={{ fontSize: 13, color: C.muted, maxWidth: 240 }}>
+                  Choose a task to see requirements, prior progress, and your AI research assistant.
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
