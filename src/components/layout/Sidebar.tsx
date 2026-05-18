@@ -6,7 +6,7 @@ import {
   Code, Database, Layers, ImagePlus, Video, Mic, PenLine, Zap,
   Briefcase, Code2, Film, ImagePlus as ImagePlusIcon, Mic as MicIcon,
   Cpu, Wand2, ChevronDown, ChevronUp, ShieldCheck, Users, Sprout, Fish, Heart,
-  GitBranch, PawPrint, FlaskConical,
+  GitBranch, PawPrint, FlaskConical, Tree,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -158,7 +158,7 @@ const Sidebar: React.FC = () => {
       headerText: 'text-teal-600',
       items: [
         { name: 'AI Learning Lab', path: '/research/ai-learning-lab', icon: <FlaskConical size={20} /> },
-        { name: 'IGiTREE',         path: '/research/igitree',         icon: <Tree size={20} />     },
+        { name: 'IGiTREE',         path: '/research/igitree',         icon: <Tree size={20} />         },
       ],
     },
   ];
