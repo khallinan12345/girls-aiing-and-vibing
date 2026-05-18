@@ -158,6 +158,7 @@ const Sidebar: React.FC = () => {
       headerText: 'text-teal-600',
       items: [
         { name: 'AI Learning Lab', path: '/research/ai-learning-lab', icon: <FlaskConical size={20} /> },
+        { name: 'IGiTREE',         path: '/research/igitree',         icon: <Tree size={20} />     },
       ],
     },
   ];

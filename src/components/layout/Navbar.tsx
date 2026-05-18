@@ -100,7 +100,8 @@ const Navbar: React.FC = () => {
       name: 'Research',
       shorthand: 'Research',
       dropdown: [
-        { name: 'Research AI Learning Lab', path: '/research/ai-learning-lab' },
+        { name: 'Research AI Learning Lab', path: '/research/ai-learning-lab' },  
+        { name: 'IGiTREE', path: '/research/igitree' },
       ],
     },
     { name: 'Dashboard', path: '/dashboard', shorthand: 'Dashboard' },

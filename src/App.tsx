@@ -67,12 +67,7 @@ import AIForBusinessCertificationPage from './pages/tech-skills/AIForBusinessCer
 import AIContentCreationCertificationPage from './pages/tech-skills/AIContentCreationCertificationPage';
 
 // Legacy pages - kept for backwards compatibility
-import ProjectsListPage from './pages/ProjectsListPage';
-import TeamPage from './pages/TeamPage';
 import CodeAssistantPage from './pages/CodeAssistantPage';
-import TutorAI from './pages/TutorAI';
-import SkillsPage from './pages/SkillsPage';
-import CreatePage from './pages/CreatePage';
 import AdminStudentDashboard from './pages/admin/AdminStudentDashboard';
 
 // Community Impact Pages
@@ -90,6 +85,7 @@ import AnimalHusbandryPage from './pages/community-impact/AnimalHusbandryPage';
 
 // Research Pages
 import ResearchAILearningLab from './pages/research/ResearchAILearningLab';
+import IGiTREEResearchPage from './pages/research/IGiTREEResearchPage';
 
 const AppContent: React.FC = () => {
   const location = useLocation();
@@ -244,6 +240,7 @@ const AppContent: React.FC = () => {
 
         {/* Research Routes */}
         <Route path="/research/ai-learning-lab" element={<ResearchAILearningLab />} />
+        <Route path="/research/igitree" element={<IGiTREEResearchPage />} />
 
         {/* Legacy Route Redirects */}
         <Route path="/ai-proficiency" element={<Navigate to="/certifications/ai-proficiency" replace />} />
