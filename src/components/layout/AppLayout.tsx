@@ -13,8 +13,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({
   children,
   requireAuth = true,
 }) => {
-  const { user, loading } = useAuth();
+  const { user, session, loading } = useAuth();
 
+  // Show spinner while auth is resolving
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
@@ -23,7 +24,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({
     );
   }
 
-  if (requireAuth && !user) {
+  // Only redirect if BOTH loading is done AND there is no session.
+  // Checking session (not just user) avoids a race where user state
+  // hasn't been set yet but a valid session already exists.
+  if (requireAuth && !session && !user) {
     return <Navigate to="/login" replace />;
   }
 

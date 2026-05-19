@@ -135,31 +135,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     
     try {
-      const profile = await fetchUserProfile(session.user.id);
+      // Direct fetch — bypass fetchUserProfile caching so we always get fresh DB state
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
+      if (error) {
+        console.warn('[Auth] refreshUserProfile fetch error:', error.message);
+        return;
+      }
+
       if (profile) {
         setUser(profile);
-        // Only show popup if profile_completed is explicitly false
-        setNeedsProfileCompletion(profile.profile_completed === false);
         profileConfirmedRef.current = true;
-      } else if (!profileConfirmedRef.current) {
-        // Only set needs completion if profile was never confirmed
-        console.log('[Auth] No profile found during refresh - needs completion');
-        const minimalUser: UserProfile = {
-          id: session.user.id,
-          name: '',
-          email: session.user.email || '',
-          role: 'student',
-          created_at: session.user.created_at || '',
-          updated_at: session.user.created_at || '',
-        };
-        setUser(minimalUser);
-        setNeedsProfileCompletion(true);
+        // Trust the DB value unconditionally
+        const needsCompletion = profile.profile_completed === false;
+        console.log('[Auth] refreshUserProfile — profile_completed:', profile.profile_completed, '→ needsCompletion:', needsCompletion);
+        setNeedsProfileCompletion(needsCompletion);
       }
       console.log('[Auth] refreshUserProfile done');
     } catch (error) {
       console.error('[Auth] refreshUserProfile error:', error);
     }
-  }, [session?.user?.id]); // Fixed dependency
+  }, [session?.user?.id]);
 
   const markProfileCompleted = useCallback(async (userId: string) => {
     console.log('[Auth] markProfileCompleted for', userId);
@@ -219,33 +219,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setNeedsProfileCompletion(profile.profile_completed === false);
               profileConfirmedRef.current = true;
             } else {
-              console.log('[Auth] No profile found - user needs to complete profile');
-              // Create a minimal user object for the auth state
+              console.log('[Auth] No profile row found — new user, show completion popup');
               const minimalUser: UserProfile = {
                 id: currentSession.user.id,
                 name: '',
                 email: currentSession.user.email || '',
-                role: 'student', // Will be set during profile completion
+                role: 'student',
                 created_at: currentSession.user.created_at || '',
                 updated_at: currentSession.user.created_at || '',
               };
               setUser(minimalUser);
-              setNeedsProfileCompletion(true); // Show profile completion popup
+              setNeedsProfileCompletion(true);
               profileConfirmedRef.current = false;
             }
           } catch (profileError) {
-            console.error('[Auth] Error fetching profile:', profileError);
-            // If profile fetch fails, assume no profile exists
-            const minimalUser: UserProfile = {
-              id: currentSession.user.id,
-              name: '',
-              email: currentSession.user.email || '',
-              role: 'student',
-              created_at: currentSession.user.created_at || '',
-              updated_at: currentSession.user.created_at || '',
-            };
-            setUser(minimalUser);
-            setNeedsProfileCompletion(true);
+            console.error('[Auth] Error fetching profile — NOT showing popup to avoid false positive:', profileError);
+            // Fetch error ≠ missing profile. Don't show popup — wait for next refresh.
+            setUser(null);
+            setNeedsProfileCompletion(false);
             profileConfirmedRef.current = false;
           }
         } else {
