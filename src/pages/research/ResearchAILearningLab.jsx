@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { supabase } from "../../lib/supabaseClient";
 
 // ─── DESIGN TOKENS ─────────────────────────────────────────────────────────────
 const C = {
@@ -131,7 +132,91 @@ const RESEARCH_PROJECTS = [
   }
 ];
 
-const MOCK_PLATFORM_DATA = {
+// ─── PLATFORM DATA HOOK ─────────────────────────────────────────────────────────
+// Pulls real anonymized data from dashboard_stats via get_research_snapshot RPC.
+function usePlatformData() {
+  const [data, setData] = useState(null);
+  const [snapshots, setSnapshots] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        // Fetch last 90 days of daily snapshots for Oloibiri + Ibiade
+        const fromDate = new Date();
+        fromDate.setDate(fromDate.getDate() - 90);
+        const { data: rows } = await supabase.rpc("get_research_snapshot", {
+          p_from_date: fromDate.toISOString().split("T")[0],
+          p_granularity: "daily",
+        });
+
+        if (rows && rows.length > 0) {
+          const active = rows.filter(r => !r.k_anon_suppressed);
+          const oloibiri = active.filter(r => r.site === "Oloibiri");
+          const ibiade  = active.filter(r => r.site === "Ibiade");
+
+          // Unique learners (stable token)
+          const uniqueLearners = new Set(active.map(r => r.learner_token)).size;
+
+          // Latest month's avg AI proficiency
+          const latestMonth = active.reduce((max, r) => r.activity_date > max ? r.activity_date : max, "");
+          const latestRows = active.filter(r => r.activity_date === latestMonth);
+          const profAvg = latestRows.filter(r => r.ai_prof_min_score != null).length > 0
+            ? latestRows.reduce((s, r) => s + (r.ai_prof_min_score ?? 0), 0) / latestRows.length
+            : null;
+
+          // Survey counts — distinct activity_dates with data per site
+          const oloibiriSurveys = new Set(oloibiri.map(r => r.activity_date)).size;
+          const ibiadeSurveys   = new Set(ibiade.map(r => r.activity_date)).size;
+
+          // Monthly trend (last 5 months)
+          const monthMap = {};
+          active.forEach(r => {
+            const m = r.cohort_month;
+            if (!monthMap[m]) monthMap[m] = { scores: [], pue: [] };
+            if (r.ai_prof_min_score != null) monthMap[m].scores.push(r.ai_prof_min_score);
+            if (r.pue_score != null) monthMap[m].pue.push(r.pue_score);
+          });
+          const trend = Object.entries(monthMap)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .slice(-5)
+            .map(([month, d]) => ({
+              month: new Date(month).toLocaleDateString("en-US", { month: "short" }),
+              score: d.scores.length ? (d.scores.reduce((s,v) => s+v, 0) / d.scores.length).toFixed(2) : null,
+              pue:   d.pue.length   ? (d.pue.reduce((s,v) => s+v, 0)   / d.pue.length).toFixed(1)   : null,
+            }));
+
+          // Total sessions
+          const totalSessions = active.reduce((s, r) => s + (r.session_count ?? 0), 0);
+
+          setData({
+            totalSessions,
+            proficiencyAvg: profAvg ? parseFloat(profAvg.toFixed(2)) : null,
+            activeResearchers: uniqueLearners,
+            siteSurveys: { Oloibiri: oloibiriSurveys, Ibiade: ibiadeSurveys },
+            recentTrend: trend,
+            avgPUE: latestRows.filter(r => r.pue_score != null).length > 0
+              ? (latestRows.reduce((s,r) => s + (r.pue_score ?? 0), 0) / latestRows.length).toFixed(1)
+              : null,
+            roleReadyCount: active.filter(r => r.role_readiness_signal === 1).length,
+            peerDiffusionCount: active.filter(r => r.peer_diffusion_signal === 1).length,
+          });
+          setSnapshots(rows);
+        }
+      } catch (e) {
+        console.warn("[usePlatformData] fetch failed:", e.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  return { data, snapshots, loading };
+}
+
+// Fallback static data when RPC unavailable (e.g. unauthenticated view)
+const FALLBACK_PLATFORM_DATA = {
   totalSessions: 1607,
   proficiencyAvg: 2.3,
   activeResearchers: 20,
@@ -141,7 +226,9 @@ const MOCK_PLATFORM_DATA = {
     { month: "Mar", score: 1.8 }, { month: "Apr", score: 2.1 },
     { month: "May", score: 2.3 },
   ],
-  topLearners: ["Silas Clergy", "Amara O.", "Chinwe I.", "Emmanuel B."],
+  avgPUE: null,
+  roleReadyCount: null,
+  peerDiffusionCount: null,
 };
 
 // ─── STYLES ─────────────────────────────────────────────────────────────────────
@@ -820,12 +907,12 @@ function statusIcon(s) {
 }
 
 // ─── AI ASSISTANT HOOK ──────────────────────────────────────────────────────────
-function useAI(taskContext) {
+function useAI(taskContext, platformData) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const getSystemPrompt = useCallback(() => {
-    const pd = MOCK_PLATFORM_DATA;
+    const pd = platformData || FALLBACK_PLATFORM_DATA;
     return `You are a research assistant embedded in the vAI Community Research Platform, helping youth researchers in Oloibiri and Ibiade, Nigeria conduct participatory action research.
 
 CURRENT TASK CONTEXT:
@@ -835,13 +922,22 @@ CURRENT TASK CONTEXT:
 - Sub-task: ${taskContext?.taskName || ""}
 - Validation Required: ${taskContext?.validation || ""}
 
-REAL PLATFORM DATA (from vAI Supabase):
-- Total AI sessions across platform: ${pd.totalSessions}
-- Average proficiency score: ${pd.proficiencyAvg}/3.0 (UNESCO 0–3 scale)
-- Active researchers: ${pd.activeResearchers}
-- Oloibiri survey responses: ${pd.siteSurveys.Oloibiri}/100
-- Ibiade survey responses: ${pd.siteSurveys.Ibiade}/80
-- Proficiency trend (Jan–May 2026): ${pd.recentTrend.map(d => `${d.month}: ${d.score}`).join(", ")}
+LIVE PLATFORM DATA (from vAI anonymized daily snapshots):
+- Total AI sessions (last 90 days): ${pd.totalSessions?.toLocaleString() ?? "loading"}
+- Average AI proficiency score: ${pd.proficiencyAvg != null ? pd.proficiencyAvg + "/3.0 (UNESCO scale)" : "loading"}
+- Unique active learners: ${pd.activeResearchers ?? "loading"}
+- Oloibiri data collection days: ${pd.siteSurveys?.Oloibiri ?? "loading"}
+- Ibiade data collection days: ${pd.siteSurveys?.Ibiade ?? "loading"}
+- Avg Productive Use of Energy score: ${pd.avgPUE != null ? pd.avgPUE + "/100" : "not yet available"}
+- Learners showing role-readiness signals: ${pd.roleReadyCount ?? "loading"}
+- Peer diffusion signals detected: ${pd.peerDiffusionCount ?? "loading"}
+- Proficiency trend (recent months): ${pd.recentTrend?.map(d => `${d.month}: ${d.score}`).join(", ") ?? "loading"}
+
+DATA NOTES FOR RESEARCHER:
+- All data is k-anonymized (minimum cohort size 5) — no individual learner can be identified
+- PUE scores are on 0–100 scale (higher = more productive real-world AI use)
+- AI proficiency is on 0–3 UNESCO scale (0=none, 1=emerging, 2=developing, 3=proficient)
+- Archived daily snapshots go back to July 2025 — use the Data & Archives tab to explore trends
 
 YOUR ROLE:
 1. SCAFFOLD the task step by step — break it into clear, manageable actions
@@ -933,7 +1029,7 @@ function ParsedMessage({ text, onUseDraft }) {
 }
 
 // ─── AI CHAT PANEL ───────────────────────────────────────────────────────────────
-function AIChatPanel({ task, phase, project, onUseDraft }) {
+function AIChatPanel({ task, phase, project, onUseDraft, platformData }) {
   const taskContext = {
     projectTitle: project?.title,
     researchQuestion: project?.question,
@@ -941,7 +1037,7 @@ function AIChatPanel({ task, phase, project, onUseDraft }) {
     taskName: task?.name,
     validation: task?.validation,
   };
-  const { messages, loading, initConversation, send, setMessages } = useAI(taskContext);
+  const { messages, loading, initConversation, send, setMessages } = useAI(taskContext, platformData);
   const [input, setInput] = useState("");
   const msgsRef = useRef(null);
 
@@ -1015,7 +1111,7 @@ function AIChatPanel({ task, phase, project, onUseDraft }) {
 }
 
 // ─── TASK DETAIL VIEW ────────────────────────────────────────────────────────────
-function TaskDetail({ task, phase, project }) {
+function TaskDetail({ task, phase, project, platformData }) {
   const [findings, setFindings] = useState("");
   const [saved, setSaved] = useState(false);
   const [toast, setToast] = useState(null);
@@ -1033,7 +1129,7 @@ function TaskDetail({ task, phase, project }) {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const pd = MOCK_PLATFORM_DATA;
+  const pd = platformData || FALLBACK_PLATFORM_DATA;
 
   // Mock prior entries for the active task
   const priorEntries = task?.status === "active" || task?.status === "complete" ? [
@@ -1120,19 +1216,254 @@ function TaskDetail({ task, phase, project }) {
       </div>
 
       {/* AI Panel */}
-      <AIChatPanel task={task} phase={phase} project={project} onUseDraft={handleUseDraft} />
+      <AIChatPanel task={task} phase={phase} project={project} onUseDraft={handleUseDraft} platformData={platformData} />
 
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
 
+
+// ─── DATA & ARCHIVES PANEL ───────────────────────────────────────────────────────
+function DataArchivesPanel({ project, snapshots, platformData }) {
+  const pd = platformData || FALLBACK_PLATFORM_DATA;
+  const [activeTab, setActiveTab] = useState("summary");
+
+  // Filter snapshots to relevant sites
+  const relevant = snapshots.filter(r => !r.k_anon_suppressed);
+
+  // Monthly summaries
+  const monthlyMap = {};
+  relevant.forEach(r => {
+    const m = r.cohort_month;
+    if (!monthlyMap[m]) monthlyMap[m] = {
+      month: m, learners: new Set(), sessions: 0,
+      completions: 0, pueScores: [], profScores: [], certs: 0,
+    };
+    monthlyMap[m].learners.add(r.learner_token);
+    monthlyMap[m].sessions += r.session_count ?? 0;
+    monthlyMap[m].completions += r.activities_completed_today ?? 0;
+    monthlyMap[m].certs += r.certifications_earned_today ?? 0;
+    if (r.pue_score != null) monthlyMap[m].pueScores.push(r.pue_score);
+    if (r.ai_prof_min_score != null) monthlyMap[m].profScores.push(r.ai_prof_min_score);
+  });
+
+  const monthly = Object.values(monthlyMap)
+    .sort((a, b) => b.month.localeCompare(a.month))
+    .map(m => ({
+      ...m,
+      uniqueLearners: m.learners.size,
+      avgPUE: m.pueScores.length ? (m.pueScores.reduce((s,v)=>s+v,0)/m.pueScores.length).toFixed(1) : "—",
+      avgProf: m.profScores.length ? (m.profScores.reduce((s,v)=>s+v,0)/m.profScores.length).toFixed(2) : "—",
+    }));
+
+  // Recent daily snapshots
+  const recentDaily = relevant
+    .sort((a, b) => b.activity_date.localeCompare(a.activity_date))
+    .slice(0, 30);
+
+  const tabs = [
+    { key: "summary", label: "📊 Summary" },
+    { key: "monthly", label: "📅 Monthly" },
+    { key: "daily",   label: "📆 Daily Snapshots" },
+    { key: "surveys", label: "📋 Survey Status" },
+  ];
+
+  return (
+    <div style={{ padding: "20px 24px" }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 700, color: C.navy, marginBottom: 4 }}>
+          Data & Archives
+        </div>
+        <div style={{ fontSize: 12, color: C.muted, fontStyle: "italic" }}>
+          Anonymized daily snapshots from vAI platform · k-anonymized (min cohort 5) · No learner IDs
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)}
+            style={{
+              padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+              border: `1px solid ${activeTab === t.key ? C.navy : C.sand}`,
+              background: activeTab === t.key ? C.navy : C.white,
+              color: activeTab === t.key ? C.white : C.mid,
+              cursor: "pointer", fontFamily: "'Source Serif 4', serif",
+            }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Summary Tab */}
+      {activeTab === "summary" && (
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginBottom: 24 }}>
+            {[
+              { val: pd.totalSessions?.toLocaleString() ?? "—", lbl: "Total Sessions", color: C.navy },
+              { val: pd.activeResearchers ?? "—", lbl: "Unique Learners", color: C.teal },
+              { val: pd.proficiencyAvg != null ? pd.proficiencyAvg + "/3" : "—", lbl: "Avg AI Proficiency", color: C.gold },
+              { val: pd.avgPUE != null ? pd.avgPUE + "%" : "—", lbl: "Avg PUE Score", color: C.sage },
+              { val: pd.roleReadyCount ?? "—", lbl: "Role-Ready Signals", color: C.teal },
+              { val: pd.peerDiffusionCount ?? "—", lbl: "Peer Diffusion", color: C.blue },
+              { val: pd.siteSurveys?.Oloibiri ?? "—", lbl: "Oloibiri Data Days", color: C.navy },
+              { val: pd.siteSurveys?.Ibiade ?? "—", lbl: "Ibiade Data Days", color: C.navy },
+            ].map((s, i) => (
+              <div key={i} style={{ background: C.white, border: `1px solid ${C.sand}`, borderRadius: 10, padding: "14px 16px" }}>
+                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 700, color: s.color, lineHeight: 1 }}>{s.val}</div>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 4, letterSpacing: 0.3 }}>{s.lbl}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Trend chart (text-based sparkline) */}
+          {pd.recentTrend && pd.recentTrend.length > 0 && (
+            <div style={{ background: C.white, border: `1px solid ${C.sand}`, borderRadius: 10, padding: "16px 20px" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
+                AI Proficiency Trend
+              </div>
+              <div style={{ display: "flex", gap: 16, alignItems: "flex-end" }}>
+                {pd.recentTrend.map((d, i) => {
+                  const h = d.score ? Math.round((parseFloat(d.score) / 3) * 80) : 0;
+                  return (
+                    <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                      <div style={{ fontSize: 11, color: C.navy, fontWeight: 600 }}>{d.score ?? "—"}</div>
+                      <div style={{ width: 28, height: h, background: C.gold, borderRadius: "4px 4px 0 0", minHeight: 4 }} />
+                      <div style={{ fontSize: 10, color: C.muted }}>{d.month}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Monthly Tab */}
+      {activeTab === "monthly" && (
+        <div style={{ overflowX: "auto" }}>
+          {monthly.length === 0 ? (
+            <div style={{ padding: 32, textAlign: "center", color: C.muted, fontStyle: "italic" }}>No monthly data available yet.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: C.cream }}>
+                  {["Month", "Learners", "Sessions", "Completions", "Certs", "Avg PUE", "Avg AI Prof"].map(h => (
+                    <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: 0.8, textTransform: "uppercase", borderBottom: `1px solid ${C.sand}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {monthly.map((m, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${C.sand}88` }}>
+                    <td style={{ padding: "9px 12px", fontWeight: 600, color: C.navy }}>
+                      {new Date(m.month).toLocaleDateString("en-US", { year: "numeric", month: "short" })}
+                    </td>
+                    <td style={{ padding: "9px 12px" }}>{m.uniqueLearners}</td>
+                    <td style={{ padding: "9px 12px" }}>{m.sessions.toLocaleString()}</td>
+                    <td style={{ padding: "9px 12px" }}>{m.completions}</td>
+                    <td style={{ padding: "9px 12px" }}>{m.certs}</td>
+                    <td style={{ padding: "9px 12px" }}>{m.avgPUE !== "—" ? m.avgPUE + "%" : "—"}</td>
+                    <td style={{ padding: "9px 12px" }}>{m.avgProf !== "—" ? m.avgProf + "/3" : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Daily Snapshots Tab */}
+      {activeTab === "daily" && (
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, fontStyle: "italic" }}>
+            Showing last 30 days · {recentDaily.length} rows · all k-anonymized
+          </div>
+          {recentDaily.length === 0 ? (
+            <div style={{ padding: 32, textAlign: "center", color: C.muted, fontStyle: "italic" }}>No daily snapshot data available.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: C.cream }}>
+                  {["Date", "Site", "Learner Token", "Sessions", "Completed", "Certs", "PUE", "AI Prof"].map(h => (
+                    <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: 0.8, textTransform: "uppercase", borderBottom: `1px solid ${C.sand}`, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {recentDaily.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${C.sand}55` }}>
+                    <td style={{ padding: "7px 10px", color: C.mid }}>{r.activity_date}</td>
+                    <td style={{ padding: "7px 10px", fontWeight: 600, color: C.navy }}>{r.site}</td>
+                    <td style={{ padding: "7px 10px", fontFamily: "JetBrains Mono, monospace", fontSize: 11, color: C.muted }}>{r.learner_token?.slice(0, 12)}…</td>
+                    <td style={{ padding: "7px 10px" }}>{r.session_count ?? "—"}</td>
+                    <td style={{ padding: "7px 10px" }}>{r.activities_completed_today ?? 0}</td>
+                    <td style={{ padding: "7px 10px" }}>{r.certifications_earned_today ?? 0}</td>
+                    <td style={{ padding: "7px 10px" }}>{r.pue_score != null ? r.pue_score + "%" : "—"}</td>
+                    <td style={{ padding: "7px 10px" }}>{r.ai_prof_min_score != null ? r.ai_prof_min_score + "/3" : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Survey Status Tab */}
+      {activeTab === "surveys" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          {[
+            {
+              site: "Oloibiri",
+              target: 100,
+              responses: pd.siteSurveys?.Oloibiri ?? 0,
+              color: C.gold,
+              note: "Baseline surveys complete. Follow-up proficiency pull in progress.",
+            },
+            {
+              site: "Ibiade",
+              target: 80,
+              responses: pd.siteSurveys?.Ibiade ?? 0,
+              color: C.teal,
+              note: "Baseline surveys complete. Agency observation logs active.",
+            },
+          ].map(s => (
+            <div key={s.site} style={{ background: C.white, border: `1px solid ${C.sand}`, borderRadius: 10, padding: "18px 20px" }}>
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 16, fontWeight: 700, color: C.navy, marginBottom: 12 }}>
+                {s.site}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: C.muted }}>Data collection days</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: s.color }}>{s.responses}</span>
+              </div>
+              <div style={{ background: C.sand, borderRadius: 4, height: 8, marginBottom: 12 }}>
+                <div style={{ background: s.color, borderRadius: 4, height: 8, width: `${Math.min(100, (s.responses / s.target) * 100)}%`, transition: "width 0.5s" }} />
+              </div>
+              <div style={{ fontSize: 11, color: C.mid, fontStyle: "italic", lineHeight: 1.5 }}>{s.note}</div>
+            </div>
+          ))}
+
+          <div style={{ gridColumn: "1 / -1", background: C.parchment, border: `1px solid ${C.sand}`, borderRadius: 10, padding: "14px 18px" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: C.navy, marginBottom: 6 }}>📌 Data Collection Notes</div>
+            <div style={{ fontSize: 12, color: C.mid, lineHeight: 1.6 }}>
+              All data is collected automatically from the vAI platform and anonymized nightly. Survey response counts reflect unique learners with active platform records. 
+              Researchers cannot see individual learner data — all analysis uses anonymized cohort snapshots (minimum group size: 5).
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── PROJECT PAGE ────────────────────────────────────────────────────────────────
-function ProjectPage({ project, onBack }) {
+function ProjectPage({ project, onBack, snapshots, platformData }) {
   const [activePhaseId, setActivePhaseId] = useState(
     project.phases.find(p => p.status === "active")?.id || 1
   );
   const [activeTaskId, setActiveTaskId] = useState(null);
+  const [showDataArchives, setShowDataArchives] = useState(false);
 
   const activePhase = project.phases.find(p => p.id === activePhaseId);
   const activeTask = activePhase?.tasks?.find(t => t.id === activeTaskId);
@@ -1176,8 +1507,37 @@ function ProjectPage({ project, onBack }) {
         ))}
       </div>
 
+      {/* Data & Archives Toggle */}
+      <div style={{ padding: "0 24px 0", borderBottom: `1px solid ${C.sand}`, background: C.white, display: "flex", gap: 0 }}>
+        <button
+          onClick={() => setShowDataArchives(false)}
+          style={{
+            padding: "10px 18px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+            border: "none", background: "none", fontFamily: "'Source Serif 4', serif",
+            borderBottom: !showDataArchives ? `2px solid ${project.color}` : "2px solid transparent",
+            color: !showDataArchives ? project.color : C.mid,
+          }}>
+          🔬 Research Tasks
+        </button>
+        <button
+          onClick={() => setShowDataArchives(true)}
+          style={{
+            padding: "10px 18px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+            border: "none", background: "none", fontFamily: "'Source Serif 4', serif",
+            borderBottom: showDataArchives ? `2px solid ${project.color}` : "2px solid transparent",
+            color: showDataArchives ? project.color : C.mid,
+          }}>
+          📊 Data & Archives
+        </button>
+      </div>
+
+      {/* Data Archives View */}
+      {showDataArchives && (
+        <DataArchivesPanel project={project} snapshots={snapshots ?? []} platformData={platformData} />
+      )}
+
       {/* Phase Body */}
-      <div className="phase-body" style={setAccent(project.color)}>
+      {!showDataArchives && <div className="phase-body" style={setAccent(project.color)}>
         {/* Task List */}
         <div className="task-list">
           <div className="task-list-title">Sub-Tasks — {activePhase?.name}</div>
@@ -1218,7 +1578,7 @@ function ProjectPage({ project, onBack }) {
 
         {/* Task Detail or Empty */}
         {activeTask ? (
-          <TaskDetail task={activeTask} phase={activePhase} project={project} />
+          <TaskDetail task={activeTask} phase={activePhase} project={project} platformData={platformData} />
         ) : (
           <div className="task-detail">
             <div className="task-detail-empty">
@@ -1230,7 +1590,7 @@ function ProjectPage({ project, onBack }) {
             </div>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -1317,7 +1677,7 @@ function SignupForm({ project, onSuccess, onCancel }) {
 }
 
 // ─── MAIN LANDING ────────────────────────────────────────────────────────────────
-function ResearchLanding({ onSelectProject, onSignup }) {
+function ResearchLanding({ onSelectProject, onSignup, platformData }) {
   return (
     <div>
       <div className="landing-hero">
@@ -1327,20 +1687,20 @@ function ResearchLanding({ onSelectProject, onSignup }) {
           <p className="hero-sub">You are not just a learner — you are a researcher. Join a study team, investigate real questions, and earn a University of Dayton research credential.</p>
           <div className="hero-stats">
             <div className="hero-stat">
-              <div className="hero-stat-val">20</div>
-              <div className="hero-stat-lbl">Active Researchers</div>
+              <div className="hero-stat-val">{platformData?.activeResearchers ?? 20}</div>
+              <div className="hero-stat-lbl">Active Learners</div>
             </div>
             <div className="hero-stat">
               <div className="hero-stat-val">3</div>
               <div className="hero-stat-lbl">Open Studies</div>
             </div>
             <div className="hero-stat">
-              <div className="hero-stat-val">1,607</div>
+              <div className="hero-stat-val">{platformData?.totalSessions?.toLocaleString() ?? "1,607"}</div>
               <div className="hero-stat-lbl">AI Sessions Tracked</div>
             </div>
             <div className="hero-stat">
-              <div className="hero-stat-val">5</div>
-              <div className="hero-stat-lbl">Credential Badges</div>
+              <div className="hero-stat-val">{platformData?.proficiencyAvg != null ? platformData.proficiencyAvg + "/3" : "—"}</div>
+              <div className="hero-stat-lbl">Avg AI Proficiency</div>
             </div>
           </div>
         </div>
@@ -1407,6 +1767,7 @@ export default function ResearchPlatform() {
   const [selectedProject, setSelectedProject] = useState(null);
   const [signupProject, setSignupProject] = useState(null);
   const [mockUser] = useState({ name: "Amara Osei", site: "Oloibiri", initials: "AO" });
+  const { data: platformData, snapshots } = usePlatformData();
 
   const handleSelectProject = (proj) => {
     setSelectedProject(proj);
@@ -1479,11 +1840,11 @@ export default function ResearchPlatform() {
 
           {/* Views */}
           {view === "landing" && (
-            <ResearchLanding onSelectProject={handleSelectProject} onSignup={handleSignup} />
+            <ResearchLanding onSelectProject={handleSelectProject} onSignup={handleSignup} platformData={platformData} />
           )}
 
           {view === "project" && selectedProject && (
-            <ProjectPage project={selectedProject} onBack={() => setView("landing")} />
+            <ProjectPage project={selectedProject} onBack={() => setView("landing")} snapshots={snapshots} platformData={platformData} />
           )}
 
           {view === "signup" && signupProject && (
