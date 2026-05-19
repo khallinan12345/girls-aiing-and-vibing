@@ -221,11 +221,8 @@ const HomePage: React.FC = () => {
       ? 'Learn AI. Get Your Certificate.'
       : 'Use AI. Get Certified.',
     headline2: lvl <= 1
-      ? 'Show What You Can Do. Gain Employable Skills.'
+      ? 'Show What You Can Do.'
       : 'Show the World.',
-    headline3: lvl <= 1
-      ? 'Impact Your Community!'
-      : 'Impact Your Community.',
 
     // ── Welcome card ────────────────────────────────────────────────────────
     welcomeGreeting: lvl <= 1
@@ -248,28 +245,14 @@ const HomePage: React.FC = () => {
         Show schools and employers what you can do.
       </>
     ) : lvl === 1 ? (
-      <div className="flex flex-col items-center gap-4 w-full">
-        <div className="flex items-start gap-3 max-w-2xl w-full">
-          <span className="text-yellow-200 font-bold text-2xl shrink-0">1.</span>
-          <p className="text-left"><strong className="text-yellow-200">Build your English.</strong> Practise speaking and listening with your AI coach.</p>
-        </div>
-        <div className="flex items-start gap-3 max-w-2xl w-full">
-          <span className="text-blue-200 font-bold text-2xl shrink-0">2.</span>
-          <p className="text-left"><strong className="text-blue-200">Learn AI and Tech Skills.</strong> Try things yourself. Your coach will help you.</p>
-        </div>
-        <div className="flex items-start gap-3 max-w-2xl w-full">
-          <span className="text-green-200 font-bold text-2xl shrink-0">3.</span>
-          <p className="text-left"><strong className="text-green-200">Get your certificate.</strong> Show what you know to schools and employers.</p>
-        </div>
-        <div className="flex items-start gap-3 max-w-2xl w-full">
-          <span className="text-orange-200 font-bold text-2xl shrink-0">4.</span>
-          <p className="text-left"><strong className="text-orange-200">Impact Your Community.</strong> Use AI to help farmers, healthcare, and local entrepreneurs.</p>
-        </div>
-        <div className="flex items-start gap-3 max-w-2xl w-full">
-          <span className="text-pink-200 font-bold text-2xl shrink-0">5.</span>
-          <p className="text-left"><strong className="text-pink-200">Lead Research.</strong> Join open-source, community-based, youth-led research projects.</p>
-        </div>
-      </div>
+      <>
+        <strong className="text-yellow-200">Step 1 — Build your English.</strong>{' '}
+        Practise speaking and listening with your AI coach.{' '}
+        <strong className="text-blue-200"> Step 2 — Learn AI.</strong>{' '}
+        Try things yourself. Your coach will help you.{' '}
+        <strong className="text-green-200"> Step 3 — Get your certificate.</strong>{' '}
+        Show what you know to schools and employers.
+      </>
     ) : lvl === 2 ? (
       <>
         <strong className="text-yellow-200">First, build your English.</strong>{' '}
@@ -290,16 +273,12 @@ const HomePage: React.FC = () => {
     ),
 
     bodyDefault: lvl <= 1 ? (
-      <div className="flex flex-col items-center gap-4 w-full">
-        <div className="flex items-start gap-3 max-w-2xl w-full">
-          <span className="text-yellow-200 font-bold text-2xl shrink-0">1.</span>
-          <p className="text-left"><strong className="text-yellow-200">Learn AI and Tech Skills.</strong> Build your skills with your coach. Go at your own pace.</p>
-        </div>
-        <div className="flex items-start gap-3 max-w-2xl w-full">
-          <span className="text-green-200 font-bold text-2xl shrink-0">2.</span>
-          <p className="text-left"><strong className="text-green-200">Get your certificate.</strong> Show schools and employers what you have learned.</p>
-        </div>
-      </div>
+      <>
+        <strong className="text-yellow-200">Step 1 — Learn.</strong>{' '}
+        Build your AI skills with your coach. Go at your own pace.{' '}
+        <strong className="text-green-200"> Step 2 — Get your certificate.</strong>{' '}
+        Show schools and employers what you have learned.
+      </>
     ) : (
       <>
         <strong className="text-yellow-200">First, Learn.</strong>{' '}
@@ -402,14 +381,11 @@ const HomePage: React.FC = () => {
                   </span>
                 </div>
               )}
-              <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold bg-gradient-to-r from-pink-300 via-purple-300 to-blue-300 bg-clip-text text-transparent mb-4">
+              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-pink-300 via-purple-300 to-blue-300 bg-clip-text text-transparent mb-3">
                 {loadingContinent ? 'Loading…' : content.headline1}
               </h1>
               <h2 className="text-4xl md:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-blue-300 via-purple-300 to-pink-300 bg-clip-text text-transparent">
                 {content.headline2}
-              </h2>
-              <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-orange-300 via-pink-300 to-red-300 bg-clip-text text-transparent mt-2">
-                {content.headline3}
               </h2>
             </div>
 
@@ -484,32 +460,7 @@ const HomePage: React.FC = () => {
               </div>
             )}
 
-            <div className="text-xl md:text-2xl text-white mb-12 max-w-3xl w-full flex flex-col items-center">
-              {isAfrica ? content.bodyAfrica : content.bodyDefault}
-            </div>
 
-            <div className="flex flex-wrap gap-4 justify-center mb-16">
-              {isAfrica && (
-                <Link to="/english-skills">
-                  <button className="bg-gradient-to-r from-cyan-600 to-teal-600 text-white hover:from-cyan-700 hover:to-teal-700 px-8 py-4 rounded-lg font-bold text-xl shadow-lg transition-all hover:scale-105 flex items-center gap-3">
-                    <Globe2 size={24} />
-                    {content.btnEnglish}
-                  </button>
-                </Link>
-              )}
-              <Link to="/learning/ai">
-                <button className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white hover:from-blue-700 hover:to-cyan-700 px-8 py-4 rounded-lg font-bold text-xl shadow-lg transition-all hover:scale-105 flex items-center gap-3">
-                  <Brain size={24} />
-                  {content.btnLearnAI}
-                </button>
-              </Link>
-              <Link to="/certifications/ai-proficiency">
-                <button className="bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700 px-8 py-4 rounded-lg font-bold text-xl shadow-lg transition-all hover:scale-105 flex items-center gap-3">
-                  <Award size={24} />
-                  {content.btnCertify}
-                </button>
-              </Link>
-            </div>
 
             {/* English Skills Step — Africa only */}
             {isAfrica && (
