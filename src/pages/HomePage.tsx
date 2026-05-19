@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import AppLayout from '../components/layout/AppLayout';
-import { Sparkles, Brain, Award, CheckCircle, Globe2, Newspaper, ChevronRight, X as XIcon } from 'lucide-react';
+import { Sparkles, Brain, Award, CheckCircle, Globe2, Newspaper, ChevronRight, X as XIcon, Sprout, FlaskConical } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabaseClient';
 import { useBranding } from '../lib/useBranding';
