@@ -330,6 +330,26 @@ const HomePage: React.FC = () => {
     btnAIProficiency: lvl <= 1 ? 'AI Certificate →'       : 'AI Proficiency →',
     btnAIReadySkills: lvl <= 1 ? 'Skills Certificate →'   : 'AI Ready Skills →',
 
+    // ── Impact step ──────────────────────────────────────────────────────────
+    impactStepHeading: 'Step 4: Impact Your Community',
+    impactStepDesc: lvl <= 1
+      ? 'Use AI to help people around you — farmers, animal raisers, fisherpeople, entrepreneurs, and community members who need healthcare triage. Your skills can change lives.'
+      : 'Apply your AI skills to real community problems — supporting agriculture, health triage, local enterprise, and economic development.',
+    impactStepBtn: lvl <= 1 ? 'Explore Community AI →' : 'Community Impact →',
+    impactAreas: lvl <= 1
+      ? ['Farming 🌾', 'Healthcare 🏥', 'Fishing 🐟', 'Business 💼']
+      : ['Agriculture', 'Health Triage', 'Aquaculture', 'Entrepreneurship'],
+
+    // ── Research step ────────────────────────────────────────────────────────
+    researchStepHeading: 'Step 5: Be Part of a Research Team',
+    researchStepDesc: lvl <= 1
+      ? 'Join a real research project with young people from your community. Help answer important questions about learning, health, and AI — and earn a US college research certification. Your voice matters to the world.'
+      : 'Join open-source, community-based, youth-led research projects and earn a US college research certification. Contribute to global knowledge on AI, learning outcomes, and community development.',
+    researchStepBtn: lvl <= 1 ? 'See Research Projects →' : 'Research Projects →',
+    researchAreas: lvl <= 1
+      ? ['Learning 📚', 'Health 💊', 'Hope & Future 🌱', 'US College Cert 🎓']
+      : ['Learning Outcomes', 'Hope & Agency', 'Community Spillover', 'US Research Certification'],
+
     // ── Framework footer ──────────────────────────────────────────────────────
     frameworkText: lvl <= 1
       ? '🎓 This programme is trusted by ISTE, UNESCO, and CSTA — big global organisations. Real skills for school, work, and life.'
@@ -546,6 +566,68 @@ const HomePage: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Step 4: Impact Your Community — Africa only */}
+            {isAfrica && (
+              <div className="max-w-5xl w-full bg-gradient-to-r from-orange-500/20 to-amber-500/20 backdrop-blur-md rounded-2xl p-8 mb-8 shadow-2xl border-2 border-orange-400/50">
+                <div className="flex items-center justify-center gap-3 mb-6">
+                  <Sprout className="h-10 w-10 text-orange-300" />
+                  <h3 className="text-3xl md:text-4xl font-bold text-white">
+                    {content.impactStepHeading}
+                  </h3>
+                </div>
+                <div className="bg-white/10 rounded-lg p-6 mb-4">
+                  <p className="text-xl text-white text-center mb-4">
+                    {content.impactStepDesc}
+                  </p>
+                  <div className="flex justify-center">
+                    <Link to="/community-impact/ai-ambassadors">
+                      <button className="bg-white text-orange-700 hover:bg-orange-600 hover:text-white px-8 py-3 rounded-lg font-bold text-lg shadow-lg transition-all hover:scale-105">
+                        {content.impactStepBtn}
+                      </button>
+                    </Link>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {content.impactAreas.map((area: string) => (
+                    <div key={area} className="bg-white/10 rounded-lg px-3 py-2 text-center">
+                      <p className="text-sm font-semibold text-orange-200">{area}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Step 5: Research Team — Africa only */}
+            {isAfrica && (
+              <div className="max-w-5xl w-full bg-gradient-to-r from-pink-500/20 to-rose-500/20 backdrop-blur-md rounded-2xl p-8 mb-8 shadow-2xl border-2 border-pink-400/50">
+                <div className="flex items-center justify-center gap-3 mb-6">
+                  <FlaskConical className="h-10 w-10 text-pink-300" />
+                  <h3 className="text-3xl md:text-4xl font-bold text-white">
+                    {content.researchStepHeading}
+                  </h3>
+                </div>
+                <div className="bg-white/10 rounded-lg p-6 mb-4">
+                  <p className="text-xl text-white text-center mb-4">
+                    {content.researchStepDesc}
+                  </p>
+                  <div className="flex justify-center">
+                    <Link to="/research/ai-learning-lab">
+                      <button className="bg-white text-pink-700 hover:bg-pink-600 hover:text-white px-8 py-3 rounded-lg font-bold text-lg shadow-lg transition-all hover:scale-105">
+                        {content.researchStepBtn}
+                      </button>
+                    </Link>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {content.researchAreas.map((area: string) => (
+                    <div key={area} className="bg-white/10 rounded-lg px-3 py-2 text-center">
+                      <p className="text-sm font-semibold text-pink-200">{area}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Framework Section */}
             <div className="max-w-4xl w-full bg-gradient-to-r from-blue-500/20 to-purple-500/20 backdrop-blur-sm rounded-xl p-6 border border-white/20">
