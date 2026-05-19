@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { User, GraduationCap, Globe, MapPin, Key, Building2, Search, PlusCircle, Upload, Copy, CheckCircle } from 'lucide-react';
 
-// Leader can either join an existing org (they have a co-leader join code)
+// Site leader can either join an existing org (they have a co-leader join code)
 // or create a brand-new org for their own cohort.
 type LeaderOrgMode = 'choose' | 'join' | 'create';
 
@@ -84,7 +84,7 @@ const NIGERIA_STATE_CITY_MAP: Record<string, string> = {
 };
 
 const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId, email, onComplete }) => {
-  const [role, setRole] = useState<'learner' | 'leader'>('learner');
+  const [role, setRole] = useState<'student' | 'site_leader'>('student');
 
   // ── Shared fields ──────────────────────────────────────────────────────────
   const [name, setName] = useState('');
@@ -188,7 +188,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
 
     if (!name.trim()) { setError('Please enter your name'); return; }
 
-    if (role === 'leader') {
+    if (role === 'site_leader') {
       if (leaderOrgMode === 'choose') {
         setError('Please choose to join an existing organization or create a new one'); return;
       }
@@ -217,14 +217,14 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
       let join_code_used: string | null  = null;
 
       // ── LEADER: join existing org ──────────────────────────────────────────
-      if (role === 'leader' && leaderOrgMode === 'join' && coOrgCtx) {
+      if (role === 'site_leader' && leaderOrgMode === 'join' && coOrgCtx) {
         organization_id = coOrgCtx.id;
         join_code_used  = coJoinCode;
         // co-leader just links their profile to the org; leader_id stays unchanged
       }
 
       // ── LEADER: create new org ─────────────────────────────────────────────
-      if (role === 'leader' && leaderOrgMode === 'create') {
+      if (role === 'site_leader' && leaderOrgMode === 'create') {
         const { data: codeData } = await supabase.rpc('generate_join_code');
         const newCode = codeData as string;
         const { data: orgData, error: orgError } = await supabase
@@ -285,7 +285,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
       }
 
       // ── LEARNER with code: link to org ─────────────────────────────────────
-      if (role === 'learner' && orgCtx) {
+      if (role === 'student' && orgCtx) {
         organization_id = orgCtx.id;
         join_code_used  = joinCode;
       }
@@ -294,19 +294,19 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
       // Learners inherit from their org. Co-leaders inherit from the org they joined.
       // New-org leaders use what they filled in.
       const profileContinent =
-        role === 'learner'                        ? (orgCtx?.continent    ?? '') :
+        role === 'student'                        ? (orgCtx?.continent    ?? '') :
         leaderOrgMode === 'join'                  ? (coOrgCtx?.continent  ?? '') :
         continent;
       const profileCountry =
-        role === 'learner'                        ? (orgCtx?.country      ?? '') :
+        role === 'student'                        ? (orgCtx?.country      ?? '') :
         leaderOrgMode === 'join'                  ? (coOrgCtx?.country    ?? '') :
         country;
       const profileState =
-        role === 'learner'                        ? (orgCtx?.state        ?? null) :
+        role === 'student'                        ? (orgCtx?.state        ?? null) :
         leaderOrgMode === 'join'                  ? (coOrgCtx?.state      ?? null) :
         (state || null);
       const profileCity =
-        role === 'learner'                        ? (orgCtx?.city         ?? null) :
+        role === 'student'                        ? (orgCtx?.city         ?? null) :
         leaderOrgMode === 'join'                  ? (coOrgCtx?.city       ?? null) :
         (city || null);
 
@@ -323,13 +323,13 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
         organization_id,
         join_code_used,
         // Primary leaders (who registered the org) get this flag — co-leaders do not
-        is_primary_leader:  role === 'leader' && leaderOrgMode === 'create',
+        is_primary_leader:  role === 'site_leader' && leaderOrgMode === 'create',
         profile_completed:  true,
         created_at:         new Date().toISOString(),
         updated_at:         new Date().toISOString(),
       };
 
-      if (role === 'learner') {
+      if (role === 'student') {
         profilePayload.grade_level = parseInt(gradeLevel, 10);
       }
 
@@ -341,7 +341,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
       }
 
       // ── Seed dashboard activities for learners ─────────────────────────────
-      if (role === 'learner') {
+      if (role === 'student') {
         const seedContinent = profileContinent || 'Africa';
         const { error: rpcError } = await supabase.rpc(
           'create_grade_appropriate_dashboard_activities_by_continent',
@@ -365,7 +365,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
       }
 
       // Show join-code modal for new org leaders; proceed immediately for everyone else
-      if (role === 'leader' && leaderOrgMode === 'create') {
+      if (role === 'site_leader' && leaderOrgMode === 'create') {
         // modal shown via newOrgJoinCode state — onComplete called when user dismisses
       } else {
         onComplete();
@@ -380,7 +380,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
 
   // ── Whether the learner must choose their own gender ──────────────────────
   // Only show gender picker to learners if org has mixed genders OR no org linked
-  const learnerNeedsGender = role === 'learner' && (!orgCtx || orgCtx.learner_gender === 'both');
+  const learnerNeedsGender = role === 'student' && (!orgCtx || orgCtx.learner_gender === 'both');
 
   // ── Join code modal ────────────────────────────────────────────────────────
   if (newOrgJoinCode && newOrgName) {
@@ -454,19 +454,22 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
               </label>
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { value: 'learner', label: 'Learner / Student', desc: 'I am here to learn' },
-                  { value: 'leader', label: 'Leader / Educator', desc: 'I lead a learning group' },
+                  { value: 'student',      label: 'Student / Learner',  desc: 'I have a join code from my teacher' },
+                  { value: 'site_leader',  label: 'Teacher / Educator', desc: 'I lead a learning group' },
                 ].map(opt => (
                   <label key={opt.value}
                     className={'flex flex-col p-3 border-2 rounded-lg cursor-pointer transition-colors ' +
                       (role === opt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300')}>
                     <input type="radio" name="role" value={opt.value} checked={role === opt.value}
-                      onChange={() => setRole(opt.value as any)} className="sr-only" />
+                      onChange={() => setRole(opt.value as 'student' | 'site_leader')} className="sr-only" />
                     <span className="text-sm font-semibold text-gray-900">{opt.label}</span>
                     <span className="text-xs text-gray-500 mt-0.5">{opt.desc}</span>
                   </label>
                 ))}
               </div>
+              <p className="mt-2 text-xs text-gray-400 italic">
+                Research leads and platform administrators are assigned by an admin after signup.
+              </p>
             </div>
 
             {/* ── Name (everyone) ─────────────────────────────────────────── */}
@@ -480,7 +483,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
             {/* ══════════════════════════════════════════════════════════════
                 LEARNER FLOW
             ══════════════════════════════════════════════════════════════ */}
-            {role === 'learner' && (
+            {role === 'student' && (
               <>
                 {/* Join code */}
                 <div>
@@ -593,7 +596,7 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
             {/* ══════════════════════════════════════════════════════════════
                 LEADER FLOW
             ══════════════════════════════════════════════════════════════ */}
-            {role === 'leader' && (
+            {role === 'site_leader' && (
               <>
                 {/* Gender */}
                 <div>
@@ -857,9 +860,9 @@ const ProfileCompletionPopup: React.FC<ProfileCompletionPopupProps> = ({ userId,
                 className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium transition-colors">
                 {isSubmitting
                   ? 'Completing...'
-                  : role === 'leader' && leaderOrgMode === 'create'
+                  : role === 'site_leader' && leaderOrgMode === 'create'
                   ? 'Register Organization & Complete Profile'
-                  : role === 'leader' && leaderOrgMode === 'join'
+                  : role === 'site_leader' && leaderOrgMode === 'join'
                   ? 'Join as Co-Facilitator & Complete Profile'
                   : 'Complete Profile'}
               </button>

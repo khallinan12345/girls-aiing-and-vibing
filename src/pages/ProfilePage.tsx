@@ -27,7 +27,7 @@ interface UserProfile {
   id: string;
   name: string;
   email: string;
-  role: 'student' | 'learner' | 'teacher' | 'leader' | 'platform_administrator';
+  role: 'student' | 'teacher' | 'platform_administrator' | 'site_leader' | 'research_lead';
   grade_level?: number;
   gender?: 'female' | 'male' | 'other';
   continent?: string;
@@ -168,7 +168,7 @@ const ProfilePage: React.FC = () => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    role: 'learner' as 'learner' | 'leader' | 'student' | 'teacher',
+    role: 'student' as 'student' | 'teacher' | 'platform_administrator' | 'site_leader' | 'research_lead',
     grade_level: '1',
     gender: 'female' as 'female' | 'male' | 'other',
     continent: '',
@@ -377,17 +377,17 @@ const ProfilePage: React.FC = () => {
             .from('profiles')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', profileData.organization_id)
-            .not('role', 'in', '("leader","platform_administrator")');
+            .not('role', 'in', '("site_leader","platform_administrator","research_lead")');
 
           setOrgInfo({ ...orgData, join_codes: codes, learner_count: count ?? 0 });
 
           // For leaders — fetch the student list scoped by their role
-          if (profileData.role === 'leader' || profileData.role === 'platform_administrator') {
+          if (['site_leader', 'platform_administrator', 'research_lead'].includes(profileData.role)) {
             setLoadingStudents(true);
             let studentQuery = supabase
               .from('profiles')
               .select('id, name, email, join_code_used, created_at')
-              .not('role', 'in', '("leader","platform_administrator")')
+              .not('role', 'in', '("site_leader","platform_administrator","research_lead")')
               .order('created_at', { ascending: false });
 
             if (profileData.is_primary_leader) {
@@ -568,7 +568,7 @@ const ProfilePage: React.FC = () => {
     setFormData({
       name: profile?.name || '',
       email: profile?.email || '',
-      role: profile?.role || 'student',
+      role: (profile?.role as any) || 'student',
       grade_level: profile?.grade_level?.toString() || '1',
       gender: profile?.gender || 'female',
       continent: profile?.continent || '',
@@ -724,26 +724,40 @@ const ProfilePage: React.FC = () => {
                     <div className="w-full">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         <Shield className="inline h-4 w-4 mr-1" />
-                        Role *
+                        Role
                       </label>
-                      <div className="space-y-2">
-                        {(['student', 'teacher'] as const).map((role) => (
-                          <label key={role} className="flex items-center">
-                            <input
-                              type="radio"
-                              name="role"
-                              value={role}
-                              checked={formData.role === role}
-                              onChange={(e) => setFormData(prev => ({ ...prev, role: e.target.value as 'student' | 'teacher' }))}
-                              className="mr-3"
-                              required
-                            />
-                            <span className="capitalize">
-                              {role === 'student' ? 'Student' : 'Teacher/Educator'}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
+
+                      {/* platform_administrator can assign any role via dropdown */}
+                      {profile.role === 'platform_administrator' ? (
+                        <select
+                          value={formData.role}
+                          onChange={(e) => setFormData(prev => ({
+                            ...prev,
+                            role: e.target.value as typeof formData.role
+                          }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        >
+                          <option value="student">Student</option>
+                          <option value="teacher">Teacher / Educator</option>
+                          <option value="site_leader">Site Leader</option>
+                          <option value="research_lead">Research Lead</option>
+                          <option value="platform_administrator">Platform Administrator</option>
+                        </select>
+                      ) : (
+                        /* All other roles: read-only — role is set by join code or admin */
+                        <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
+                          <Shield className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                          <span className="capitalize font-medium">
+                            {formData.role === 'student'                ? 'Student'
+                              : formData.role === 'teacher'             ? 'Teacher / Educator'
+                              : formData.role === 'site_leader'         ? 'Site Leader'
+                              : formData.role === 'research_lead'       ? 'Research Lead'
+                              : formData.role === 'platform_administrator' ? 'Platform Administrator'
+                              : formData.role}
+                          </span>
+                          <span className="ml-auto text-xs text-gray-400 italic">assigned by your organization</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Grade Level (students only) */}
