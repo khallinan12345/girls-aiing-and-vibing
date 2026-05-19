@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import AppLayout from '../components/layout/AppLayout';
-import { Sparkles, Brain, Award, CheckCircle, Globe2, Newspaper, ChevronRight, X as XIcon, Sprout, FlaskConical } from 'lucide-react';
+import { Sparkles, Brain, Award, CheckCircle, Globe2, Newspaper, ChevronRight, X as XIcon } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabaseClient';
 import { useBranding } from '../lib/useBranding';
@@ -221,8 +221,11 @@ const HomePage: React.FC = () => {
       ? 'Learn AI. Get Your Certificate.'
       : 'Use AI. Get Certified.',
     headline2: lvl <= 1
-      ? 'Show What You Can Do.'
+      ? 'Show What You Can Do. Gain Employable Skills.'
       : 'Show the World.',
+    headline3: lvl <= 1
+      ? 'Impact Your Community!'
+      : 'Impact Your Community.',
 
     // ── Welcome card ────────────────────────────────────────────────────────
     welcomeGreeting: lvl <= 1
@@ -245,18 +248,28 @@ const HomePage: React.FC = () => {
         Show schools and employers what you can do.
       </>
     ) : lvl === 1 ? (
-      <>
-        <strong className="text-yellow-200">Step 1 — Build your English.</strong>{' '}
-        Practise speaking and listening with your AI coach.{' '}
-        <strong className="text-blue-200"> Step 2 — Learn AI and Tech Skills.</strong>{' '}
-        Try things yourself. Your coach will help you.{' '}
-        <strong className="text-green-200"> Step 3 — Get your certificate.</strong>{' '}
-        Show what you know to schools and employers.{' '}
-        <strong className="text-orange-200"> Step 4 — Impact Your Community.</strong>{' '}
-        Use AI to help farmers, healthcare, and local entrepreneurs.{' '}
-        <strong className="text-pink-200"> Step 5 — Lead Research.</strong>{' '}
-        Join open-source, community-based, youth-led research projects.
-      </>
+      <div className="flex flex-col items-center gap-4 w-full">
+        <div className="flex items-start gap-3 max-w-2xl w-full">
+          <span className="text-yellow-200 font-bold text-2xl shrink-0">1.</span>
+          <p className="text-left"><strong className="text-yellow-200">Build your English.</strong> Practise speaking and listening with your AI coach.</p>
+        </div>
+        <div className="flex items-start gap-3 max-w-2xl w-full">
+          <span className="text-blue-200 font-bold text-2xl shrink-0">2.</span>
+          <p className="text-left"><strong className="text-blue-200">Learn AI and Tech Skills.</strong> Try things yourself. Your coach will help you.</p>
+        </div>
+        <div className="flex items-start gap-3 max-w-2xl w-full">
+          <span className="text-green-200 font-bold text-2xl shrink-0">3.</span>
+          <p className="text-left"><strong className="text-green-200">Get your certificate.</strong> Show what you know to schools and employers.</p>
+        </div>
+        <div className="flex items-start gap-3 max-w-2xl w-full">
+          <span className="text-orange-200 font-bold text-2xl shrink-0">4.</span>
+          <p className="text-left"><strong className="text-orange-200">Impact Your Community.</strong> Use AI to help farmers, healthcare, and local entrepreneurs.</p>
+        </div>
+        <div className="flex items-start gap-3 max-w-2xl w-full">
+          <span className="text-pink-200 font-bold text-2xl shrink-0">5.</span>
+          <p className="text-left"><strong className="text-pink-200">Lead Research.</strong> Join open-source, community-based, youth-led research projects.</p>
+        </div>
+      </div>
     ) : lvl === 2 ? (
       <>
         <strong className="text-yellow-200">First, build your English.</strong>{' '}
@@ -277,12 +290,16 @@ const HomePage: React.FC = () => {
     ),
 
     bodyDefault: lvl <= 1 ? (
-      <>
-        <strong className="text-yellow-200">Step 1 — Learn.</strong>{' '}
-        Build your AI skills with your coach. Go at your own pace.{' '}
-        <strong className="text-green-200"> Step 2 — Get your certificate.</strong>{' '}
-        Show schools and employers what you have learned.
-      </>
+      <div className="flex flex-col items-center gap-4 w-full">
+        <div className="flex items-start gap-3 max-w-2xl w-full">
+          <span className="text-yellow-200 font-bold text-2xl shrink-0">1.</span>
+          <p className="text-left"><strong className="text-yellow-200">Learn AI and Tech Skills.</strong> Build your skills with your coach. Go at your own pace.</p>
+        </div>
+        <div className="flex items-start gap-3 max-w-2xl w-full">
+          <span className="text-green-200 font-bold text-2xl shrink-0">2.</span>
+          <p className="text-left"><strong className="text-green-200">Get your certificate.</strong> Show schools and employers what you have learned.</p>
+        </div>
+      </div>
     ) : (
       <>
         <strong className="text-yellow-200">First, Learn.</strong>{' '}
@@ -312,12 +329,12 @@ const HomePage: React.FC = () => {
 
     // ── Learning step ────────────────────────────────────────────────────────
     learningStepHeading: lvl <= 1
-      ? (isAfrica ? 'Step 2: Learn AI and Tech Skills' : 'Step 1: Learn AI and Tech Skills')
+      ? (isAfrica ? 'Step 2: Learn AI' : 'Step 1: Learn AI')
       : (isAfrica ? 'Step 2: Learn'    : 'Step 1: Learn'),
     learningStepDesc: lvl <= 0
       ? 'Learn about AI with your coach. Try things yourself. You can go slowly — that is fine.'
       : lvl === 1
-      ? 'Learn AI and tech skills with your coach. Try things yourself — coding, problem-solving, digital tools. Ask questions any time. Go at your own pace.'
+      ? 'Learn AI skills with your coach. Try things yourself. Ask questions any time. Go at your own pace.'
       : 'Start with AI-powered learning modules that teach you essential skills through hands-on practice and personalized guidance.',
     btnAILearning:   lvl <= 1 ? 'AI Learning →'        : 'AI Learning →',
     btnSkillsDev:    lvl <= 1 ? 'Skills Practice →'    : 'Skills Development →',
@@ -333,26 +350,6 @@ const HomePage: React.FC = () => {
       : "Once you've learned the skills, earn globally-recognized certifications that prove your mastery to schools, employers, and communities.",
     btnAIProficiency: lvl <= 1 ? 'AI Certificate →'       : 'AI Proficiency →',
     btnAIReadySkills: lvl <= 1 ? 'Skills Certificate →'   : 'AI Ready Skills →',
-
-    // ── Impact step ──────────────────────────────────────────────────────────
-    impactStepHeading: lvl <= 1 ? 'Step 4: Impact Your Community' : 'Step 4: Community Impact',
-    impactStepDesc: lvl <= 1
-      ? 'Use AI to help people around you — farmers, animal raisers, fisherpeople, entrepreneurs, and community members who need healthcare triage. Your skills can change lives.'
-      : 'Apply your AI skills to real problems in your community — supporting agriculture, health, local enterprise, and economic development through AI-assisted tools.',
-    impactStepBtn: lvl <= 1 ? 'Explore Community AI →' : 'Community Impact →',
-    impactAreas: lvl <= 1
-      ? ['Farming 🌾', 'Healthcare 🏥', 'Fishing 🐟', 'Business 💼']
-      : ['Agriculture', 'Health Triage', 'Aquaculture', 'Entrepreneurship'],
-
-    // ── Research step ────────────────────────────────────────────────────────
-    researchStepHeading: lvl <= 1 ? 'Step 5: Lead Community Research' : 'Step 5: Lead Research',
-    researchStepDesc: lvl <= 1
-      ? 'Join a real research project. Work with young people from your community. Help answer important questions about learning, health, and AI. Your voice matters.'
-      : 'Join open-source, community-based, youth-led research projects investigating how AI shapes learning, agency, and community development. Contribute to global knowledge.',
-    researchStepBtn: lvl <= 1 ? 'See Research Projects →' : 'Research Projects →',
-    researchAreas: lvl <= 1
-      ? ['Learning 📚', 'Health 💊', 'Hope & Future 🌱', 'Community 🏘️']
-      : ['Learning Outcomes', 'Hope & Agency', 'Community Spillover', 'Health Impact'],
 
     // ── Framework footer ──────────────────────────────────────────────────────
     frameworkText: lvl <= 1
@@ -410,6 +407,9 @@ const HomePage: React.FC = () => {
               </h1>
               <h2 className="text-4xl md:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-blue-300 via-purple-300 to-pink-300 bg-clip-text text-transparent">
                 {content.headline2}
+              </h2>
+              <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-orange-300 via-pink-300 to-red-300 bg-clip-text text-transparent mt-2">
+                {content.headline3}
               </h2>
             </div>
 
@@ -484,9 +484,9 @@ const HomePage: React.FC = () => {
               </div>
             )}
 
-            <p className="text-xl md:text-2xl lg:text-3xl text-white mb-12 max-w-4xl">
+            <div className="text-xl md:text-2xl text-white mb-12 max-w-3xl w-full flex flex-col items-center">
               {isAfrica ? content.bodyAfrica : content.bodyDefault}
-            </p>
+            </div>
 
             <div className="flex flex-wrap gap-4 justify-center mb-16">
               {isAfrica && (
@@ -595,68 +595,6 @@ const HomePage: React.FC = () => {
                 </div>
               </div>
             </div>
-
-            {/* Impact Step — Africa only */}
-            {isAfrica && (
-              <div className="max-w-5xl w-full bg-gradient-to-r from-orange-500/20 to-amber-500/20 backdrop-blur-md rounded-2xl p-8 mb-8 shadow-2xl border-2 border-orange-400/50">
-                <div className="flex items-center justify-center gap-3 mb-6">
-                  <Sprout className="h-10 w-10 text-orange-300" />
-                  <h3 className="text-3xl md:text-4xl font-bold text-white">
-                    {content.impactStepHeading}
-                  </h3>
-                </div>
-                <div className="bg-white/10 rounded-lg p-6 mb-4">
-                  <p className="text-xl text-white text-center mb-4">
-                    {content.impactStepDesc}
-                  </p>
-                  <div className="flex justify-center">
-                    <Link to="/community-impact">
-                      <button className="bg-white text-orange-700 hover:bg-orange-600 hover:text-white px-8 py-3 rounded-lg font-bold text-lg shadow-lg transition-all hover:scale-105">
-                        {content.impactStepBtn}
-                      </button>
-                    </Link>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
-                  {content.impactAreas.map(area => (
-                    <div key={area} className="bg-white/10 rounded-lg px-3 py-2 text-center">
-                      <p className="text-sm font-semibold text-orange-200">{area}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Research Step — Africa only */}
-            {isAfrica && (
-              <div className="max-w-5xl w-full bg-gradient-to-r from-pink-500/20 to-rose-500/20 backdrop-blur-md rounded-2xl p-8 mb-8 shadow-2xl border-2 border-pink-400/50">
-                <div className="flex items-center justify-center gap-3 mb-6">
-                  <FlaskConical className="h-10 w-10 text-pink-300" />
-                  <h3 className="text-3xl md:text-4xl font-bold text-white">
-                    {content.researchStepHeading}
-                  </h3>
-                </div>
-                <div className="bg-white/10 rounded-lg p-6 mb-4">
-                  <p className="text-xl text-white text-center mb-4">
-                    {content.researchStepDesc}
-                  </p>
-                  <div className="flex justify-center">
-                    <Link to="/research">
-                      <button className="bg-white text-pink-700 hover:bg-pink-600 hover:text-white px-8 py-3 rounded-lg font-bold text-lg shadow-lg transition-all hover:scale-105">
-                        {content.researchStepBtn}
-                      </button>
-                    </Link>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
-                  {content.researchAreas.map(area => (
-                    <div key={area} className="bg-white/10 rounded-lg px-3 py-2 text-center">
-                      <p className="text-sm font-semibold text-pink-200">{area}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* Framework Section */}
             <div className="max-w-4xl w-full bg-gradient-to-r from-blue-500/20 to-purple-500/20 backdrop-blur-sm rounded-xl p-6 border border-white/20">
