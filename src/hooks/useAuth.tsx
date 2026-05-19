@@ -67,7 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Create timeout promise (5 seconds)
       const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
+        setTimeout(() => reject(new Error('Profile fetch timeout')), 12000)
       );
   
       // Create profile fetch promise
@@ -99,17 +99,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error) {
       console.error('[Auth] Profile fetch failed:', error);
       
-      // CRITICAL FIX: If timeout occurs but user already exists, don't override
+      // On timeout: never force popup — return a safe placeholder that marks profile_completed=true
       if (error.message === 'Profile fetch timeout') {
         console.warn('[Auth] Profile fetch timed out');
         
-        if (user?.id === userId && profileConfirmedRef.current) {
-          console.log('[Auth] But profile was already confirmed, keeping existing state');
-          return user; // Return existing user instead of null
+        if (user?.id === userId) {
+          console.log('[Auth] Timeout but user exists in state — keeping existing state');
+          return user;
         }
         
-        console.warn('[Auth] User may need to complete profile again');
-        return null;
+        // Return a safe placeholder so popup is never shown on timeout
+        console.warn('[Auth] Timeout with no existing user — returning safe placeholder');
+        return {
+          id: userId,
+          name: '',
+          email: '',
+          role: 'student',
+          profile_completed: true, // Prevent popup on timeout
+          created_at: '',
+          updated_at: '',
+        } as UserProfile;
       }
       
       return null;
@@ -129,7 +138,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const profile = await fetchUserProfile(session.user.id);
       if (profile) {
         setUser(profile);
-        setNeedsProfileCompletion(!profile.profile_completed);
+        // Only show popup if profile_completed is explicitly false
+        setNeedsProfileCompletion(profile.profile_completed === false);
         profileConfirmedRef.current = true;
       } else if (!profileConfirmedRef.current) {
         // Only set needs completion if profile was never confirmed
@@ -205,7 +215,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (profile) {
               console.log('[Auth] Profile found, setting user state');
               setUser(profile);
-              setNeedsProfileCompletion(!profile.profile_completed);
+              // Only show popup if profile_completed is explicitly false
+              setNeedsProfileCompletion(profile.profile_completed === false);
               profileConfirmedRef.current = true;
             } else {
               console.log('[Auth] No profile found - user needs to complete profile');
@@ -294,7 +305,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         if (profile) {
           setUser(profile);
-          setNeedsProfileCompletion(!profile.profile_completed);
+          // Only show popup if profile_completed is explicitly false
+          setNeedsProfileCompletion(profile.profile_completed === false);
           profileConfirmedRef.current = true;
         } else if (!profileConfirmedRef.current) {
           // Only set needs completion if profile was never confirmed
