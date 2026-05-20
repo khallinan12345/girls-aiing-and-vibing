@@ -172,18 +172,20 @@ BOUNDARIES:
     setLoading(true);
     setMessages([]);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
+          page: "ResearchDataExplorer",
           system: systemPrompt(),
+          max_tokens: 1000,
           messages: [{ role: "user", content: openingPrompt }],
         }),
       });
       const d = await res.json();
-      const text = d.content?.find(b => b.type === "text")?.text ?? "";
+      const text = d.choices?.[0]?.message?.content
+        ?? d.content?.find(b => b.type === "text")?.text
+        ?? "";
       setMessages([{ role: "ai", text, ts: Date.now() }]);
     } catch {
       setMessages([{ role: "ai", text: "I'm having trouble connecting right now. Please try again in a moment.", ts: Date.now() }]);
@@ -198,18 +200,20 @@ BOUNDARIES:
       { role: "user", content: userMsg }
     ];
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
+          page: "ResearchDataExplorer",
           system: systemPrompt(),
+          max_tokens: 1000,
           messages: msgs,
         }),
       });
       const d = await res.json();
-      const text = d.content?.find(b => b.type === "text")?.text ?? "Connection issue — please try again.";
+      const text = d.choices?.[0]?.message?.content
+        ?? d.content?.find(b => b.type === "text")?.text
+        ?? "Connection issue — please try again.";
       setMessages(prev => [...prev, { role: "ai", text, ts: Date.now() }]);
     } catch {
       setMessages(prev => [...prev, { role: "ai", text: "Connection issue — please try again.", ts: Date.now() }]);
@@ -1461,18 +1465,20 @@ Always start a new conversation by introducing yourself briefly and asking one s
     setLoading(true);
     setMessages([]);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
+          page: "ResearchAILearningLab",
           system: getSystemPrompt(),
+          max_tokens: 1000,
           messages: [{ role: "user", content: "I'm starting this task. Please introduce yourself and help me get started." }],
         }),
       });
       const data = await res.json();
-      const text = data.content?.find(b => b.type === "text")?.text || "";
+      const text = data.choices?.[0]?.message?.content
+        ?? data.content?.find(b => b.type === "text")?.text
+        ?? "";
       setMessages([{ role: "ai", text, ts: Date.now() }]);
     } catch (e) {
       setMessages([{ role: "ai", text: "Hi! I'm your research assistant. I'm here to help you work through this task step by step. What have you done so far, and where are you feeling stuck?", ts: Date.now() }]);
@@ -1484,18 +1490,20 @@ Always start a new conversation by introducing yourself briefly and asking one s
     setLoading(true);
     const msgs = [...history.map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text })), { role: "user", content: userMsg }];
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
+          page: "ResearchAILearningLab",
           system: getSystemPrompt(),
+          max_tokens: 1000,
           messages: msgs,
         }),
       });
       const data = await res.json();
-      const text = data.content?.find(b => b.type === "text")?.text || "I'm having trouble connecting. Please try again.";
+      const text = data.choices?.[0]?.message?.content
+        ?? data.content?.find(b => b.type === "text")?.text
+        ?? "I'm having trouble connecting. Please try again.";
       setMessages(prev => [...prev, { role: "ai", text, ts: Date.now() }]);
     } catch {
       setMessages(prev => [...prev, { role: "ai", text: "Connection issue — please try again.", ts: Date.now() }]);
