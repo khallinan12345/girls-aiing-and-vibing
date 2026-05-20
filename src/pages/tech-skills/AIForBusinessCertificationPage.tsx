@@ -301,24 +301,29 @@ const AIForBusinessCertificationPage: React.FC = () => {
     if (sessionIdRef.current) return sessionIdRef.current;
     const sid = makeId(); sessionIdRef.current = sid; setSessionId(sid);
     if (user?.id) {
-      await supabase.from('dashboard').insert({
+      const { error } = await supabase.from('dashboard').insert({
         user_id: user.id, activity: CERT_ACTIVITY,
         category_activity: 'Certification', progress: 'started',
         biz_cert_session_id: sid,
         biz_cert_canvas: EMPTY_CANVAS,
         biz_cert_evaluation: {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
+      if (error) console.error('[Certifications] ensureRecord insert error:', error);
+      else console.log('[Certifications] Saved to dashboard:', { sid });
     }
     return sid;
   }, [user?.id]);
 
   // ── Persist canvas ────────────────────────────────────────────────────
   const persistCanvas = useCallback(async (c: BusinessCanvas) => {
-    const sid = sessionIdRef.current; if (!user?.id || !sid) return;
-    await supabase.from('dashboard').update({
+    if (!user?.id) return;
+    const { error } = await supabase.from('dashboard').update({
       biz_cert_canvas: c,
       updated_at: new Date().toISOString(),
-    }).eq('user_id', user.id).eq('biz_cert_session_id', sid);
+    }).eq('user_id', user.id).eq('activity', CERT_ACTIVITY);
+    if (error) console.error('[Certifications] persistCanvas error:', error);
   }, [user?.id]);
 
   const handleCanvasChange = useCallback((key: keyof BusinessCanvas, value: string) => {
@@ -460,11 +465,12 @@ Respond ONLY in this JSON format:
       const avgCalc = newScores.reduce((s, a) => s + (a.score ?? 0), 0) / newScores.length;
       const allPass = newScores.every(s => (s.score ?? 0) >= 2);
 
-      await supabase.from('dashboard').update({
+      const { error: updateErr } = await supabase.from('dashboard').update({
         biz_cert_evaluation: { scores, evaluatedAt: new Date().toISOString(), overallAvg: avgCalc },
         progress: allPass ? 'completed' : 'started',
         updated_at: new Date().toISOString(),
-      }).eq('user_id', user.id).eq('biz_cert_session_id', sessionIdRef.current!);
+      }).eq('user_id', user.id).eq('activity', CERT_ACTIVITY);
+      if (updateErr) console.error('[Certifications] evaluation update error:', updateErr);
 
       if (newScores.some(s => (s.score ?? 0) >= 2)) {
         try {
