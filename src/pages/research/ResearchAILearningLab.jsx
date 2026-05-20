@@ -485,7 +485,7 @@ function Phase0Orientation({ project, onComplete }) {
 
       {/* Header */}
       <div style={{ padding: "16px 24px", background: C.navyDk, borderBottom: `2px solid ${C.gold}44` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
           <span style={{ fontSize: 18 }}>🧭</span>
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 17, fontWeight: 700, color: C.white }}>
             Phase 0: Data Orientation
@@ -494,26 +494,36 @@ function Phase0Orientation({ project, onComplete }) {
             Prerequisite · Data Explorer Badge
           </span>
         </div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontStyle: "italic" }}>
-          Before collecting new data, explore what already exists. Complete all 5 modules to earn your badge and unlock Phase 1.
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.6, marginBottom: 6 }}>
+          Welcome to the research team. Before you collect any new data, you need to understand the data that already exists.
+          The vAI platform has been collecting information about learners since July 2025 — sessions, scores, activities, and more.
+          This phase will teach you what that data means and how to explore it.
+        </div>
+        <div style={{ fontSize: 12, color: C.gold, fontStyle: "italic" }}>
+          Complete all 5 modules below to earn your <strong>Data Explorer Badge</strong> and unlock Phase 1: Research Design.
         </div>
       </div>
 
       {/* Module Rail */}
-      <div style={{ display: "flex", gap: 0, background: C.white, borderBottom: `1px solid ${C.sand}`, overflowX: "auto" }}>
-        {PHASE0_MODULES.map((m, i) => (
-          <button key={i} onClick={() => setActiveModule(i)}
-            style={{
-              padding: "10px 16px", fontSize: 12, fontWeight: 600,
-              border: "none", cursor: "pointer", whiteSpace: "nowrap",
-              fontFamily: "'Source Serif 4', serif",
-              background: "none",
-              borderBottom: activeModule === i ? `3px solid ${C.gold}` : "3px solid transparent",
-              color: activeModule === i ? C.navy : completedModules.has(i) ? C.success : C.mid,
-            }}>
-            {completedModules.has(i) ? "✓ " : ""}{m.icon} {m.name}
-          </button>
-        ))}
+      <div style={{ background: C.white, borderBottom: `1px solid ${C.sand}` }}>
+        <div style={{ padding: "8px 16px 0", fontSize: 11, color: C.muted, fontStyle: "italic" }}>
+          Work through each module in order. You must chat with the AI in each module before marking it complete.
+        </div>
+        <div style={{ display: "flex", gap: 0, overflowX: "auto" }}>
+          {PHASE0_MODULES.map((m, i) => (
+            <button key={i} onClick={() => setActiveModule(i)}
+              style={{
+                padding: "10px 16px", fontSize: 12, fontWeight: 600,
+                border: "none", cursor: "pointer", whiteSpace: "nowrap",
+                fontFamily: "'Source Serif 4', serif",
+                background: "none",
+                borderBottom: activeModule === i ? `3px solid ${C.gold}` : "3px solid transparent",
+                color: activeModule === i ? C.navy : completedModules.has(i) ? C.success : C.mid,
+              }}>
+              {completedModules.has(i) ? "✓ " : ""}{m.icon} {m.name}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Main layout: data panel + chat */}
@@ -524,11 +534,16 @@ function Phase0Orientation({ project, onComplete }) {
 
           {/* Left panel header */}
           <div style={{ padding: "16px 20px 0", borderBottom: `1px solid ${C.sand}` }}>
-            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, fontWeight: 700, color: C.navy, marginBottom: 2 }}>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, fontWeight: 700, color: C.navy, marginBottom: 4 }}>
               {module.icon} {module.name}
             </div>
+            <div style={{ fontSize: 12, color: C.charcoal, lineHeight: 1.6, marginBottom: 8, background: `${C.gold}10`, border: `1px solid ${C.gold}33`, borderRadius: 6, padding: "8px 10px" }}>
+              <strong>What you are looking at:</strong> This panel shows real anonymized data from the vAI platform.
+              All learner names have been removed — you will only see anonymous tokens like "7b61fee9…".
+              Use the <strong>Cohort Data</strong> tab to see summary statistics, and the <strong>Data Dictionary</strong> tab to understand what each column means.
+            </div>
             <div style={{ fontSize: 11, color: C.muted, fontStyle: "italic", marginBottom: 10 }}>
-              {module.goal}
+              Your goal for this module: {module.goal}
             </div>
             {/* Tab switcher */}
             <div style={{ display: "flex", gap: 0 }}>
@@ -554,8 +569,14 @@ function Phase0Orientation({ project, onComplete }) {
           {/* Data Dictionary Tab */}
           {leftTab === "dictionary" && (
             <div>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, fontStyle: "italic" }}>
-                Click any group to expand its fields. Ask the AI about any column you're curious about.
+              <div style={{ background: `${C.teal}10`, border: `1px solid ${C.teal}33`, borderRadius: 8, padding: "10px 12px", marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.teal, marginBottom: 4 }}>📖 How to use the Data Dictionary</div>
+                <div style={{ fontSize: 12, color: C.charcoal, lineHeight: 1.6 }}>
+                  Every column in the dataset is listed here by group. Click a group name to expand it and see all its fields.
+                  Each field shows its <strong>name</strong> (what it's called in the database), its <strong>scale</strong> (what the numbers mean),
+                  and a <strong>plain English description</strong>. If you want to know more, click <em>"Ask AI about this →"</em> and
+                  your AI guide will explain it and show you what it looks like in the real data.
+                </div>
               </div>
               {DATA_DICTIONARY.map((group, gi) => (
                 <div key={gi} style={{ marginBottom: 8 }}>
@@ -685,6 +706,13 @@ function Phase0Orientation({ project, onComplete }) {
 
           {/* Mark complete button */}
           <div style={{ marginTop: 20 }}>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, lineHeight: 1.5 }}>
+              {completedModules.has(activeModule)
+                ? "✓ You have completed this module. Move to the next tab above."
+                : messages.length < 3
+                  ? "💬 Chat with the AI first — ask at least 2–3 questions before marking complete."
+                  : "👇 When you feel you understand this module, mark it complete and move to the next one."}
+            </div>
             <button
               onClick={markComplete}
               disabled={completedModules.has(activeModule) || messages.length < 3}
@@ -720,17 +748,26 @@ function Phase0Orientation({ project, onComplete }) {
         <div style={{ display: "flex", flexDirection: "column", background: C.white }}>
           {/* Chat header */}
           <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.sand}`, background: C.navyDk }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
               <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#4CAF50", animation: "pulse 2s infinite" }} />
               <span style={{ fontSize: 12, fontWeight: 600, color: C.white }}>Data Orientation AI Guide</span>
               <span style={{ marginLeft: "auto", fontSize: 10, color: "rgba(255,255,255,0.4)" }}>
                 Real platform data connected
               </span>
             </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>
+              Your AI guide has read all the platform data and will walk you through it.
+              You can ask anything — "what does PUE mean?", "show me who is most persistent", or "help me form a research question".
+              Use the suggested questions below to get started, or type your own.
+            </div>
           </div>
 
           {/* Quick prompts */}
-          <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.sand}`, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ padding: "8px 14px", borderBottom: `1px solid ${C.sand}` }}>
+            <div style={{ fontSize: 10, color: C.muted, fontWeight: 600, letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 6 }}>
+              Suggested questions — click to ask:
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {module.quickPrompts.map((p, i) => (
               <button key={i} onClick={() => {
                 setMessages(prev => [...prev, { role: "user", text: p, ts: Date.now() }]);
@@ -744,6 +781,7 @@ function Phase0Orientation({ project, onComplete }) {
                 {p}
               </button>
             ))}
+            </div>
           </div>
 
           {/* Messages */}
