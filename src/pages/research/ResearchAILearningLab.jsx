@@ -108,20 +108,16 @@ PERSISTENCE TIERS:
 - Most months any learner active: ${persist.most_persistent_months ?? 0}
 
 MOST PERSISTENT LEARNERS (anonymized tokens):
-${topPersist.map(l => `  • ${l.token} | ${l.site} | ${l.months_active} months | avg ${l.avg_sessions} sessions/month | PUE: ${l.avg_pue ?? "n/a"} | Certs: ${l.certs_earned}`).join("
-")}
+${topPersist.map(l => `  • ${l.token} | ${l.site} | ${l.months_active} months | avg ${l.avg_sessions} sessions/month | PUE: ${l.avg_pue ?? "n/a"} | Certs: ${l.certs_earned}`).join("\n")}
 
 TOP ACHIEVERS BY COMPLETIONS:
-${topAchieve.map(l => `  • ${l.token} | ${l.site} | ${l.activities_completed} completions | ${l.certs_earned} certs | ${l.months_active} months | avg ${l.avg_sessions} sessions/month`).join("
-")}
+${topAchieve.map(l => `  • ${l.token} | ${l.site} | ${l.activities_completed} completions | ${l.certs_earned} certs | ${l.months_active} months | avg ${l.avg_sessions} sessions/month`).join("\n")}
 
 MONTHLY TREND (cohort averages by month):
-${monthly.slice(-6).map(m => `  ${m.month} | ${m.site} | ${m.unique_learners} learners | avg sessions: ${m.avg_sessions} | avg PUE: ${m.avg_pue ?? "n/a"} | completions: ${m.completions} | certs: ${m.certs}`).join("
-")}
+${monthly.slice(-6).map(m => `  ${m.month} | ${m.site} | ${m.unique_learners} learners | avg sessions: ${m.avg_sessions} | avg PUE: ${m.avg_pue ?? "n/a"} | completions: ${m.completions} | certs: ${m.certs}`).join("\n")}
 
 SITE COMPARISON:
-${siteComp.map(s => `  ${s.site}: ${s.learners} learners | avg ${s.avg_months} months active | avg ${s.avg_sessions} sessions/month | avg PUE: ${s.avg_pue ?? "n/a"} | total certs: ${s.total_certs}`).join("
-")}
+${siteComp.map(s => `  ${s.site}: ${s.learners} learners | avg ${s.avg_months} months active | avg ${s.avg_sessions} sessions/month | avg PUE: ${s.avg_pue ?? "n/a"} | total certs: ${s.total_certs}`).join("\n")}
 
 SCAFFOLDING CONVERGENCE (is AI helping learners become more independent?):
 - Converging (getting more independent): ${scaffold.converging ?? 0}
