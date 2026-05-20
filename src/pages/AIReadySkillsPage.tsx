@@ -396,11 +396,11 @@ Return ONLY valid JSON: { "improved_text": "..." }`
     if (!user?.id) return;
 
     try {
-      // Fetch all certifications except AI Proficiency
+      // Fetch only AI Ready Skills certifications — not tech skills certs
       const { data: allAssessments, error: assessmentsError } = await supabase
         .from('certification_assessments')
         .select('*')
-        .neq('certification_name', 'AI Proficiency')
+        .in('certification_name', ['Critical Thinking','Creativity','Communication','Problem Solving','Digital Fluency'])
         .order('certification_name')
         .order('assessment_name');
 
