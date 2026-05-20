@@ -31,7 +31,8 @@
 //   If taskType is omitted on a coding page, it defaults to 'coding' (uses Haiku).
 //
 // FALLBACK CHAIN (for free-tier-routed pages):
-//   Groq → Gemini 2.0 Flash → Cerebras → Cloudflare Workers AI → OpenRouter (free) → Mistral → DeepSeek V3 → Anthropic Haiku
+//   Groq → Cerebras → Cloudflare Workers AI → OpenRouter (free) → Mistral → DeepSeek V3 → Anthropic Haiku
+//   NOTE: Gemini removed — free tier quota permanently exhausted (limit: 0)
 //
 // PROMPT CACHING: applied automatically on all Anthropic calls.
 //   The system prompt is marked with cache_control so repeated calls within
@@ -61,6 +62,22 @@ const HYBRID_CODING_PAGES = new Set([
   'WebDevelopmentPage',
   'FullStackDevelopmentPage',
   'AIWorkflowDevPage',
+]);
+
+// Certification pages — always Haiku; structured JSON eval must be reliable
+const CERT_PAGES = new Set([
+  'AIReadySkillsPage',
+  'AIProficiencyPage',
+  'FullStackCertificationPage',
+  'AIVideoProductionCertificationPage',
+  'AIImageCertificationPage',
+  'AIVoiceCertificationPage',
+  'AIContentCreationCertificationPage',
+  'AIAmbassadorsCertificationPage',
+  'AgricultureConsultantCertificationPage',
+  'FishingConsultantCertificationPage',
+  'HealthcareNavigatorCertificationPage',
+  'EntrepreneurshipConsultantCertificationPage',
 ]);
 
 const ANTHROPIC_HAIKU  = 'claude-haiku-4-5-20251001';
@@ -213,6 +230,11 @@ function resolveRoute(page, playgroundModel, taskType) {
   if (page === 'AIPlaygroundPage') {
     if (playgroundModel === ANTHROPIC_SONNET) return { provider: 'anthropic', model: ANTHROPIC_SONNET };
     return { provider: 'groq', model: GROQ_MODEL };
+  }
+
+  // Certification pages → Haiku directly; reliable JSON eval, no free-tier risk
+  if (CERT_PAGES.has(page)) {
+    return { provider: 'anthropic', model: ANTHROPIC_HAIKU };
   }
 
   // Default → Haiku
@@ -562,12 +584,6 @@ async function callWithFallbackChain(messages, system, max_tokens, temperature) 
       model:    GROQ_MODEL,
       keyEnv:   'GROQ_API_KEY',
       fn:       () => callGroq(GROQ_MODEL, messages, system, max_tokens, temperature),
-    },
-    {
-      name:     'gemini',
-      model:    GEMINI_MODEL,
-      keyEnv:   'GEMINI_API_KEY',
-      fn:       () => callGemini(GEMINI_MODEL, messages, system, max_tokens, temperature),
     },
     {
       name:     'cerebras',
