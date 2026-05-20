@@ -298,12 +298,120 @@ const PHASE0_MODULES = [
   },
 ];
 
+
+// ─── DATA DICTIONARY ─────────────────────────────────────────────────────────
+const DATA_DICTIONARY = [
+  {
+    group: "Identity & Time",
+    color: C.navy,
+    fields: [
+      { name: "learner_token", scale: "text", desc: "Anonymous stable ID for each learner. Same token across all months — never reveals who the learner is." },
+      { name: "site", scale: "text", desc: "Community location: Oloibiri, Ibiade, Lagos, Accra, Kigali." },
+      { name: "activity_date", scale: "date", desc: "The specific day this snapshot was taken." },
+      { name: "cohort_month", scale: "date", desc: "First day of the month — used to group learners by month." },
+      { name: "grade_band", scale: "1-4 / 5-8 / 9-12", desc: "Learner's grade level bucketed into bands to protect privacy." },
+    ]
+  },
+  {
+    group: "Session Activity",
+    color: C.teal,
+    fields: [
+      { name: "session_count", scale: "integer", desc: "Total AI sessions this month. One session = one conversation with the AI coach." },
+      { name: "engaged_session_count", scale: "integer", desc: "Sessions where the learner asked more than minimal questions — a measure of depth." },
+      { name: "avg_words_per_session", scale: "integer", desc: "Average number of words the learner typed per session. More words = deeper engagement." },
+      { name: "activities_started_today", scale: "integer", desc: "New learning activities started on this specific day." },
+      { name: "activities_completed_today", scale: "integer", desc: "Activities marked complete on this day." },
+      { name: "certifications_earned_today", scale: "integer", desc: "Certificates earned on this day." },
+      { name: "activities_completed_total", scale: "integer", desc: "Running total of all activities completed up to this date." },
+    ]
+  },
+  {
+    group: "AI Proficiency (0–3 scale)",
+    color: C.gold,
+    fields: [
+      { name: "ai_prof_application_score", scale: "0–3", desc: "Can the learner apply AI to solve real problems? 0=none, 1=emerging, 2=developing, 3=proficient." },
+      { name: "ai_prof_ethics_score", scale: "0–3", desc: "Does the learner understand AI ethics, bias, and responsible use?" },
+      { name: "ai_prof_understanding_score", scale: "0–3", desc: "Does the learner understand how AI works conceptually?" },
+      { name: "ai_prof_verification_score", scale: "0–3", desc: "Does the learner check and verify AI outputs rather than accepting them blindly?" },
+      { name: "ai_prof_min_score", scale: "0–3", desc: "The lowest of the four proficiency scores — the 'weakest link' measure." },
+      { name: "ai_prof_cert_level", scale: "text", desc: "Certification level achieved: Emerging / Developing / Proficient." },
+    ]
+  },
+  {
+    group: "Cognitive Skills (0–100 scale)",
+    color: C.sage,
+    fields: [
+      { name: "cognitive_score", scale: "0–100", desc: "Overall cognitive engagement score — how deeply the learner is thinking." },
+      { name: "critical_thinking_score", scale: "0–100", desc: "Evidence of evaluating claims, questioning assumptions, logical reasoning." },
+      { name: "problem_solving_score", scale: "0–100", desc: "Breaking down problems, iterating on solutions, measuring outcomes." },
+      { name: "creativity_score", scale: "0–100", desc: "Originality, risk-taking, exploring new ideas." },
+    ]
+  },
+  {
+    group: "Reasoning Levels",
+    color: C.blue,
+    fields: [
+      { name: "reasoning_level_0", scale: "0–100%", desc: "Definitional — learner only asks 'what is X?' type questions. Lowest depth." },
+      { name: "reasoning_level_1", scale: "0–100%", desc: "Responsive — learner responds to AI prompts but doesn't initiate deeper thinking." },
+      { name: "reasoning_level_2", scale: "0–100%", desc: "Elaborative — learner builds on ideas, asks follow-up questions, connects concepts." },
+      { name: "reasoning_level_3", scale: "0–100%", desc: "Structured — learner constructs arguments, plans, or multi-step reasoning chains. Highest depth." },
+      { name: "reasoning_chain_count", scale: "integer", desc: "Number of extended reasoning sequences (3+ connected exchanges) in the month." },
+    ]
+  },
+  {
+    group: "Scaffolding (AI Independence)",
+    color: "#8B6B9C",
+    fields: [
+      { name: "scaffold_convergence_trend", scale: "converging / stable / diverging", desc: "Is the learner needing less AI help over time (converging = growing independence) or more (diverging)?" },
+      { name: "scaffold_clarification_per_session", scale: "rate", desc: "How often the AI had to ask clarifying questions per session." },
+      { name: "scaffold_decomposition_per_session", scale: "rate", desc: "How often the AI broke down a concept into smaller pieces for the learner." },
+      { name: "scaffold_consecutive_correction_runs", scale: "count", desc: "Runs of consecutive corrections — high numbers suggest the learner is struggling." },
+    ]
+  },
+  {
+    group: "Metacognition",
+    color: C.teal,
+    fields: [
+      { name: "metacog_verification_rate", scale: "rate", desc: "How often the learner checks their own understanding ('Did I get that right?')." },
+      { name: "metacog_reactive_rate", scale: "rate", desc: "How often the learner responds to being corrected rather than self-checking." },
+      { name: "metacog_strategic_rate", scale: "rate", desc: "How often the learner plans their learning strategy rather than just reacting." },
+    ]
+  },
+  {
+    group: "Productive Use of Energy — PUE (0–100)",
+    color: C.gold,
+    fields: [
+      { name: "pue_score", scale: "0–100", desc: "Overall PUE score — is the learner using AI for real community/economic purposes? Higher = more productive real-world use." },
+      { name: "pue_energy_constraint_pct", scale: "0–100%", desc: "% of AI interactions involving energy access or power constraints." },
+      { name: "pue_market_pricing_pct", scale: "0–100%", desc: "% involving market prices, trading, or economic decisions." },
+      { name: "pue_enterprise_planning_pct", scale: "0–100%", desc: "% involving planning a business, farm, or enterprise." },
+      { name: "pue_learner_initiated_pct", scale: "0–100%", desc: "% of PUE interactions the learner started themselves (not AI-prompted)." },
+      { name: "pue_multi_domain_pct", scale: "0–100%", desc: "% spanning multiple domains (e.g. health + farming). Shows integrated thinking." },
+      { name: "pue_local_context_pct", scale: "0–100%", desc: "% referencing local community, culture, or context." },
+    ]
+  },
+  {
+    group: "Role Readiness & Community Impact",
+    color: C.success,
+    fields: [
+      { name: "role_readiness_signal", scale: "0 or 1", desc: "1 = learner shows signs of being ready to teach or mentor others. Key spillover indicator." },
+      { name: "peer_diffusion_signal", scale: "0 or 1", desc: "1 = learner is spreading AI knowledge to peers or family members." },
+      { name: "role_teaching_intent_count", scale: "integer", desc: "Number of interactions showing intent to teach others." },
+      { name: "role_community_application_count", scale: "integer", desc: "Interactions applying AI to community problems." },
+      { name: "role_enterprise_orientation_count", scale: "integer", desc: "Interactions oriented toward enterprise or income generation." },
+      { name: "role_intergenerational_count", scale: "integer", desc: "Interactions involving elders, family, or intergenerational knowledge transfer." },
+    ]
+  },
+];
+
 // ─── PHASE 0 COMPONENT ───────────────────────────────────────────────────────
 function Phase0Orientation({ project, onComplete }) {
   const [activeModule, setActiveModule] = useState(0);
   const [completedModules, setCompletedModules] = useState(new Set());
   const [input, setInput] = useState("");
   const [showBadge, setShowBadge] = useState(false);
+  const [leftTab, setLeftTab] = useState("data");   // "data" | "dictionary"
+  const [expandedGroup, setExpandedGroup] = useState(null);
   const msgsRef = useRef(null);
 
   const { data: longitudinalData, loading: dataLoading } = useLongitudinalData();
@@ -412,19 +520,96 @@ function Phase0Orientation({ project, onComplete }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", flex: 1, minHeight: 0 }}>
 
         {/* Left: Data context panel */}
-        <div style={{ padding: "20px 24px", overflowY: "auto", borderRight: `1px solid ${C.sand}` }}>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 16, fontWeight: 700, color: C.navy, marginBottom: 4 }}>
+        <div style={{ overflowY: "auto", borderRight: `1px solid ${C.sand}`, display: "flex", flexDirection: "column" }}>
+
+          {/* Left panel header */}
+          <div style={{ padding: "16px 20px 0", borderBottom: `1px solid ${C.sand}` }}>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, fontWeight: 700, color: C.navy, marginBottom: 2 }}>
               {module.icon} {module.name}
             </div>
-            <div style={{ fontSize: 12, color: C.muted, fontStyle: "italic", marginBottom: 16 }}>
-              Goal: {module.goal}
+            <div style={{ fontSize: 11, color: C.muted, fontStyle: "italic", marginBottom: 10 }}>
+              {module.goal}
+            </div>
+            {/* Tab switcher */}
+            <div style={{ display: "flex", gap: 0 }}>
+              {[
+                { key: "data", label: "📊 Cohort Data" },
+                { key: "dictionary", label: "📖 Data Dictionary" },
+              ].map(t => (
+                <button key={t.key} onClick={() => setLeftTab(t.key)}
+                  style={{
+                    padding: "7px 14px", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                    border: "none", background: "none", fontFamily: "'Source Serif 4', serif",
+                    borderBottom: leftTab === t.key ? `2px solid ${C.gold}` : "2px solid transparent",
+                    color: leftTab === t.key ? C.navy : C.muted,
+                  }}>
+                  {t.label}
+                </button>
+              ))}
             </div>
           </div>
 
-          {dataLoading ? (
+          <div style={{ padding: "16px 20px", flex: 1, overflowY: "auto" }}>
+
+          {/* Data Dictionary Tab */}
+          {leftTab === "dictionary" && (
+            <div>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, fontStyle: "italic" }}>
+                Click any group to expand its fields. Ask the AI about any column you're curious about.
+              </div>
+              {DATA_DICTIONARY.map((group, gi) => (
+                <div key={gi} style={{ marginBottom: 8 }}>
+                  <button
+                    onClick={() => setExpandedGroup(expandedGroup === gi ? null : gi)}
+                    style={{
+                      width: "100%", padding: "9px 12px", borderRadius: 8, cursor: "pointer",
+                      background: C.white, border: `1px solid ${C.sand}`,
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      fontFamily: "'Source Serif 4', serif",
+                    }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: group.color }}>{group.group}</span>
+                    <span style={{ fontSize: 11, color: C.muted }}>{group.fields.length} fields {expandedGroup === gi ? "▲" : "▼"}</span>
+                  </button>
+                  {expandedGroup === gi && (
+                    <div style={{ border: `1px solid ${C.sand}`, borderTop: "none", borderRadius: "0 0 8px 8px", overflow: "hidden" }}>
+                      {group.fields.map((f, fi) => (
+                        <div key={fi} style={{
+                          padding: "10px 12px",
+                          borderBottom: fi < group.fields.length - 1 ? `1px solid ${C.sand}55` : "none",
+                          background: fi % 2 === 0 ? C.white : C.cream,
+                        }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                            <code style={{ fontSize: 11, fontWeight: 700, color: group.color, fontFamily: "JetBrains Mono, monospace" }}>{f.name}</code>
+                            <span style={{ fontSize: 10, color: C.muted, background: C.sand, padding: "2px 6px", borderRadius: 4 }}>{f.scale}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: C.charcoal, lineHeight: 1.5 }}>{f.desc}</div>
+                          <button
+                            onClick={() => {
+                              const q = `Tell me more about the "${f.name}" column and show me what it looks like in our data.`;
+                              setMessages(prev => [...prev, { role: "user", text: q, ts: Date.now() }]);
+                              send(q, messages);
+                              setLeftTab("data");
+                            }}
+                            style={{
+                              marginTop: 6, padding: "3px 8px", fontSize: 10, cursor: "pointer",
+                              border: `1px solid ${group.color}44`, borderRadius: 4,
+                              background: "none", color: group.color, fontFamily: "'Source Serif 4', serif",
+                            }}>
+                            Ask AI about this →
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Cohort Data Tab */}
+          {leftTab === "data" && dataLoading ? (
             <div style={{ color: C.muted, fontSize: 13, fontStyle: "italic" }}>Loading platform data…</div>
-          ) : longitudinalData ? (
+          ) : leftTab === "data" && longitudinalData ? (
             <div>
               {/* Cohort snapshot */}
               <div style={{ marginBottom: 16 }}>
@@ -492,9 +677,11 @@ function Phase0Orientation({ project, onComplete }) {
                 </div>
               )}
             </div>
-          ) : (
+          ) : leftTab === "data" ? (
             <div style={{ color: C.warn, fontSize: 13 }}>Could not load platform data. Check your connection.</div>
-          )}
+          ) : null}
+
+          </div>{/* /tab content */}
 
           {/* Mark complete button */}
           <div style={{ marginTop: 20 }}>
