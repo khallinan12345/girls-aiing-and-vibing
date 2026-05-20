@@ -1293,10 +1293,10 @@ Return ONLY the description, nothing else.`
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl p-8 mb-8 text-white shadow-xl">
-          <h1 className="text-4xl md:text-5xl font-bold mb-4">Professional Certifications</h1>
+          <h1 className="text-4xl md:text-5xl font-bold mb-4">AI Ready Skills Certifications</h1>
           <p className="text-xl text-blue-100 max-w-3xl mb-4">
             Build essential skills and demonstrate your expertise across multiple certification areas.
-            Each certification validates your proficiency in critical competencies.
+            Each certification validates your proficiency in critical competencies. These are skills you need for AI proficiency and life.
           </p>
           
           {certifications.length > 1 && (
