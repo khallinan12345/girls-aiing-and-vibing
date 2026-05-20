@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "../../lib/supabaseClient";
-import Sidebar from "../layout/Sidebar";
+import Sidebar from "../../components/layout/Sidebar";
 import { useAuth } from "../../hooks/useAuth";
 
 // ─── DESIGN TOKENS ─────────────────────────────────────────────────────────────
