@@ -85,6 +85,7 @@ import AnimalHusbandryPage from './pages/community-impact/AnimalHusbandryPage';
 
 // Research Pages
 import ResearchAILearningLab from './pages/research/ResearchAILearningLab';
+import ResearchNewProjectPage from './pages/research/ResearchNewProjectPage';
 import IGiTREEResearchPage from './pages/research/ResearchIGiTREE';
 
 const AppContent: React.FC = () => {
@@ -240,6 +241,7 @@ const AppContent: React.FC = () => {
 
         {/* Research Routes */}
         <Route path="/research/ai-learning-lab" element={<ResearchAILearningLab />} />
+        <Route path="/research/new" element={<ResearchNewProjectPage />} />
         <Route path="/research/igitree" element={<IGiTREEResearchPage />} />
 
         {/* Legacy Route Redirects */}

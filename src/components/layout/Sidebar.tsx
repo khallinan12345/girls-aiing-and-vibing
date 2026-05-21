@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { supabase } from '../../lib/supabaseClient';
 import {
   Award, Brain, BarChart, BookOpen, GraduationCap,
   Code, Database, Layers, ImagePlus, Video, Mic, PenLine, Zap,
@@ -156,10 +157,7 @@ const Sidebar: React.FC = () => {
       activeText: 'text-teal-700',
       sectionBg: 'bg-teal-50/40',
       headerText: 'text-teal-600',
-      items: [
-        { name: 'AI Learning Lab', path: '/research/ai-learning-lab', icon: <FlaskConical size={20} /> },
-        { name: 'IGiTREE',         path: '/research/igitree',         icon: <Leaf size={20} />         },
-      ],
+      items: [], // populated dynamically from research_programs
     },
   ];
 
@@ -175,6 +173,29 @@ const Sidebar: React.FC = () => {
   };
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(getInitialOpen);
+  const [researchItems, setResearchItems] = useState<NavItem[]>([
+    { name: 'AI Learning Lab', path: '/research/ai-learning-lab', icon: <FlaskConical size={20} /> },
+    { name: 'IGiTREE',         path: '/research/igitree',         icon: <Leaf size={20} />         },
+    { name: '+ Propose Research', path: '/research/new',          icon: <FlaskConical size={20} /> },
+  ]);
+
+  useEffect(() => {
+    supabase
+      .from('research_programs')
+      .select('slug, title')
+      .eq('status', 'active')
+      .order('created_at')
+      .then(({ data }) => {
+        if (data?.length) {
+          const dynamic: NavItem[] = data.map((p: any) => ({
+            name: p.title,
+            path: `/research/${p.slug}`,
+            icon: <FlaskConical size={20} />,
+          }));
+          setResearchItems([...dynamic, { name: '+ Propose Research', path: '/research/new', icon: <FlaskConical size={20} /> }]);
+        }
+      });
+  }, []);
 
   const toggle = (id: string) =>
     setOpenSections(prev => ({ ...prev, [id]: !prev[id] }));
@@ -233,7 +254,7 @@ const Sidebar: React.FC = () => {
 
                   {isOpen && (
                     <div className={`space-y-0.5 ${section.sectionBg} rounded-lg p-1.5`}>
-                      {section.items.map(item =>
+                      {(section.id === 'research' ? researchItems : section.items).map(item =>
                         renderNavItem(item, section.activeBg, section.activeText)
                       )}
                     </div>

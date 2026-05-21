@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../hooks/useAuth';
@@ -19,6 +19,29 @@ const Navbar: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [researchPrograms, setResearchPrograms] = useState<{name: string; path: string}[]>([
+    { name: 'AI Learning Lab', path: '/research/ai-learning-lab' },
+    { name: 'IGiTREE',         path: '/research/igitree'         },
+  ]);
+
+  useEffect(() => {
+    supabase
+      .from('research_programs')
+      .select('slug, title')
+      .eq('status', 'active')
+      .order('created_at')
+      .then(({ data }) => {
+        if (data?.length) {
+          const dynamic = data.map((p: any) => ({
+            name: p.title,
+            path: `/research/${p.slug}`,
+          }));
+          setResearchPrograms([...dynamic, { name: '+ Propose Research', path: '/research/new' }]);
+        } else {
+          setResearchPrograms(prev => [...prev, { name: '+ Propose Research', path: '/research/new' }]);
+        }
+      });
+  }, []);
   const branding = useBranding();
 
   const handleSignOut = async () => {
@@ -100,10 +123,7 @@ const Navbar: React.FC = () => {
     {
       name: 'Research',
       shorthand: 'Research',
-      dropdown: [
-        { name: 'Research AI Learning Lab', path: '/research/ai-learning-lab' },  
-        { name: 'IGiTREE', path: '/research/igitree' },
-      ],
+      dropdown: '__dynamic__' as any,
     },
     { name: 'Dashboard', path: '/dashboard', shorthand: 'Dashboard' },
     { name: 'AI Playground', path: '/playground', shorthand: 'Claude' },
@@ -151,7 +171,7 @@ const Navbar: React.FC = () => {
             <div className="flex items-stretch gap-0.5">
               {navigationLinks.map((link) => {
                 if (link.dropdown) {
-                  const isAnyActive = link.dropdown.some((item) =>
+                  const isAnyActive = (link.name === 'Research' ? researchPrograms : (link.dropdown as any[])).some((item: any) =>
                     isActivePath(item.path)
                   );
                   // Research gets a distinct teal accent to signal it's a new section
@@ -162,6 +182,9 @@ const Navbar: React.FC = () => {
                   const idleStyle = isResearch
                     ? 'text-teal-600 hover:text-teal-700 border-b-2 border-transparent hover:border-teal-300'
                     : navItemIdle;
+                  const dropdownItems = link.name === 'Research'
+                    ? researchPrograms
+                    : (link.dropdown as {name:string;path:string}[]);
                   return (
                     <div
                       key={link.name}
@@ -195,7 +218,7 @@ const Navbar: React.FC = () => {
                           {/* Transparent bridge — keeps hover zone continuous across the gap */}
                           <div className="h-1 w-full" />
                           <div className="bg-white rounded-md shadow-lg ring-1 ring-black/5 py-1 min-w-[210px]">
-                            {link.dropdown.map((item) => (
+                            {dropdownItems.map((item) => (
                               <Link
                                 key={item.path}
                                 to={item.path}
