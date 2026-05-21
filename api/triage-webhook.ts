@@ -16,6 +16,16 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
+
+// ─── Supabase client (service role — bypasses RLS) ───────────────────────────
+
+function getSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error('Missing Supabase env vars');
+  return createClient(url, key);
+}
 
 // ─── Error types that warrant an alert ───────────────────────────────────────
 
@@ -43,18 +53,38 @@ const SEVERITY_COLOR: Record<string, string> = {
   critical: '#7c3aed',
 };
 
-// ─── In-memory dedup (resets on cold start — acceptable for alerting) ─────────
+// ─── Persistent dedup via Supabase ───────────────────────────────────────────
+// Requires this table (run once in Supabase SQL editor):
+//
+//   create table if not exists triage_dedup (
+//     dedup_key  text primary key,
+//     created_at timestamptz default now()
+//   );
+//
+//   -- Auto-expire rows after 10 minutes so the same error can re-alert later
+//   create index on triage_dedup (created_at);
+//
+// A pg_cron job (or just let the webhook clean up on each call):
+//   delete from triage_dedup where created_at < now() - interval '10 minutes';
 
-const recentEvents = new Map<string, number>();
-const DEDUP_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const DEDUP_WINDOW_MINUTES = 10;
 
-function isDuplicate(key: string): boolean {
-  const last = recentEvents.get(key);
-  if (last && Date.now() - last < DEDUP_WINDOW_MS) return true;
-  recentEvents.set(key, Date.now());
-  for (const [k, t] of recentEvents.entries()) {
-    if (Date.now() - t > DEDUP_WINDOW_MS) recentEvents.delete(k);
-  }
+async function isDuplicate(key: string): Promise<boolean> {
+  const supabase = getSupabase();
+
+  // Prune expired entries first
+  await supabase
+    .from('triage_dedup')
+    .delete()
+    .lt('created_at', new Date(Date.now() - DEDUP_WINDOW_MINUTES * 60 * 1000).toISOString());
+
+  // Try to claim the slot — conflict means it already exists (duplicate)
+  const { error } = await supabase
+    .from('triage_dedup')
+    .insert({ dedup_key: key });
+
+  if (error?.code === '23505') return true;  // unique_violation → duplicate
+  if (error) console.error('[triage-webhook] Dedup insert error:', error.message);
   return false;
 }
 
@@ -190,7 +220,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const dedupKey = `${event_type}:${function_name}`;
-  if (isDuplicate(dedupKey)) {
+  if (await isDuplicate(dedupKey)) {
     console.log(`[triage-webhook] Deduped ${dedupKey} — already alerted recently`);
     return res.status(200).json({ message: 'Deduplicated — already alerted' });
   }
