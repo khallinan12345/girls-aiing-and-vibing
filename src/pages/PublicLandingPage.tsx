@@ -430,7 +430,8 @@ const PublicLandingPage: React.FC = () => {
               AI-scaffolded learning in English skills, artificial intelligence, and tech skills —
               coding, web development, AI agents, image, voice &amp; video creation — plus
               community-impact AI support for farming, fishing, healthcare, animal husbandry,
-              and entrepreneurship across Sub-Saharan Africa and beyond.
+              and entrepreneurship, along with open-source, community impactful, youth-led distributed 
+              research across Sub-Saharan Africa and beyond.
             </p>
 
             <div className="fu fu3" style={{ display: "flex", gap: "0.9rem", justifyContent: "center", flexWrap: "wrap" }}>
