@@ -926,11 +926,10 @@ const PublicLandingPage: React.FC = () => {
               <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.8rem,4vw,2.8rem)", fontWeight: 700, color: "#1a1208", margin: "0 0 1rem" }}>
                 Research by the community,<br />for the community
               </h2>
-              <p style={{ color: "rgba(26,18,8,0.62)", maxWidth: 680, margin: "0 auto", lineHeight: 1.8, fontSize: "0.97rem" }}>
-                This is not research conducted <em>about</em> communities. Learners in Oloibiri and Ibiade
-                are not subjects — they are the researchers. Youth participants self-enroll, document their
-                own capability formation, and lead the inquiry into what AI learning produces in a community
-                where infrastructure has not yet arrived. The methodology is open. The findings belong to everyone.
+              <p style={{ color: "rgba(26,18,8,0.62)", maxWidth: 700, margin: "0 auto", lineHeight: 1.8, fontSize: "0.97rem" }}>
+                This is not research conducted <em>about</em> communities. Learners are not subjects —
+                they are co-researchers. Youth participants self-enroll, document their own capability
+                formation, and lead the inquiry. The methodology is open. The findings belong to everyone.
               </p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.65rem", justifyContent: "center", marginTop: "1.5rem" }}>
                 {["🔬 Open methodology", "👩‍💻 Youth-led", "📊 Live platform data", "🌍 Community ownership", "✊ Self-enrolled learners"].map(tag => (
@@ -943,141 +942,264 @@ const PublicLandingPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Programs */}
-            {programs.map(program => {
-              const qs = questions.filter(q => q.program_id === program.id);
-              const isVAI = program.slug === 'vai-ai-learning-lab-impact';
-              return (
-                <div key={program.id} style={{ marginBottom: "3rem" }}>
+            {/* ── Block 1: Active Research Programs ── */}
+            <div style={{ marginBottom: "4rem" }}>
+              <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.4rem", fontWeight: 700, color: "#1a1208", margin: "0 0 1.5rem", paddingBottom: "0.75rem", borderBottom: "2px solid rgba(22,163,74,0.15)" }}>
+                Active Research Programs
+              </h3>
 
-                  {/* Program header */}
-                  <div style={{
-                    background: isVAI ? "linear-gradient(135deg,#0c160a,#162612)" : "linear-gradient(135deg,#0d1f14,#1a3a28)",
-                    borderRadius: 18, padding: "2rem 2.25rem",
-                    marginBottom: "1.25rem",
-                    border: "1px solid rgba(22,163,74,0.15)",
-                  }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-                      <div style={{ flex: 1, minWidth: 260 }}>
-                        <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.45rem" }}>
-                          Active Research Program
+              {programs.map(program => {
+                const qs = questions.filter(q => q.program_id === program.id);
+                const isVAI = program.slug === 'vai-ai-learning-lab-impact';
+                return (
+                  <div key={program.id} style={{ marginBottom: "2.5rem" }}>
+                    {/* Program header card */}
+                    <div style={{
+                      background: "linear-gradient(135deg,#0c160a,#162612)",
+                      borderRadius: 18, padding: "2rem 2.25rem", marginBottom: "1.25rem",
+                      border: "1px solid rgba(22,163,74,0.15)",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
+                        <div style={{ flex: 1, minWidth: 260 }}>
+                          <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.45rem" }}>
+                            Active Research Program
+                          </div>
+                          <h4 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.1rem,3vw,1.55rem)", fontWeight: 700, color: "#fff", margin: "0 0 0.75rem" }}>
+                            {program.title}
+                          </h4>
+                          <p style={{ fontSize: "0.88rem", color: "rgba(255,255,255,0.58)", lineHeight: 1.75, margin: "0 0 1rem", maxWidth: 620 }}>
+                            {program.description}
+                          </p>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                            {program.sites.map((site: string) => (
+                              <span key={site} style={{
+                                padding: "0.25rem 0.75rem", borderRadius: 99,
+                                background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.2)",
+                                fontSize: "0.74rem", fontWeight: 600, color: "#4ade80",
+                              }}>📍 {site}</span>
+                            ))}
+                          </div>
                         </div>
-                        <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.2rem,3vw,1.65rem)", fontWeight: 700, color: "#fff", margin: "0 0 0.75rem" }}>
-                          {program.title}
-                        </h3>
-                        <p style={{ fontSize: "0.88rem", color: "rgba(255,255,255,0.58)", lineHeight: 1.75, margin: "0 0 1rem", maxWidth: 620 }}>
-                          {program.description}
-                        </p>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-                          {program.sites.map((site: string) => (
-                            <span key={site} style={{
-                              padding: "0.25rem 0.75rem", borderRadius: 99,
-                              background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.2)",
-                              fontSize: "0.74rem", fontWeight: 600, color: "#4ade80",
-                            }}>📍 {site}</span>
-                          ))}
-                        </div>
+                        {/* Live data for vAI */}
+                        {isVAI && latestRow && (
+                          <div style={{
+                            background: "rgba(255,255,255,0.05)", borderRadius: 14,
+                            border: "1px solid rgba(255,255,255,0.08)",
+                            padding: "1.25rem 1.5rem", minWidth: 180, textAlign: "center", flexShrink: 0,
+                          }}>
+                            <div style={{ fontSize: "0.66rem", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.5rem" }}>Live Cohort</div>
+                            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "2.6rem", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{latestRow.learner_count}</div>
+                            <div style={{ fontSize: "0.72rem", color: "#4ade80", fontWeight: 600, marginTop: "0.3rem" }}>Active Learners</div>
+                            <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "0.85rem 0" }} />
+                            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.8rem", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{latestRow.sessions_count?.toLocaleString()}</div>
+                            <div style={{ fontSize: "0.72rem", color: "#fbbf24", fontWeight: 600, marginTop: "0.3rem" }}>AI Sessions</div>
+                          </div>
+                        )}
+                        {/* iGiTREE — coming soon data badge */}
+                        {!isVAI && (
+                          <div style={{
+                            background: "rgba(255,255,255,0.05)", borderRadius: 14,
+                            border: "1px solid rgba(255,255,255,0.08)",
+                            padding: "1.25rem 1.5rem", minWidth: 180, textAlign: "center", flexShrink: 0,
+                          }}>
+                            <div style={{ fontSize: "0.66rem", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.75rem" }}>Live Data</div>
+                            <span style={{ fontSize: "1.8rem" }}>🧬</span>
+                            <div style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.35)", marginTop: "0.5rem", lineHeight: 1.5 }}>Coming as cohort<br />data matures</div>
+                          </div>
+                        )}
                       </div>
-                      {isVAI && latest && (
-                        <div style={{
-                          background: "rgba(255,255,255,0.05)", borderRadius: 14,
-                          border: "1px solid rgba(255,255,255,0.08)",
-                          padding: "1.25rem 1.5rem", minWidth: 180, textAlign: "center",
+                    </div>
+
+                    {/* Guiding question cards */}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))", gap: "1rem" }}>
+                      {qs.map(q => (
+                        <div key={q.id} style={{
+                          background: "#fff", borderRadius: 14,
+                          border: `1px solid ${q.color_hex}28`,
+                          padding: "1.5rem", boxShadow: "0 2px 12px rgba(26,18,8,0.05)",
+                          position: "relative", overflow: "hidden",
                         }}>
-                          <div style={{ fontSize: "0.66rem", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.5rem" }}>Live Cohort</div>
-                          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "2.6rem", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{latest.learner_count}</div>
-                          <div style={{ fontSize: "0.72rem", color: "#4ade80", fontWeight: 600, marginTop: "0.3rem" }}>Active Learners</div>
-                          <div style={{ height: "1px", background: "rgba(255,255,255,0.08)", margin: "0.85rem 0" }} />
-                          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.8rem", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{latest.sessions_count?.toLocaleString()}</div>
-                          <div style={{ fontSize: "0.72rem", color: "#fbbf24", fontWeight: 600, marginTop: "0.3rem" }}>AI Sessions</div>
+                          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: q.color_hex }} />
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem", marginBottom: "0.9rem" }}>
+                            <span style={{ fontSize: "1.4rem", flexShrink: 0, lineHeight: 1 }}>{q.icon}</span>
+                            <div>
+                              <div style={{ fontSize: "0.66rem", fontWeight: 700, color: q.color_hex, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.2rem" }}>{q.domain}</div>
+                              <div style={{ fontWeight: 700, color: "#1a1208", fontSize: "0.92rem", lineHeight: 1.35 }}>{q.title}</div>
+                            </div>
+                          </div>
+                          <p style={{ fontSize: "0.82rem", color: "rgba(26,18,8,0.62)", lineHeight: 1.72, margin: "0 0 1rem", fontStyle: "italic" }}>
+                            "{q.research_question}"
+                          </p>
+                          {/* Live indicators for vAI questions */}
+                          {isVAI && latestRow && q.slug === 'learning-outcomes' && (
+                            <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
+                              {[
+                                { label: "AI Proficiency", value: `${latestRow.avg_mean?.toFixed(0) ?? "—"}/100`, color: "#C8963E" },
+                                { label: "Role-Ready", value: `${latestRow.role_ready_count ?? "—"} learners`, color: "#16a34a" },
+                              ].map(stat => (
+                                <div key={stat.label} style={{ background: `${stat.color}12`, border: `1px solid ${stat.color}28`, borderRadius: 8, padding: "0.4rem 0.75rem" }}>
+                                  <div style={{ fontSize: "0.62rem", color: stat.color, fontWeight: 700, textTransform: "uppercase" }}>{stat.label}</div>
+                                  <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#1a1208" }}>{stat.value}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {isVAI && latestRow && q.slug === 'community-spillover' && (
+                            <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
+                              {[
+                                { label: "PUE Linkage", value: `${latestRow.pue_learner_pct?.toFixed(0) ?? "—"}%`, color: "#5B7A6A" },
+                                { label: "Reducing AI Reliance", value: `${latestRow.converging_count ?? "—"}`, color: "#16a34a" },
+                              ].map(stat => (
+                                <div key={stat.label} style={{ background: `${stat.color}12`, border: `1px solid ${stat.color}28`, borderRadius: 8, padding: "0.4rem 0.75rem" }}>
+                                  <div style={{ fontSize: "0.62rem", color: stat.color, fontWeight: 700, textTransform: "uppercase" }}>{stat.label}</div>
+                                  <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#1a1208" }}>{stat.value}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {isVAI && latestRow && q.slug === 'hope-agency' && (
+                            <div style={{ background: "rgba(42,123,136,0.07)", borderRadius: 8, padding: "0.55rem 0.85rem", fontSize: "0.76rem", color: "rgba(26,18,8,0.55)", lineHeight: 1.6 }}>
+                              📊 {latestRow.assessed_count ?? "—"} learners assessed this period via monthly AI rubrics
+                            </div>
+                          )}
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginTop: "0.85rem" }}>
+                            {q.sites.map((site: string) => (
+                              <span key={site} style={{ fontSize: "0.68rem", fontWeight: 600, color: "rgba(26,18,8,0.4)", background: "rgba(26,18,8,0.05)", borderRadius: 99, padding: "0.2rem 0.6rem" }}>
+                                {site}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                      )}
+                      ))}
                     </div>
                   </div>
+                );
+              })}
+            </div>
 
-                  {/* Guiding questions */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1rem" }}>
-                    {qs.map(q => (
-                      <div key={q.id} style={{
-                        background: "#fff", borderRadius: 14,
-                        border: `1px solid ${q.color_hex}28`,
-                        padding: "1.5rem",
-                        boxShadow: "0 2px 12px rgba(26,18,8,0.05)",
-                        position: "relative", overflow: "hidden",
-                      }}>
-                        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: q.color_hex }} />
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem", marginBottom: "0.9rem" }}>
-                          <span style={{ fontSize: "1.4rem", flexShrink: 0, lineHeight: 1 }}>{q.icon}</span>
-                          <div>
-                            <div style={{ fontSize: "0.66rem", fontWeight: 700, color: q.color_hex, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.2rem" }}>
-                              {q.domain}
-                            </div>
-                            <div style={{ fontWeight: 700, color: "#1a1208", fontSize: "0.92rem", lineHeight: 1.35 }}>{q.title}</div>
-                          </div>
-                        </div>
-                        <p style={{ fontSize: "0.82rem", color: "rgba(26,18,8,0.62)", lineHeight: 1.72, margin: "0 0 1rem", fontStyle: "italic" }}>
-                          "{q.research_question}"
-                        </p>
-                        {/* Live data indicators for vAI questions */}
-                        {isVAI && latest && q.slug === 'learning-outcomes' && (
-                          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-                            {[
-                              { label: "AI Proficiency", value: `${latest.avg_mean?.toFixed(0) ?? "—"}/100`, color: "#C8963E" },
-                              { label: "Role-Ready", value: `${latest.role_ready_count ?? "—"} learners`, color: "#16a34a" },
-                            ].map(stat => (
-                              <div key={stat.label} style={{ background: `${stat.color}10`, border: `1px solid ${stat.color}25`, borderRadius: 8, padding: "0.4rem 0.75rem" }}>
-                                <div style={{ fontSize: "0.66rem", color: stat.color, fontWeight: 700, textTransform: "uppercase" }}>{stat.label}</div>
-                                <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#1a1208" }}>{stat.value}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {isVAI && latest && q.slug === 'hope-agency' && (
-                          <div style={{ background: "rgba(42,123,136,0.07)", borderRadius: 8, padding: "0.6rem 0.9rem", fontSize: "0.78rem", color: "rgba(26,18,8,0.6)", lineHeight: 1.6 }}>
-                            📊 Measured via monthly AI-assessed sessions · {latest.assessed_count ?? "—"} learners assessed this period
-                          </div>
-                        )}
-                        {isVAI && latest && q.slug === 'community-spillover' && (
-                          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-                            {[
-                              { label: "PUE Linkage", value: `${latest.pue_learner_pct?.toFixed(0) ?? "—"}%`, color: "#5B7A6A" },
-                              { label: "Reducing AI Reliance", value: `${latest.converging_count ?? "—"}`, color: "#16a34a" },
-                            ].map(stat => (
-                              <div key={stat.label} style={{ background: `${stat.color}10`, border: `1px solid ${stat.color}25`, borderRadius: 8, padding: "0.4rem 0.75rem" }}>
-                                <div style={{ fontSize: "0.66rem", color: stat.color, fontWeight: 700, textTransform: "uppercase" }}>{stat.label}</div>
-                                <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#1a1208" }}>{stat.value}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginTop: "0.75rem" }}>
-                          {q.sites.map((site: string) => (
-                            <span key={site} style={{ fontSize: "0.68rem", fontWeight: 600, color: "rgba(26,18,8,0.45)", background: "rgba(26,18,8,0.05)", borderRadius: 99, padding: "0.2rem 0.6rem" }}>
-                              {site}
-                            </span>
-                          ))}
+            {/* ── Block 2: Open Research Network ── */}
+            <div style={{
+              background: "linear-gradient(135deg,#1e1b4b,#312e81)",
+              borderRadius: 22, padding: "3rem 2.5rem",
+              border: "1px solid rgba(139,92,246,0.2)",
+            }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3rem", alignItems: "start" }}>
+
+                {/* Left: vision */}
+                <div>
+                  <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: "0.6rem" }}>
+                    Coming Soon · Open to Researchers Worldwide
+                  </div>
+                  <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.3rem,3vw,2rem)", fontWeight: 700, color: "#fff", margin: "0 0 1rem", lineHeight: 1.25 }}>
+                    A distributed research network — proposed by anyone, vetted for equity, led by communities
+                  </h3>
+                  <p style={{ fontSize: "0.88rem", color: "rgba(255,255,255,0.58)", lineHeight: 1.8, margin: "0 0 1.5rem" }}>
+                    Any researcher — from any university or institution — will be able to propose a study.
+                    A review board vets each proposal for scientific merit and, critically, whether it empowers
+                    or exploits its participants. Approved studies are then offered to communities, who choose
+                    whether to participate. Learners who join become co-researchers: AI-mentored, team-based,
+                    and eligible for university research certification upon documented completion.
+                  </p>
+
+                  {/* How it works */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+                    {[
+                      { step: "01", icon: "💡", title: "Researcher proposes a study", detail: "Any institution worldwide. Open submission." },
+                      { step: "02", icon: "🛡️", title: "AI + board vetting", detail: "Reviewed by the vAI Research Board and an AI IRB for equity, scientific merit, and community empowerment — not exploitation." },
+                      { step: "03", icon: "🌍", title: "Community chooses to participate", detail: "Communities are invited, never assigned. They select the studies that matter to them." },
+                      { step: "04", icon: "👩‍🔬", title: "Learners join as co-researchers", detail: "AI-mentored, team-based participation. Learners document, analyze, and contribute." },
+                      { step: "05", icon: "🎓", title: "University research certification", detail: "Successful participants earn credentials recognized by University of Dayton, Temple University, and partner institutions." },
+                    ].map(item => (
+                      <div key={item.step} style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+                        <div style={{
+                          width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
+                          background: "rgba(139,92,246,0.2)", border: "1px solid rgba(139,92,246,0.3)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: "1rem",
+                        }}>{item.icon}</div>
+                        <div>
+                          <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "#fff", marginBottom: "0.15rem" }}>{item.title}</div>
+                          <div style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>{item.detail}</div>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
-              );
-            })}
 
-            {/* Findings placeholder — ready for when data arrives */}
-            <div style={{
-              marginTop: "1rem",
-              background: "rgba(22,163,74,0.06)",
-              border: "1px dashed rgba(22,163,74,0.3)",
-              borderRadius: 14, padding: "1.5rem 2rem",
-              display: "flex", alignItems: "center", gap: "1rem",
-            }}>
-              <span style={{ fontSize: "1.4rem" }}>🔬</span>
-              <div>
-                <div style={{ fontWeight: 700, color: "#15803d", fontSize: "0.88rem", marginBottom: "0.2rem" }}>Findings emerging</div>
-                <div style={{ fontSize: "0.8rem", color: "rgba(26,18,8,0.55)", lineHeight: 1.65 }}>
-                  Formal research findings will appear here as they are documented by the research community.
-                  Live platform data above reflects current cohort activity.
+                {/* Right: board + CTA */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+
+                  {/* Review Board */}
+                  <div style={{
+                    background: "rgba(255,255,255,0.05)", borderRadius: 16,
+                    border: "1px solid rgba(139,92,246,0.2)", padding: "1.75rem",
+                  }}>
+                    <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "1rem" }}>
+                      Research Review Board
+                    </div>
+                    {[
+                      { name: "Bennywhite Davidson", role: "vAI Co-Founder · Oloibiri, Nigeria", emoji: "🇳🇬" },
+                      { name: "Silas Clergy", role: "Youth Representative · vAI Learner & Developer", emoji: "👨‍💻" },
+                      { name: "Kevin Hallinan", role: "Emeritus Professor · University of Dayton", emoji: "🎓" },
+                      { name: "Jean Akingeneye", role: "Research Partner · iGiTREE", emoji: "🧬" },
+                      { name: "UD Representative", role: "University of Dayton · Incoming", emoji: "🏛️" },
+                      { name: "Temple Representative", role: "Temple University · Incoming", emoji: "🏛️" },
+                    ].map(member => (
+                      <div key={member.name} style={{
+                        display: "flex", alignItems: "center", gap: "0.75rem",
+                        padding: "0.6rem 0", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                      }}>
+                        <span style={{ fontSize: "1.1rem", flexShrink: 0 }}>{member.emoji}</span>
+                        <div>
+                          <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "#fff" }}>{member.name}</div>
+                          <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.4)", lineHeight: 1.4 }}>{member.role}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* CTA */}
+                  <div style={{
+                    background: "rgba(139,92,246,0.12)", borderRadius: 16,
+                    border: "1px solid rgba(139,92,246,0.25)", padding: "1.75rem",
+                    textAlign: "center",
+                  }}>
+                    <div style={{ fontSize: "1.6rem", marginBottom: "0.75rem" }}>🔬</div>
+                    <div style={{ fontWeight: 700, color: "#fff", fontSize: "1rem", marginBottom: "0.5rem" }}>Are you a researcher?</div>
+                    <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.5)", lineHeight: 1.65, margin: "0 0 1.25rem" }}>
+                      We are building the proposal portal now. Register your interest and we will contact you when submissions open.
+                    </p>
+                    <a
+                      href="mailto:kevin.hallinan@udayton.edu?subject=Research%20Network%20Interest&body=Hello%2C%20I%20am%20interested%20in%20proposing%20a%20study%20through%20the%20vAI%20Open%20Research%20Network.%0A%0AName%3A%20%0AInstitution%3A%20%0AResearch%20area%3A%20%0A%0APlease%20keep%20me%20informed%20of%20when%20submissions%20open."
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: "0.5rem",
+                        padding: "0.75rem 1.75rem", borderRadius: 10,
+                        background: "#7c3aed", color: "#fff",
+                        fontSize: "0.88rem", fontWeight: 700, textDecoration: "none",
+                        transition: "opacity 0.15s",
+                      }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = "0.85"; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = "1"; }}
+                    >
+                      ✉️ Register Interest
+                    </a>
+                  </div>
+
+                  {/* Findings placeholder */}
+                  <div style={{
+                    background: "rgba(22,163,74,0.08)", border: "1px dashed rgba(22,163,74,0.3)",
+                    borderRadius: 12, padding: "1.1rem 1.4rem",
+                    display: "flex", alignItems: "center", gap: "0.85rem",
+                  }}>
+                    <span style={{ fontSize: "1.2rem" }}>📊</span>
+                    <div>
+                      <div style={{ fontWeight: 700, color: "#15803d", fontSize: "0.82rem", marginBottom: "0.15rem" }}>Findings emerging</div>
+                      <div style={{ fontSize: "0.75rem", color: "rgba(26,18,8,0.5)", lineHeight: 1.6 }}>
+                        Formal research findings will appear here as the research community documents them.
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               </div>
             </div>
