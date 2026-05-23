@@ -1825,8 +1825,10 @@ const LongitudinalGlobalPanel: React.FC = () => {
             'creativity_score', 'pue_score',
           ].join(','))
           .order('cohort_month', { ascending: true })
-          .order('snapshot_date', { ascending: true });
+          .order('snapshot_date', { ascending: true })
+          .limit(10000);  // dashboard_stats has daily rows; raise limit to capture full history
         if (error) throw error;
+
         setRows((data as LongRow[]) || []);
       } catch (err: any) {
         setError(err.message);
@@ -1848,18 +1850,20 @@ const LongitudinalGlobalPanel: React.FC = () => {
   );
   if (rows.length === 0) return null;
 
-  // ── Deduplicate to latest snapshot per learner per cohort_month ──────────
-  // dashboard_stats has one row per learner per snapshot_date; we want the
-  // most recent snapshot within each cohort_month for each learner.
-  const latestByKey: Record<string, LongRow> = {};
+  // ── Deduplicate to one row per learner per cohort_month ─────────────────
+  // dashboard_stats has one row per learner per activity_date (daily), but all
+  // scored fields (session_count, cognitive scores, certs, etc.) are monthly
+  // aggregates that repeat identically on every daily row within a cohort_month.
+  // First-seen wins — any row within a learner+month is representative.
+  const seenKeys = new Set<string>();
+  const dedupedRows: LongRow[] = [];
   rows.forEach(r => {
     const key = `${r.learner_token}|${r.cohort_month}`;
-    const existing = latestByKey[key];
-    if (!existing || (r.snapshot_date ?? '') > (existing.snapshot_date ?? '')) {
-      latestByKey[key] = r;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      dedupedRows.push(r);
     }
   });
-  const dedupedRows = Object.values(latestByKey);
 
   // ── Compute assessment_cycle client-side ───────────────────────────────────
   // Rank each learner's unique months chronologically → cycle number
@@ -1905,8 +1909,12 @@ const LongitudinalGlobalPanel: React.FC = () => {
   const hasReasoningData = persistent.some(r =>
     r.reasoning_level_3 !== null && r.reasoning_level_3 !== undefined && Number(r.reasoning_level_3) > 0
   );
+  const totalSessions = (arr: typeof rowsWithCycle) =>
+    arr.reduce((s, r) => s + (Number(r.session_count) || 0), 0);
+
   const reasoning = hasReasoningData ? cycles.map(c => ({
     cycle: c, n: byCycle[c].length,
+    sessions: totalSessions(byCycle[c]),
     l0: avg(byCycle[c], 'reasoning_level_0'),
     l1: avg(byCycle[c], 'reasoning_level_1'),
     l2: avg(byCycle[c], 'reasoning_level_2'),
@@ -1920,6 +1928,7 @@ const LongitudinalGlobalPanel: React.FC = () => {
     const validTrend = rows.filter(r => r.scaffold_convergence_trend !== 'insufficient_data');
     return {
       cycle: c, n: rows.length,
+      sessions: totalSessions(rows),
       clarf: avg(rows, 'scaffold_clarification_per_session'),
       convergingPct: validTrend.length
         ? pct(validTrend.filter(r => r.scaffold_convergence_trend === 'converging').length, validTrend.length)
@@ -1933,6 +1942,7 @@ const LongitudinalGlobalPanel: React.FC = () => {
     pct(arr.filter(r => (Number(r[key]) || 0) > 0).length, arr.length);
   const roleReadiness = cycles.map(c => ({
     cycle: c,
+    sessions: totalSessions(byCycle[c]),
     teaching:          hasSig(byCycle[c], 'role_teaching_intent_count'),
     community:         hasSig(byCycle[c], 'role_community_application_count'),
     enterprise:        hasSig(byCycle[c], 'role_enterprise_orientation_count'),
@@ -2063,7 +2073,10 @@ const LongitudinalGlobalPanel: React.FC = () => {
               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Reasoning level composition</p>
               {reasoning.map(r => (
                 <div key={r.cycle} className="mb-2">
-                  <span className="text-[10px] text-gray-400">Cycle {r.cycle} (n={r.n})</span>
+                  <div className="flex justify-between mb-0.5">
+                    <span className="text-[10px] text-gray-400">Cycle {r.cycle} · {r.n} learner{r.n !== 1 ? 's' : ''}</span>
+                    <span className="text-[10px] font-mono text-gray-400">{r.sessions} sessions</span>
+                  </div>
                   <div className="flex h-5 rounded overflow-hidden w-full mt-1">
                     <div style={{ width: `${r.l0}%`, background: '#e5e7eb' }} title={`L0: ${r.l0.toFixed(0)}%`} />
                     <div style={{ width: `${r.l1}%`, background: '#1a4a6e' }} title={`L1: ${r.l1.toFixed(0)}%`} className="flex items-center justify-center">
@@ -2099,7 +2112,10 @@ const LongitudinalGlobalPanel: React.FC = () => {
                 ];
                 return (
                   <div key={c} className="mb-3">
-                    <p className="text-[10px] text-gray-400 mb-1.5">Cycle {c} (n={byCycle[c].length})</p>
+                    <div className="flex justify-between mb-1.5">
+                      <span className="text-[10px] text-gray-400">Cycle {c} · {byCycle[c].length} learner{byCycle[c].length !== 1 ? 's' : ''}</span>
+                      <span className="text-[10px] font-mono text-gray-400">{totalSessions(byCycle[c])} sessions</span>
+                    </div>
                     {scores.map(s => (
                       <div key={s.label} className="mb-1.5">
                         <div className="flex justify-between text-[10px] mb-0.5">
@@ -2122,11 +2138,11 @@ const LongitudinalGlobalPanel: React.FC = () => {
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-4">
           <div>
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">AI scaffolding demand</p>
-            <p className="text-[10px] text-gray-400 mb-2 italic">Avg number of AI clarification prompts per session. Falling values mean learners are directing the conversation independently rather than being guided.</p>
+            <p className="text-[10px] text-gray-400 mb-2 italic"><strong className="text-gray-500">Clarif/session</strong> = avg number of times per session the AI needed to re-prompt, simplify, or redirect the learner. High values indicate dependence on AI guidance; falling values indicate the learner is forming their own questions and directing the conversation.</p>
             {scaffolding.map(s => (
               <div key={s.cycle} className="mb-2">
                 <div className="flex justify-between mb-1 text-[10px]">
-                  <span className="text-gray-400">Cycle {s.cycle} (n={s.n})</span>
+                  <span className="text-gray-400">Cycle {s.cycle} · {s.n} learner{s.n !== 1 ? 's' : ''} · <span className="font-mono">{s.sessions} sessions</span></span>
                   <span className="font-mono text-teal-700 font-bold">
                     {s.clarf.toFixed(1)}{s.convergingPct !== null
                       ? <span className="text-green-600"> · {s.convergingPct}% converging</span>
@@ -2142,7 +2158,8 @@ const LongitudinalGlobalPanel: React.FC = () => {
           </div>
           <div>
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Role readiness signals</p>
-            <p className="text-[10px] text-gray-400 mb-2 italic">% of learners whose AI conversations show evidence of applying learning beyond the platform — teaching peers, advising on community problems, planning enterprises, or sharing knowledge across generations. Detected via AI transcript analysis.</p>
+            <p className="text-[10px] text-gray-400 mb-1 italic">% of learners per cycle whose AI conversations contain evidence of applying learning beyond the platform. Detected automatically via transcript analysis — the AI counts unprompted mentions of each behaviour.</p>
+            <p className="text-[10px] text-gray-400 mb-2 italic"><strong className="text-gray-500">Teaching intent</strong> = mentioned plans or actions to teach peers, family, or neighbours. <strong className="text-gray-500">Community application</strong> = applied AI to a real local problem. <strong className="text-gray-500">Enterprise orientation</strong> = referenced a business or income plan. <strong className="text-gray-500">Intergenerational</strong> = knowledge shared across age groups.</p>
             {roleKeys.map(item => (
               <div key={item.key} className="mb-2">
                 <p className="text-[10px] text-gray-400 mb-1">{item.label}</p>
@@ -2150,7 +2167,7 @@ const LongitudinalGlobalPanel: React.FC = () => {
                   {roleReadiness.map((r, i) => (
                     <div key={r.cycle} className="flex-1 rounded-sm"
                       style={{ height: `${Math.max(4, r[item.key])}%`, background: roleColors[Math.min(i, 2)] }}
-                      title={`Cycle ${r.cycle}: ${r[item.key]}%`} />
+                      title={`Cycle ${r.cycle}: ${r[item.key]}% (${r.sessions} sessions, n=${r.n})`} />
                   ))}
                 </div>
                 <div className="flex mt-0.5">
