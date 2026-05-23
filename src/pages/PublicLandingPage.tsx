@@ -622,6 +622,209 @@ const PublicLandingPage: React.FC = () => {
                   </div>
                 )}
 
+                {/* ── Longitudinal: Persistent Learner Trajectories ─────── */}
+                <div style={{
+                  marginTop: "2.5rem",
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 16, padding: "2rem",
+                }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem", marginBottom: "1.75rem" }}>
+                    <div>
+                      <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.45rem" }}>
+                        Longitudinal Evidence · Persistent Learners
+                      </div>
+                      <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.1rem,3vw,1.55rem)", fontWeight: 700, color: "#fff", margin: "0 0 0.4rem" }}>
+                        What happens when learners stay
+                      </h3>
+                      <p style={{ fontSize: "0.83rem", color: "rgba(255,255,255,0.45)", lineHeight: 1.65, margin: 0, maxWidth: 560 }}>
+                        33 learners with 2+ monthly assessments across 11 months. Zero prior computer access.
+                        Data from: <em>Hallinan, Hao, Davidson &amp; Clergy (2026), World Development submission.</em>
+                      </p>
+                    </div>
+                    <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", flexShrink: 0 }}>
+                      {[
+                        { num: "2.3×", label: "L3 reasoning growth", color: "#a78bfa" },
+                        { num: "58%", label: "less AI scaffolding", color: "#4ade80" },
+                        { num: "$6.69", label: "per certification", color: "#fbbf24" },
+                      ].map(s => (
+                        <div key={s.label} style={{
+                          background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
+                          borderRadius: 10, padding: "0.75rem 1rem", textAlign: "center", minWidth: 90,
+                        }}>
+                          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.num}</div>
+                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.38)", marginTop: "0.25rem", lineHeight: 1.4 }}>{s.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Reasoning composition stacked bars */}
+                  <div style={{ marginBottom: "1.75rem" }}>
+                    <div style={{ fontSize: "0.69rem", fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.9rem" }}>
+                      Reasoning level composition — from prompted response to self-directed enterprise planning
+                    </div>
+                    {[
+                      { label: "1st assess. (n=19)", l0: 8.1, l1: 68.5, l2: 21.5, l3: 10.9, highlight: false },
+                      { label: "2nd assess. (n=24)", l0: 8.0, l1: 60.0, l2: 25.1, l3: 18.8, highlight: false },
+                      { label: "3rd assess. (n=16)", l0: 8.9, l1: 54.2, l2: 23.2, l3: 24.8, highlight: false },
+
+                    ].map(row => (
+                      <div key={row.label} style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "8px" }}>
+                        <div style={{ width: 128, fontSize: "0.72rem", color: "rgba(255,255,255,0.38)", textAlign: "right", flexShrink: 0 }}>{row.label}</div>
+                        <div style={{ flex: 1, height: 26, display: "flex", borderRadius: 5, overflow: "hidden" }}>
+                          <div style={{ width: `${row.l0}%`, background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            {row.l0 > 5 && <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", fontWeight: 600 }}>{row.l0}%</span>}
+                          </div>
+                          <div style={{ width: `${row.l1}%`, background: "#1a4a6e", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <span style={{ fontSize: "9px", color: "#5a9abf", fontWeight: 600 }}>L1 {row.l1}%</span>
+                          </div>
+                          <div style={{ width: `${row.l2}%`, background: "#1a5c5c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <span style={{ fontSize: "9px", color: "#4aabab", fontWeight: 600 }}>{row.l2}%</span>
+                          </div>
+                          <div style={{
+                            width: `${row.l3}%`,
+                            background: row.highlight ? "#22c58b" : "#15764a",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>
+                            <span style={{ fontSize: "9px", color: row.highlight ? "#093c25" : "#4adb96", fontWeight: 700 }}>
+                              L3 {row.l3}%{row.highlight ? " ↑3×" : ""}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", gap: "1rem", marginTop: "0.65rem", flexWrap: "wrap" }}>
+                      {[
+                        { bg: "rgba(255,255,255,0.06)", label: "L0 Definitional" },
+                        { bg: "#1a4a6e", label: "L1 Responsive (prompted)" },
+                        { bg: "#1a5c5c", label: "L2 Elaborative" },
+                        { bg: "#22c58b", label: "L3 Structured — enterprise-ready" },
+                      ].map(l => (
+                        <div key={l.label} style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "0.7rem", color: "rgba(255,255,255,0.38)" }}>
+                          <div style={{ width: 10, height: 10, borderRadius: 2, background: l.bg, border: "1px solid rgba(255,255,255,0.1)", flexShrink: 0 }} />
+                          {l.label}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Three columns: scaffolding + role readiness + enterprise */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: "1rem" }}>
+
+                    {/* Scaffolding decline */}
+                    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
+                      <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.75rem" }}>
+                        AI scaffolding demand
+                      </div>
+                      {[
+                        { label: "1st (n=19)", val: 6.63, pct: 100, caution: false },
+                        { label: "2nd (n=24)", val: 3.97, pct: 60, caution: false },
+                        { label: "3rd (n=16)", val: 2.79, pct: 42, caution: false },
+                      ].map(row => (
+                        <div key={row.label} style={{ marginBottom: "0.6rem" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
+                            <span style={{ fontSize: "0.71rem", color: row.caution ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.5)" }}>{row.label}</span>
+                            <span style={{ fontSize: "0.71rem", fontWeight: 700, color: row.caution ? "rgba(255,255,255,0.2)" : "#4ade80" }}>{row.val}</span>
+                          </div>
+                          <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 99, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${row.pct}%`, background: row.caution ? "rgba(255,255,255,0.1)" : "#4ade80", borderRadius: 99 }} />
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ fontSize: "0.69rem", color: "rgba(255,255,255,0.25)", marginTop: "0.5rem", lineHeight: 1.5 }}>
+                        Clarifications/session. 58% decline by 3rd cycle.
+                      </div>
+                      <div style={{ marginTop: "0.85rem", padding: "0.6rem 0.75rem", background: "rgba(74,222,128,0.07)", borderRadius: 8 }}>
+                        <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.35)", marginBottom: "2px" }}>Converging at 3rd assessment</div>
+                        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", color: "#4ade80", lineHeight: 1 }}>37.5%</div>
+                        <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.25)", marginTop: "2px" }}>up from 10.5% · 0% diverging</div>
+                      </div>
+                    </div>
+
+                    {/* Role readiness */}
+                    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
+                      <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#d97706", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.75rem" }}>
+                        Role readiness signals
+                      </div>
+                      {[
+                        { label: "Teaching intent",       a1: 30, a2: 39, a3: 67 },
+                        { label: "Community application", a1: 36, a2: 52, a3: 67 },
+                        { label: "Enterprise orient.",    a1: 30, a2: 45, a3: 61 },
+                        { label: "Intergenerational",     a1: 27, a2: 48, a3: 50 },
+                      ].map(row => (
+                        <div key={row.label} style={{ marginBottom: "0.85rem" }}>
+                          <div style={{ fontSize: "0.71rem", color: "rgba(255,255,255,0.5)", marginBottom: "5px" }}>{row.label}</div>
+                          <div style={{ display: "flex", gap: "4px", alignItems: "flex-end", height: 28 }}>
+                            {[
+                              { val: row.a1, color: "rgba(217,119,6,0.3)" },
+                              { val: row.a2, color: "rgba(217,119,6,0.6)" },
+                              { val: row.a3, color: "#d97706" },
+                            ].map((bar, bi) => (
+                              <div key={bi} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+                                <div style={{ width: "100%", height: `${bar.val / 100 * 28}px`, background: bar.color, borderRadius: "2px 2px 0 0" }} />
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "3px" }}>
+                            {[row.a1, row.a2, row.a3].map((v, vi) => (
+                              <span key={vi} style={{ fontSize: "0.65rem", color: vi === 2 ? "#d97706" : "rgba(255,255,255,0.25)", fontWeight: vi === 2 ? 700 : 400 }}>{v}%</span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.22)", marginTop: "0.3rem", lineHeight: 1.5 }}>
+                        Bars = assess. 1 → 2 → 3. All indicators roughly double.
+                      </div>
+                    </div>
+
+                    {/* Enterprise artifacts */}
+                    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
+                      <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.75rem" }}>
+                        Enterprise capability
+                      </div>
+                      {[
+                        { label: "Artifact quality score", a1: "4.1", a3: "6.5", change: "↑60%", color: "#a78bfa" },
+                        { label: "Mean certs per learner",  a1: "1.7", a3: "31.8", change: "↑19×", color: "#fbbf24" },
+                        { label: "Certified by cycle 3",   a1: "—",  a3: "83%",  change: "",      color: "#4ade80" },
+                        { label: "Producing artifacts",    a1: "68%", a3: "81%", change: "↑13pp", color: "#a78bfa" },
+                      ].map(row => (
+                        <div key={row.label} style={{
+                          display: "flex", justifyContent: "space-between", alignItems: "center",
+                          padding: "0.55rem 0", borderBottom: "1px solid rgba(255,255,255,0.05)",
+                        }}>
+                          <div>
+                            <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.45)" }}>{row.label}</div>
+                            <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.22)", marginTop: "1px" }}>
+                              {row.a1 !== "—" ? `${row.a1} →` : ""} <span style={{ color: row.color }}>{row.a3}</span>
+                            </div>
+                          </div>
+                          {row.change && (
+                            <span style={{ fontSize: "0.78rem", fontWeight: 700, color: row.color, flexShrink: 0 }}>{row.change}</span>
+                          )}
+                        </div>
+                      ))}
+
+                      {/* Natural experiment callout */}
+                      <div style={{ marginTop: "1rem", padding: "0.9rem", background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.18)", borderRadius: 10 }}>
+                        <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#a78bfa", marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                          Natural experiment
+                        </div>
+                        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.75rem", color: "#fff", lineHeight: 1, marginBottom: "0.3rem" }}>5.4×</div>
+                        <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.4)", lineHeight: 1.55 }}>
+                          engagement when mentor present vs. absent — technology, connectivity, and curriculum unchanged.
+                          The facilitator is the mechanism.
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  <div style={{ marginTop: "1.1rem", fontSize: "0.73rem", color: "rgba(255,255,255,0.22)", lineHeight: 1.6 }}>
+                    All longitudinal claims are associative; no control group was employed.
+                  </div>
+                </div>
+
                 {/* What does this data mean? */}
                 <div style={{
                   marginTop: "2.5rem",
@@ -1171,7 +1374,7 @@ const PublicLandingPage: React.FC = () => {
                       We are building the proposal portal now. Register your interest and we will contact you when submissions open.
                     </p>
                     <a
-                      href="mailto:kevin.hallinan@udayton.edu?subject=Research%20Network%20Interest&body=Hello%2C%20I%20am%20interested%20in%20proposing%20a%20study%20through%20the%20vAI%20Open%20Research%20Network.%0A%0AName%3A%20%0AInstitution%3A%20%0AResearch%20area%3A%20%0A%0APlease%20keep%20me%20informed%20of%20when%20submissions%20open."
+                      href="mailto:bennywhite.davidson@renewvia.com?subject=Research%20Network%20Interest&body=Hello%2C%20I%20am%20interested%20in%20proposing%20a%20study%20through%20the%20vAI%20Open%20Research%20Network.%0A%0AName%3A%20%0AInstitution%3A%20%0AResearch%20area%3A%20%0A%0APlease%20keep%20me%20informed%20of%20when%20submissions%20open."
                       style={{
                         display: "inline-flex", alignItems: "center", gap: "0.5rem",
                         padding: "0.75rem 1.75rem", borderRadius: 10,
@@ -1329,7 +1532,7 @@ const PublicLandingPage: React.FC = () => {
               <p style={{ color: "rgba(255,255,255,0.48)", fontSize: "0.88rem", marginBottom: "1.5rem" }}>
                 Access is managed — community leaders receive join codes directly from our team.
               </p>
-              <a href="mailto:khallinan1@udayton.edu?subject=New Community Interest — vAI Platform"
+              <a href="mailto:bennywhite.davidson@renewvia.com?subject=New Community Interest — vAI Platform"
                 className="pub-btn btn-amber" style={{ fontSize: "1rem", padding: "0.82rem 1.9rem" }}>
                 Contact Us to Get Started <ArrowRight size={15} />
               </a>
@@ -1409,8 +1612,8 @@ const PublicLandingPage: React.FC = () => {
                 we'd love to hear from you.
               </p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.9rem", justifyContent: "center" }}>
-                <a href="mailto:khallinan1@udayton.edu" className="pub-btn btn-amber">
-                  <Mail size={15} /> khallinan1@udayton.edu
+                <a href="mailto:bennywhite.davidson@renewvia.com" className="pub-btn btn-amber">
+                  <Mail size={15} /> bennywhite.davidson@renewvia.com
                 </a>
                 <a href="https://www.linkedin.com/in/kevinhallinanenergyinnovator123"
                   target="_blank" rel="noopener noreferrer"
