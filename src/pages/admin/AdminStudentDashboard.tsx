@@ -1762,23 +1762,42 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 interface LongRow {
-  assessment_cycle: number;
+  learner_token: string;
+  cohort_month: string;
+  site: string;
+  session_count: number;
   is_persistent_learner: boolean;
-  mentor_present: boolean;
-  reasoning_level_0: number;
-  reasoning_level_1: number;
-  reasoning_level_2: number;
-  reasoning_level_3: number;
+  reasoning_level_0: number | null;
+  reasoning_level_1: number | null;
+  reasoning_level_2: number | null;
+  reasoning_level_3: number | null;
   scaffold_clarification_per_session: number;
   scaffold_convergence_trend: string;
   role_teaching_intent_count: number;
   role_community_application_count: number;
   role_enterprise_orientation_count: number;
   role_intergenerational_count: number;
-  artifact_quality_score: number | null;
-  artifact_produced: boolean | null;
-  session_count: number;
   certifications_earned_total: number;
+  cognitive_score: number | null;
+  critical_thinking_score: number | null;
+  problem_solving_score: number | null;
+  creativity_score: number | null;
+  pue_score: number | null;
+}
+
+// Mentor presence calendar (mirrors site_mentor_presence table)
+const MENTOR_CALENDAR = [
+  { start: '2025-07-01', end: '2025-10-31', present: true  },
+  { start: '2025-11-01', end: '2026-02-28', present: false },
+  { start: '2026-03-01', end: '2099-12-31', present: true  },
+];
+
+function mentorPresentForMonth(cohortMonth: string): boolean {
+  const d = new Date(cohortMonth);
+  for (const p of MENTOR_CALENDAR) {
+    if (d >= new Date(p.start) && d <= new Date(p.end)) return p.present;
+  }
+  return true;
 }
 
 const LongitudinalGlobalPanel: React.FC = () => {
@@ -1790,9 +1809,20 @@ const LongitudinalGlobalPanel: React.FC = () => {
     (async () => {
       setLoading(true);
       try {
-        const { data, error } = await supabase.rpc('get_research_snapshot', {
-          p_site: null, p_from_month: null, p_to_month: null,
-        });
+        const { data, error } = await supabase
+          .from('dashboard_stats')
+          .select(\`
+            learner_token, cohort_month, site, session_count,
+            is_persistent_learner,
+            reasoning_level_0, reasoning_level_1, reasoning_level_2, reasoning_level_3,
+            scaffold_clarification_per_session, scaffold_convergence_trend,
+            role_teaching_intent_count, role_community_application_count,
+            role_enterprise_orientation_count, role_intergenerational_count,
+            certifications_earned_total,
+            cognitive_score, critical_thinking_score, problem_solving_score,
+            creativity_score, pue_score
+          \`)
+          .order('cohort_month', { ascending: true });
         if (error) throw error;
         setRows((data as LongRow[]) || []);
       } catch (err: any) {
@@ -1815,28 +1845,58 @@ const LongitudinalGlobalPanel: React.FC = () => {
   );
   if (rows.length === 0) return null;
 
-  const persistent = rows.filter(r => r.is_persistent_learner);
+  // ── Compute assessment_cycle client-side ───────────────────────────────────
+  // Rank each row within its learner by cohort_month ascending
+  const monthsByLearner: Record<string, string[]> = {};
+  rows.forEach(r => {
+    if (!monthsByLearner[r.learner_token]) monthsByLearner[r.learner_token] = [];
+    if (!monthsByLearner[r.learner_token].includes(r.cohort_month))
+      monthsByLearner[r.learner_token].push(r.cohort_month);
+  });
+  Object.values(monthsByLearner).forEach(months => months.sort());
 
-  const byCycle: Record<number, LongRow[]> = {};
+  const rowsWithCycle = rows.map(r => ({
+    ...r,
+    assessment_cycle: (monthsByLearner[r.learner_token]?.indexOf(r.cohort_month) ?? 0) + 1,
+    mentor_present:   mentorPresentForMonth(r.cohort_month),
+  }));
+
+  // ── Persistent = learner has >= 2 months ───────────────────────────────────
+  const persistent = rowsWithCycle.filter(r =>
+    (monthsByLearner[r.learner_token]?.length ?? 0) >= 2
+  );
+
+  // All rows for hero stats (not just persistent)
+  const allRows = rowsWithCycle;
+
+  // ── Group persistent rows by assessment cycle ──────────────────────────────
+  const byCycle: Record<number, typeof rowsWithCycle> = {};
   persistent.forEach(r => {
-    const c = r.assessment_cycle || 0;
+    const c = r.assessment_cycle;
     if (!byCycle[c]) byCycle[c] = [];
     byCycle[c].push(r);
   });
-  const cycles = [1, 2, 3].filter(c => byCycle[c]?.length > 0);
+  const cycles = [1, 2, 3, 4, 5].filter(c => byCycle[c]?.length > 0);
 
-  const avg = (arr: LongRow[], key: keyof LongRow) =>
-    arr.length ? arr.reduce((s, r) => s + (Number(r[key]) || 0), 0) / arr.length : 0;
+  const avg = (arr: typeof rowsWithCycle, key: keyof typeof rowsWithCycle[0]) => {
+    const vals = arr.map(r => Number(r[key])).filter(v => !isNaN(v) && v !== 0);
+    return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+  };
   const pct = (n: number, total: number) => total ? Math.round((n / total) * 100) : 0;
 
-  const reasoning = cycles.map(c => ({
+  // ── Reasoning — only show when data exists ─────────────────────────────────
+  const hasReasoningData = persistent.some(r =>
+    r.reasoning_level_3 !== null && r.reasoning_level_3 !== undefined && Number(r.reasoning_level_3) > 0
+  );
+  const reasoning = hasReasoningData ? cycles.map(c => ({
     cycle: c, n: byCycle[c].length,
     l0: avg(byCycle[c], 'reasoning_level_0'),
     l1: avg(byCycle[c], 'reasoning_level_1'),
     l2: avg(byCycle[c], 'reasoning_level_2'),
     l3: avg(byCycle[c], 'reasoning_level_3'),
-  }));
+  })) : [];
 
+  // ── Scaffolding by cycle ───────────────────────────────────────────────────
   const scaffolding = cycles.map(c => ({
     cycle: c, n: byCycle[c].length,
     clarf: avg(byCycle[c], 'scaffold_clarification_per_session'),
@@ -1847,7 +1907,8 @@ const LongitudinalGlobalPanel: React.FC = () => {
   }));
   const maxClarf = Math.max(...scaffolding.map(s => s.clarf), 1);
 
-  const hasSig = (arr: LongRow[], key: keyof LongRow) =>
+  // ── Role readiness by cycle ────────────────────────────────────────────────
+  const hasSig = (arr: typeof rowsWithCycle, key: keyof typeof rowsWithCycle[0]) =>
     pct(arr.filter(r => (Number(r[key]) || 0) > 0).length, arr.length);
   const roleReadiness = cycles.map(c => ({
     cycle: c,
@@ -1857,19 +1918,23 @@ const LongitudinalGlobalPanel: React.FC = () => {
     intergenerational: hasSig(byCycle[c], 'role_intergenerational_count'),
   }));
 
-  const mentorAbsent  = rows.filter(r => r.mentor_present === false);
-  const mentorPresent = rows.filter(r => r.mentor_present !== false);
-  const avgAbsent  = avg(mentorAbsent,  'session_count');
-  const avgPresent = avg(mentorPresent, 'session_count');
+  // ── Natural experiment ─────────────────────────────────────────────────────
+  const mentorAbsent  = allRows.filter(r => !r.mentor_present);
+  const mentorPresent = allRows.filter(r => r.mentor_present);
+  const avgAbsent  = mentorAbsent.length  ? avg(mentorAbsent,  'session_count') : 0;
+  const avgPresent = mentorPresent.length ? avg(mentorPresent, 'session_count') : 0;
   const ratio = avgAbsent > 0 ? (avgPresent / avgAbsent).toFixed(1) : null;
 
+  // ── Hero stats ─────────────────────────────────────────────────────────────
   const cycle1L3    = reasoning.find(r => r.cycle === 1)?.l3 ?? 0;
   const lastCycleL3 = reasoning[reasoning.length - 1]?.l3 ?? 0;
-  const l3Growth    = cycle1L3 > 0 ? (lastCycleL3 / cycle1L3).toFixed(1) : '—';
+  const l3Growth    = cycle1L3 > 0 ? (lastCycleL3 / cycle1L3).toFixed(1) : null;
   const cycle1Clarf = scaffolding.find(s => s.cycle === 1)?.clarf ?? 0;
   const lastClarf   = scaffolding[scaffolding.length - 1]?.clarf ?? 0;
-  const clarfDecline = cycle1Clarf > 0 ? Math.round((1 - lastClarf / cycle1Clarf) * 100) : 0;
-  const totalCerts   = rows.reduce((s, r) => s + (r.certifications_earned_total || 0), 0);
+  const clarfDecline = cycle1Clarf > 0 ? Math.round((1 - lastClarf / cycle1Clarf) * 100) : null;
+  const totalCerts   = allRows.reduce((s, r) => s + (Number(r.certifications_earned_total) || 0), 0);
+  const uniqueMonths = new Set(allRows.map(r => r.cohort_month)).size;
+  const uniqueLearners = new Set(allRows.map(r => r.learner_token)).size;
 
   const roleColors = ['#ddd6fe', '#a78bfa', '#7c3aed'];
   const roleKeys = [
@@ -1881,7 +1946,8 @@ const LongitudinalGlobalPanel: React.FC = () => {
 
   return (
     <div className="mb-6 space-y-4">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <div className="flex items-center gap-2 mb-0.5">
             <TrendingUp size={15} className="text-teal-600" />
@@ -1890,18 +1956,40 @@ const LongitudinalGlobalPanel: React.FC = () => {
             </span>
           </div>
           <p className="text-[11px] text-gray-400">
-            Hallinan, Hao, Davidson &amp; Clergy (2026) · World Development submission · {persistent.length} assessment rows · {cycles.length} cycles
+            Hallinan, Hao, Davidson &amp; Clergy (2026) · World Development ·{' '}
+            {uniqueLearners} learners · {persistent.length} persistent rows · {uniqueMonths} month{uniqueMonths !== 1 ? 's' : ''} · {cycles.length} cycle{cycles.length !== 1 ? 's' : ''}
           </p>
         </div>
         <span className="text-[10px] text-gray-400 italic">Jul 2025 – present · zero prior computer access</span>
       </div>
 
+      {/* Hero stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'L3 reasoning growth', value: `${l3Growth}×`,     sub: `cycle 1 → ${cycles.length}`,    color: 'text-teal-700',   bg: 'bg-teal-50',   border: 'border-teal-100'   },
-          { label: 'Less AI scaffolding', value: `${clarfDecline}%`, sub: 'clarifications/session',        color: 'text-blue-700',   bg: 'bg-blue-50',   border: 'border-blue-100'   },
-          { label: 'Certifications',      value: totalCerts,         sub: `across ${rows.length} rows`,    color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-100' },
-          { label: 'Mentor effect',       value: ratio ? `${ratio}×` : '—', sub: 'sessions present vs absent', color: 'text-amber-700',  bg: 'bg-amber-50',  border: 'border-amber-100'  },
+          {
+            label: l3Growth ? 'L3 reasoning growth' : 'Learners tracked',
+            value: l3Growth ? `${l3Growth}×` : uniqueLearners,
+            sub:   l3Growth ? `cycle 1 → ${cycles.length}` : `across ${uniqueMonths} month${uniqueMonths !== 1 ? 's' : ''}`,
+            color: 'text-teal-700', bg: 'bg-teal-50', border: 'border-teal-100',
+          },
+          {
+            label: clarfDecline !== null && clarfDecline > 0 ? 'Less AI scaffolding' : 'Avg clarifications/session',
+            value: clarfDecline !== null && clarfDecline > 0 ? `${clarfDecline}%` : cycle1Clarf > 0 ? cycle1Clarf.toFixed(1) : '—',
+            sub:   'clarifications/session',
+            color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-100',
+          },
+          {
+            label: 'Certifications earned',
+            value: totalCerts,
+            sub:   `${uniqueLearners} learners`,
+            color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-100',
+          },
+          {
+            label: 'Mentor effect',
+            value: ratio ? `${ratio}×` : '—',
+            sub:   ratio ? 'sessions present vs absent' : 'insufficient absence data',
+            color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-100',
+          },
         ].map(s => (
           <div key={s.label} className={`${s.bg} border ${s.border} rounded-xl p-3.5`}>
             <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
@@ -1911,43 +1999,79 @@ const LongitudinalGlobalPanel: React.FC = () => {
         ))}
       </div>
 
+      {/* Three-column panels */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 
+        {/* Reasoning OR cognitive scores fallback */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Reasoning level composition</p>
-          {reasoning.map(r => (
-            <div key={r.cycle} className="mb-2">
-              <span className="text-[10px] text-gray-400">Cycle {r.cycle} (n={r.n})</span>
-              <div className="flex h-5 rounded overflow-hidden w-full mt-1">
-                <div style={{ width: `${r.l0}%`, background: '#e5e7eb' }} title={`L0: ${r.l0.toFixed(0)}%`} />
-                <div style={{ width: `${r.l1}%`, background: '#1a4a6e' }} title={`L1: ${r.l1.toFixed(0)}%`} className="flex items-center justify-center">
-                  {r.l1 > 10 && <span className="text-[8px] text-blue-200 font-bold">L1 {r.l1.toFixed(0)}%</span>}
+          {hasReasoningData ? (
+            <>
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Reasoning level composition</p>
+              {reasoning.map(r => (
+                <div key={r.cycle} className="mb-2">
+                  <span className="text-[10px] text-gray-400">Cycle {r.cycle} (n={r.n})</span>
+                  <div className="flex h-5 rounded overflow-hidden w-full mt-1">
+                    <div style={{ width: `${r.l0}%`, background: '#e5e7eb' }} title={`L0: ${r.l0.toFixed(0)}%`} />
+                    <div style={{ width: `${r.l1}%`, background: '#1a4a6e' }} title={`L1: ${r.l1.toFixed(0)}%`} className="flex items-center justify-center">
+                      {r.l1 > 10 && <span className="text-[8px] text-blue-200 font-bold">L1 {r.l1.toFixed(0)}%</span>}
+                    </div>
+                    <div style={{ width: `${r.l2}%`, background: '#1a5c5c' }} title={`L2: ${r.l2.toFixed(0)}%`} className="flex items-center justify-center">
+                      {r.l2 > 10 && <span className="text-[8px] text-teal-200 font-bold">{r.l2.toFixed(0)}%</span>}
+                    </div>
+                    <div style={{ width: `${r.l3}%`, background: r.cycle === cycles[cycles.length - 1] ? '#1D9E75' : '#0F6E56' }} title={`L3: ${r.l3.toFixed(0)}%`} className="flex items-center justify-center">
+                      {r.l3 > 8 && <span className="text-[8px] text-green-100 font-bold">L3 {r.l3.toFixed(0)}%</span>}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ width: `${r.l2}%`, background: '#1a5c5c' }} title={`L2: ${r.l2.toFixed(0)}%`} className="flex items-center justify-center">
-                  {r.l2 > 10 && <span className="text-[8px] text-teal-200 font-bold">{r.l2.toFixed(0)}%</span>}
-                </div>
-                <div style={{ width: `${r.l3}%`, background: r.cycle === cycles[cycles.length - 1] ? '#1D9E75' : '#0F6E56' }} title={`L3: ${r.l3.toFixed(0)}%`} className="flex items-center justify-center">
-                  {r.l3 > 8 && <span className="text-[8px] text-green-100 font-bold">L3 {r.l3.toFixed(0)}%</span>}
-                </div>
+              ))}
+              <div className="flex gap-3 mt-2 flex-wrap">
+                {[{ bg: '#e5e7eb', label: 'L0' }, { bg: '#1a4a6e', label: 'L1' }, { bg: '#1a5c5c', label: 'L2' }, { bg: '#1D9E75', label: 'L3 ↑' }].map(l => (
+                  <span key={l.label} className="flex items-center gap-1 text-[10px] text-gray-400">
+                    <span style={{ background: l.bg, width: 8, height: 8, borderRadius: 2, display: 'inline-block' }} />{l.label}
+                  </span>
+                ))}
               </div>
-            </div>
-          ))}
-          <div className="flex gap-3 mt-2 flex-wrap">
-            {[{ bg: '#e5e7eb', label: 'L0' }, { bg: '#1a4a6e', label: 'L1' }, { bg: '#1a5c5c', label: 'L2' }, { bg: '#1D9E75', label: 'L3 ↑' }].map(l => (
-              <span key={l.label} className="flex items-center gap-1 text-[10px] text-gray-400">
-                <span style={{ background: l.bg, width: 8, height: 8, borderRadius: 2, display: 'inline-block' }} />{l.label}
-              </span>
-            ))}
-          </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Cognitive skill scores (0–100)</p>
+              <p className="text-[10px] text-gray-400 mb-3 italic">Reasoning level data not yet available — showing cognitive scores</p>
+              {cycles.map(c => {
+                const scores = [
+                  { label: 'Cognitive',        val: avg(byCycle[c], 'cognitive_score')         },
+                  { label: 'Critical thinking', val: avg(byCycle[c], 'critical_thinking_score') },
+                  { label: 'Problem solving',   val: avg(byCycle[c], 'problem_solving_score')   },
+                  { label: 'Creativity',        val: avg(byCycle[c], 'creativity_score')        },
+                ];
+                return (
+                  <div key={c} className="mb-3">
+                    <p className="text-[10px] text-gray-400 mb-1.5">Cycle {c} (n={byCycle[c].length})</p>
+                    {scores.map(s => (
+                      <div key={s.label} className="mb-1.5">
+                        <div className="flex justify-between text-[10px] mb-0.5">
+                          <span className="text-gray-500">{s.label}</span>
+                          <span className="font-mono text-teal-700 font-bold">{s.val.toFixed(0)}</span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-teal-400 rounded-full" style={{ width: `${Math.min(s.val, 100)}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
 
+        {/* Scaffolding + role readiness */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-4">
           <div>
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">AI scaffolding demand</p>
             {scaffolding.map(s => (
               <div key={s.cycle} className="mb-2">
                 <div className="flex justify-between mb-1 text-[10px]">
-                  <span className="text-gray-400">Cycle {s.cycle}</span>
+                  <span className="text-gray-400">Cycle {s.cycle} (n={s.n})</span>
                   <span className="font-mono text-teal-700 font-bold">
                     {s.clarf.toFixed(1)} · <span className="text-green-600">{s.convergingPct}% converging</span>
                   </span>
@@ -1983,12 +2107,17 @@ const LongitudinalGlobalPanel: React.FC = () => {
           </div>
         </div>
 
+        {/* Natural experiment */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
           <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Natural experiment · mentor presence</p>
-          {ratio && (
+          {ratio ? (
             <div className="text-center mb-4">
               <p className="text-4xl font-black text-gray-900">{ratio}×</p>
               <p className="text-[11px] text-gray-500 mt-1">sessions when mentor present<br />vs. absent</p>
+            </div>
+          ) : (
+            <div className="text-center mb-4 py-2">
+              <p className="text-[11px] text-gray-400 italic">Absence period (Nov–Feb) data will populate the ratio once those months load</p>
             </div>
           )}
           <div className="space-y-2">
@@ -2023,7 +2152,6 @@ const LongitudinalGlobalPanel: React.FC = () => {
         </div>
 
       </div>
-
       <div className="border-t border-gray-100 pt-1" />
     </div>
   );
