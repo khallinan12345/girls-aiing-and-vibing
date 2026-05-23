@@ -1764,6 +1764,7 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 interface LongRow {
   learner_token: string;
   cohort_month: string;
+  snapshot_date: string;
   site: string;
   session_count: number;
   is_persistent_learner: boolean;
@@ -1809,11 +1810,12 @@ const LongitudinalGlobalPanel: React.FC = () => {
     (async () => {
       setLoading(true);
       try {
+        // Fetch all snapshots, ordered so latest snapshot_date is last per learner+month
         const { data, error } = await supabase
           .from('dashboard_stats')
           .select([
             'learner_token', 'cohort_month', 'site', 'session_count',
-            'is_persistent_learner',
+            'snapshot_date', 'is_persistent_learner',
             'reasoning_level_0', 'reasoning_level_1', 'reasoning_level_2', 'reasoning_level_3',
             'scaffold_clarification_per_session', 'scaffold_convergence_trend',
             'role_teaching_intent_count', 'role_community_application_count',
@@ -1822,7 +1824,8 @@ const LongitudinalGlobalPanel: React.FC = () => {
             'cognitive_score', 'critical_thinking_score', 'problem_solving_score',
             'creativity_score', 'pue_score',
           ].join(','))
-          .order('cohort_month', { ascending: true });
+          .order('cohort_month', { ascending: true })
+          .order('snapshot_date', { ascending: true });
         if (error) throw error;
         setRows((data as LongRow[]) || []);
       } catch (err: any) {
@@ -1845,17 +1848,30 @@ const LongitudinalGlobalPanel: React.FC = () => {
   );
   if (rows.length === 0) return null;
 
-  // ── Compute assessment_cycle client-side ───────────────────────────────────
-  // Rank each row within its learner by cohort_month ascending
-  const monthsByLearner: Record<string, string[]> = {};
+  // ── Deduplicate to latest snapshot per learner per cohort_month ──────────
+  // dashboard_stats has one row per learner per snapshot_date; we want the
+  // most recent snapshot within each cohort_month for each learner.
+  const latestByKey: Record<string, LongRow> = {};
   rows.forEach(r => {
+    const key = `${r.learner_token}|${r.cohort_month}`;
+    const existing = latestByKey[key];
+    if (!existing || (r.snapshot_date ?? '') > (existing.snapshot_date ?? '')) {
+      latestByKey[key] = r;
+    }
+  });
+  const dedupedRows = Object.values(latestByKey);
+
+  // ── Compute assessment_cycle client-side ───────────────────────────────────
+  // Rank each learner's unique months chronologically → cycle number
+  const monthsByLearner: Record<string, string[]> = {};
+  dedupedRows.forEach(r => {
     if (!monthsByLearner[r.learner_token]) monthsByLearner[r.learner_token] = [];
     if (!monthsByLearner[r.learner_token].includes(r.cohort_month))
       monthsByLearner[r.learner_token].push(r.cohort_month);
   });
   Object.values(monthsByLearner).forEach(months => months.sort());
 
-  const rowsWithCycle = rows.map(r => ({
+  const rowsWithCycle = dedupedRows.map(r => ({
     ...r,
     assessment_cycle: (monthsByLearner[r.learner_token]?.indexOf(r.cohort_month) ?? 0) + 1,
     mentor_present:   mentorPresentForMonth(r.cohort_month),
@@ -1876,7 +1892,8 @@ const LongitudinalGlobalPanel: React.FC = () => {
     if (!byCycle[c]) byCycle[c] = [];
     byCycle[c].push(r);
   });
-  const cycles = [1, 2, 3, 4, 5].filter(c => byCycle[c]?.length > 0);
+  const maxCycle = Math.max(...persistent.map(r => r.assessment_cycle), 0);
+  const cycles = Array.from({ length: maxCycle }, (_, i) => i + 1).filter(c => byCycle[c]?.length > 0);
 
   const avg = (arr: typeof rowsWithCycle, key: keyof typeof rowsWithCycle[0]) => {
     const vals = arr.map(r => Number(r[key])).filter(v => !isNaN(v) && v !== 0);
@@ -1991,7 +2008,10 @@ const LongitudinalGlobalPanel: React.FC = () => {
           </div>
           <p className="text-[11px] text-gray-400">
             Hallinan, Hao, Davidson &amp; Clergy (2026) · World Development ·{' '}
-            {uniqueLearners} learners · {persistent.length} persistent rows · {uniqueMonths} month{uniqueMonths !== 1 ? 's' : ''} · {cycles.length} cycle{cycles.length !== 1 ? 's' : ''}
+            {uniqueLearners} learners · {persistent.length} with 2+ months · {uniqueMonths} month{uniqueMonths !== 1 ? 's' : ''}
+          </p>
+          <p className="text-[10px] text-gray-300 mt-0.5">
+            Cycle = one monthly assessment period. Learners appear in multiple cycles as they return month after month.
           </p>
         </div>
         <span className="text-[10px] text-gray-400 italic">Jul 2025 – present · zero prior computer access</span>
@@ -2101,7 +2121,8 @@ const LongitudinalGlobalPanel: React.FC = () => {
         {/* Scaffolding + role readiness */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-4">
           <div>
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">AI scaffolding demand</p>
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">AI scaffolding demand</p>
+            <p className="text-[10px] text-gray-400 mb-2 italic">Avg number of AI clarification prompts per session. Falling values mean learners are directing the conversation independently rather than being guided.</p>
             {scaffolding.map(s => (
               <div key={s.cycle} className="mb-2">
                 <div className="flex justify-between mb-1 text-[10px]">
@@ -2120,7 +2141,8 @@ const LongitudinalGlobalPanel: React.FC = () => {
             ))}
           </div>
           <div>
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Role readiness signals</p>
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Role readiness signals</p>
+            <p className="text-[10px] text-gray-400 mb-2 italic">% of learners whose AI conversations show evidence of applying learning beyond the platform — teaching peers, advising on community problems, planning enterprises, or sharing knowledge across generations. Detected via AI transcript analysis.</p>
             {roleKeys.map(item => (
               <div key={item.key} className="mb-2">
                 <p className="text-[10px] text-gray-400 mb-1">{item.label}</p>
@@ -2146,7 +2168,8 @@ const LongitudinalGlobalPanel: React.FC = () => {
 
         {/* Natural experiment */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Natural experiment · mentor presence</p>
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Natural experiment · mentor presence</p>
+          <p className="text-[10px] text-gray-400 mb-3 italic">Nov 2025–Feb 2026: Davidson's daily presence was interrupted. Technology, Starlink, curriculum, and join codes were unchanged. Session counts tracked engagement against a single variable: the facilitator.</p>
           {ratio ? (
             <div className="text-center mb-4">
               <p className="text-4xl font-black text-gray-900">
@@ -2154,8 +2177,11 @@ const LongitudinalGlobalPanel: React.FC = () => {
               </p>
               <p className="text-[11px] text-gray-500 mt-1">
                 {ratio.includes('vs')
-                  ? 'avg sessions present vs absent (near-zero engagement confirmed)'
-                  : 'sessions when mentor present vs. absent'}
+                  ? <>avg sessions/learner/month<br/>present vs. absent period</>
+                  : <>sessions/learner/month<br/>present vs. absent period</>}
+              </p>
+              <p className="text-[10px] text-gray-400 mt-1 italic">
+                Note: associative finding — no formal significance test. Single site, single absence event. Directionally strong.
               </p>
             </div>
           ) : (
