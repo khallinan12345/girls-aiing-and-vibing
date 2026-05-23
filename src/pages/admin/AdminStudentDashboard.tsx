@@ -1811,17 +1811,17 @@ const LongitudinalGlobalPanel: React.FC = () => {
       try {
         const { data, error } = await supabase
           .from('dashboard_stats')
-          .select(\`
-            learner_token, cohort_month, site, session_count,
-            is_persistent_learner,
-            reasoning_level_0, reasoning_level_1, reasoning_level_2, reasoning_level_3,
-            scaffold_clarification_per_session, scaffold_convergence_trend,
-            role_teaching_intent_count, role_community_application_count,
-            role_enterprise_orientation_count, role_intergenerational_count,
-            certifications_earned_total,
-            cognitive_score, critical_thinking_score, problem_solving_score,
-            creativity_score, pue_score
-          \`)
+          .select([
+            'learner_token', 'cohort_month', 'site', 'session_count',
+            'is_persistent_learner',
+            'reasoning_level_0', 'reasoning_level_1', 'reasoning_level_2', 'reasoning_level_3',
+            'scaffold_clarification_per_session', 'scaffold_convergence_trend',
+            'role_teaching_intent_count', 'role_community_application_count',
+            'role_enterprise_orientation_count', 'role_intergenerational_count',
+            'certifications_earned_total',
+            'cognitive_score', 'critical_thinking_score', 'problem_solving_score',
+            'creativity_score', 'pue_score',
+          ].join(','))
           .order('cohort_month', { ascending: true });
         if (error) throw error;
         setRows((data as LongRow[]) || []);
