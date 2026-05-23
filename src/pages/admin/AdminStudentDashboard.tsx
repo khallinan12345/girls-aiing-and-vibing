@@ -1897,14 +1897,18 @@ const LongitudinalGlobalPanel: React.FC = () => {
   })) : [];
 
   // ── Scaffolding by cycle ───────────────────────────────────────────────────
-  const scaffolding = cycles.map(c => ({
-    cycle: c, n: byCycle[c].length,
-    clarf: avg(byCycle[c], 'scaffold_clarification_per_session'),
-    convergingPct: pct(
-      byCycle[c].filter(r => r.scaffold_convergence_trend === 'converging').length,
-      byCycle[c].length
-    ),
-  }));
+  // convergingPct excludes 'insufficient_data' rows from denominator
+  const scaffolding = cycles.map(c => {
+    const rows = byCycle[c];
+    const validTrend = rows.filter(r => r.scaffold_convergence_trend !== 'insufficient_data');
+    return {
+      cycle: c, n: rows.length,
+      clarf: avg(rows, 'scaffold_clarification_per_session'),
+      convergingPct: validTrend.length
+        ? pct(validTrend.filter(r => r.scaffold_convergence_trend === 'converging').length, validTrend.length)
+        : null,  // null = all insufficient_data
+    };
+  });
   const maxClarf = Math.max(...scaffolding.map(s => s.clarf), 1);
 
   // ── Role readiness by cycle ────────────────────────────────────────────────
@@ -1919,22 +1923,52 @@ const LongitudinalGlobalPanel: React.FC = () => {
   }));
 
   // ── Natural experiment ─────────────────────────────────────────────────────
+  // Absent = Nov 2025–Feb 2026 rows; treat session_count=0 as valid data point
   const mentorAbsent  = allRows.filter(r => !r.mentor_present);
   const mentorPresent = allRows.filter(r => r.mentor_present);
-  const avgAbsent  = mentorAbsent.length  ? avg(mentorAbsent,  'session_count') : 0;
-  const avgPresent = mentorPresent.length ? avg(mentorPresent, 'session_count') : 0;
-  const ratio = avgAbsent > 0 ? (avgPresent / avgAbsent).toFixed(1) : null;
+  // Use sum/count directly so zero sessions count (not avg() which skips zeros)
+  const sumSessions = (arr: typeof allRows) =>
+    arr.reduce((s, r) => s + (Number(r.session_count) || 0), 0);
+  const avgAbsent  = mentorAbsent.length  ? sumSessions(mentorAbsent)  / mentorAbsent.length  : 0;
+  const avgPresent = mentorPresent.length ? sumSessions(mentorPresent) / mentorPresent.length : 0;
+  // Show ratio even when absent avg is 0 — that IS the finding
+  const ratio = mentorAbsent.length > 0
+    ? avgAbsent > 0
+      ? (avgPresent / avgAbsent).toFixed(1)
+      : `${avgPresent.toFixed(1)} vs 0`
+    : null;
 
   // ── Hero stats ─────────────────────────────────────────────────────────────
   const cycle1L3    = reasoning.find(r => r.cycle === 1)?.l3 ?? 0;
   const lastCycleL3 = reasoning[reasoning.length - 1]?.l3 ?? 0;
   const l3Growth    = cycle1L3 > 0 ? (lastCycleL3 / cycle1L3).toFixed(1) : null;
-  const cycle1Clarf = scaffolding.find(s => s.cycle === 1)?.clarf ?? 0;
-  const lastClarf   = scaffolding[scaffolding.length - 1]?.clarf ?? 0;
-  const clarfDecline = cycle1Clarf > 0 ? Math.round((1 - lastClarf / cycle1Clarf) * 100) : null;
-  const totalCerts   = allRows.reduce((s, r) => s + (Number(r.certifications_earned_total) || 0), 0);
-  const uniqueMonths = new Set(allRows.map(r => r.cohort_month)).size;
+
+  // Scaffolding: only compare cycles with meaningful n (>=5 rows)
+  const validScafCycles = scaffolding.filter(s => s.n >= 5);
+  const cycle1Clarf  = validScafCycles[0]?.clarf ?? 0;
+  const lastValidClarf = validScafCycles[validScafCycles.length - 1]?.clarf ?? 0;
+  const clarfDecline = cycle1Clarf > 0 && validScafCycles.length > 1
+    ? Math.round((1 - lastValidClarf / cycle1Clarf) * 100)
+    : null;
+
+  // Certifications: Supabase returns numbers but coerce defensively
+  const totalCerts = allRows.reduce((s, r) => {
+    const v = r.certifications_earned_total;
+    return s + (v !== null && v !== undefined ? Number(v) : 0);
+  }, 0);
+
+  const uniqueMonths   = new Set(allRows.map(r => r.cohort_month)).size;
   const uniqueLearners = new Set(allRows.map(r => r.learner_token)).size;
+
+  // Converging: exclude 'insufficient_data' from denominator
+  const validScafRows = (arr: typeof rowsWithCycle) =>
+    arr.filter(r => r.scaffold_convergence_trend !== 'insufficient_data');
+  const convergingPctValid = (arr: typeof rowsWithCycle) => {
+    const valid = validScafRows(arr);
+    return valid.length
+      ? pct(valid.filter(r => r.scaffold_convergence_trend === 'converging').length, valid.length)
+      : 0;
+  };
 
   const roleColors = ['#ddd6fe', '#a78bfa', '#7c3aed'];
   const roleKeys = [
@@ -1980,14 +2014,14 @@ const LongitudinalGlobalPanel: React.FC = () => {
           },
           {
             label: 'Certifications earned',
-            value: totalCerts,
+            value: totalCerts > 0 ? totalCerts : '—',
             sub:   `${uniqueLearners} learners`,
             color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-100',
           },
           {
             label: 'Mentor effect',
-            value: ratio ? `${ratio}×` : '—',
-            sub:   ratio ? 'sessions present vs absent' : 'insufficient absence data',
+            value: ratio ? (ratio.includes('vs') ? ratio : `${ratio}×`) : '—',
+            sub:   ratio ? 'avg sessions: present vs absent' : 'no absence period rows yet',
             color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-100',
           },
         ].map(s => (
@@ -2035,7 +2069,7 @@ const LongitudinalGlobalPanel: React.FC = () => {
           ) : (
             <>
               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Cognitive skill scores (0–100)</p>
-              <p className="text-[10px] text-gray-400 mb-3 italic">Reasoning level data not yet available — showing cognitive scores</p>
+              <p className="text-[10px] text-gray-400 mb-3 italic">Reasoning level data not yet available — showing cognitive scores. Score shifts across cycles reflect changing cohort composition (new learners joining), not individual decline.</p>
               {cycles.map(c => {
                 const scores = [
                   { label: 'Cognitive',        val: avg(byCycle[c], 'cognitive_score')         },
@@ -2073,7 +2107,10 @@ const LongitudinalGlobalPanel: React.FC = () => {
                 <div className="flex justify-between mb-1 text-[10px]">
                   <span className="text-gray-400">Cycle {s.cycle} (n={s.n})</span>
                   <span className="font-mono text-teal-700 font-bold">
-                    {s.clarf.toFixed(1)} · <span className="text-green-600">{s.convergingPct}% converging</span>
+                    {s.clarf.toFixed(1)}{s.convergingPct !== null
+                      ? <span className="text-green-600"> · {s.convergingPct}% converging</span>
+                      : <span className="text-gray-300"> · insufficient data</span>
+                    }
                   </span>
                 </div>
                 <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -2112,12 +2149,18 @@ const LongitudinalGlobalPanel: React.FC = () => {
           <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Natural experiment · mentor presence</p>
           {ratio ? (
             <div className="text-center mb-4">
-              <p className="text-4xl font-black text-gray-900">{ratio}×</p>
-              <p className="text-[11px] text-gray-500 mt-1">sessions when mentor present<br />vs. absent</p>
+              <p className="text-4xl font-black text-gray-900">
+                {ratio.includes('vs') ? ratio : `${ratio}×`}
+              </p>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {ratio.includes('vs')
+                  ? 'avg sessions present vs absent (near-zero engagement confirmed)'
+                  : 'sessions when mentor present vs. absent'}
+              </p>
             </div>
           ) : (
             <div className="text-center mb-4 py-2">
-              <p className="text-[11px] text-gray-400 italic">Absence period (Nov–Feb) data will populate the ratio once those months load</p>
+              <p className="text-[11px] text-gray-400 italic">No absence period rows in dataset yet</p>
             </div>
           )}
           <div className="space-y-2">
