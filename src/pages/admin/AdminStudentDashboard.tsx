@@ -1810,26 +1810,46 @@ const LongitudinalGlobalPanel: React.FC = () => {
     (async () => {
       setLoading(true);
       try {
-        // Fetch all snapshots, ordered so latest snapshot_date is last per learner+month
-        const { data, error } = await supabase
-          .from('dashboard_stats')
-          .select([
-            'learner_token', 'cohort_month', 'site', 'session_count',
-            'snapshot_date', 'is_persistent_learner',
-            'reasoning_level_0', 'reasoning_level_1', 'reasoning_level_2', 'reasoning_level_3',
-            'scaffold_clarification_per_session', 'scaffold_convergence_trend',
-            'role_teaching_intent_count', 'role_community_application_count',
-            'role_enterprise_orientation_count', 'role_intergenerational_count',
-            'certifications_earned_total',
-            'cognitive_score', 'critical_thinking_score', 'problem_solving_score',
-            'creativity_score', 'pue_score',
-          ].join(','))
-          .order('cohort_month', { ascending: true })
-          .order('snapshot_date', { ascending: true })
-          .limit(10000);  // dashboard_stats has daily rows; raise limit to capture full history
-        if (error) throw error;
+        // Paginate — Supabase caps at 1000 rows per request
+        const FIELDS = [
+          'learner_token', 'cohort_month', 'site', 'session_count',
+          'snapshot_date', 'is_persistent_learner',
+          'reasoning_level_0', 'reasoning_level_1', 'reasoning_level_2', 'reasoning_level_3',
+          'scaffold_clarification_per_session', 'scaffold_convergence_trend',
+          'role_teaching_intent_count', 'role_community_application_count',
+          'role_enterprise_orientation_count', 'role_intergenerational_count',
+          'certifications_earned_total',
+          'cognitive_score', 'critical_thinking_score', 'problem_solving_score',
+          'creativity_score', 'pue_score',
+        ].join(',');
 
-        setRows((data as LongRow[]) || []);
+        const PAGE = 1000;
+        let allData: LongRow[] = [];
+        let from = 0;
+        let keepGoing = true;
+
+        while (keepGoing) {
+          const { data, error } = await supabase
+            .from('dashboard_stats')
+            .select(FIELDS)
+            .order('cohort_month', { ascending: true })
+            .range(from, from + PAGE - 1);
+
+          if (error) throw error;
+          const batch = (data || []) as LongRow[];
+          allData = allData.concat(batch);
+          if (batch.length < PAGE) {
+            keepGoing = false;
+          } else {
+            from += PAGE;
+            if (allData.length >= 20000) keepGoing = false; // safety cap
+          }
+        }
+
+        console.log(`[LongitudinalPanel] fetched ${allData.length} rows, months:`,
+          [...new Set(allData.map(r => r.cohort_month))].sort());
+
+        setRows(allData);
       } catch (err: any) {
         setError(err.message);
       } finally {
