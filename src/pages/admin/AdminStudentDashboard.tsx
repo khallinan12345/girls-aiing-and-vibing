@@ -1758,6 +1758,278 @@ const LearnerCostPanel: React.FC<LearnerCostProps> = ({
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════════
+   LongitudinalGlobalPanel
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+interface LongRow {
+  assessment_cycle: number;
+  is_persistent_learner: boolean;
+  mentor_present: boolean;
+  reasoning_level_0: number;
+  reasoning_level_1: number;
+  reasoning_level_2: number;
+  reasoning_level_3: number;
+  scaffold_clarification_per_session: number;
+  scaffold_convergence_trend: string;
+  role_teaching_intent_count: number;
+  role_community_application_count: number;
+  role_enterprise_orientation_count: number;
+  role_intergenerational_count: number;
+  artifact_quality_score: number | null;
+  artifact_produced: boolean | null;
+  session_count: number;
+  certifications_earned_total: number;
+}
+
+const LongitudinalGlobalPanel: React.FC = () => {
+  const [rows, setRows]       = useState<LongRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase.rpc('get_research_snapshot', {
+          p_site: null, p_from_month: null, p_to_month: null,
+        });
+        if (error) throw error;
+        setRows((data as LongRow[]) || []);
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  if (loading) return (
+    <div className="flex items-center gap-2 py-6 text-gray-400 text-sm">
+      <Loader2 size={16} className="animate-spin" /> Loading longitudinal data…
+    </div>
+  );
+  if (error) return (
+    <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 mb-4">
+      Longitudinal data unavailable: {error}
+    </div>
+  );
+  if (rows.length === 0) return null;
+
+  const persistent = rows.filter(r => r.is_persistent_learner);
+
+  const byCycle: Record<number, LongRow[]> = {};
+  persistent.forEach(r => {
+    const c = r.assessment_cycle || 0;
+    if (!byCycle[c]) byCycle[c] = [];
+    byCycle[c].push(r);
+  });
+  const cycles = [1, 2, 3].filter(c => byCycle[c]?.length > 0);
+
+  const avg = (arr: LongRow[], key: keyof LongRow) =>
+    arr.length ? arr.reduce((s, r) => s + (Number(r[key]) || 0), 0) / arr.length : 0;
+  const pct = (n: number, total: number) => total ? Math.round((n / total) * 100) : 0;
+
+  const reasoning = cycles.map(c => ({
+    cycle: c, n: byCycle[c].length,
+    l0: avg(byCycle[c], 'reasoning_level_0'),
+    l1: avg(byCycle[c], 'reasoning_level_1'),
+    l2: avg(byCycle[c], 'reasoning_level_2'),
+    l3: avg(byCycle[c], 'reasoning_level_3'),
+  }));
+
+  const scaffolding = cycles.map(c => ({
+    cycle: c, n: byCycle[c].length,
+    clarf: avg(byCycle[c], 'scaffold_clarification_per_session'),
+    convergingPct: pct(
+      byCycle[c].filter(r => r.scaffold_convergence_trend === 'converging').length,
+      byCycle[c].length
+    ),
+  }));
+  const maxClarf = Math.max(...scaffolding.map(s => s.clarf), 1);
+
+  const hasSig = (arr: LongRow[], key: keyof LongRow) =>
+    pct(arr.filter(r => (Number(r[key]) || 0) > 0).length, arr.length);
+  const roleReadiness = cycles.map(c => ({
+    cycle: c,
+    teaching:          hasSig(byCycle[c], 'role_teaching_intent_count'),
+    community:         hasSig(byCycle[c], 'role_community_application_count'),
+    enterprise:        hasSig(byCycle[c], 'role_enterprise_orientation_count'),
+    intergenerational: hasSig(byCycle[c], 'role_intergenerational_count'),
+  }));
+
+  const mentorAbsent  = rows.filter(r => r.mentor_present === false);
+  const mentorPresent = rows.filter(r => r.mentor_present !== false);
+  const avgAbsent  = avg(mentorAbsent,  'session_count');
+  const avgPresent = avg(mentorPresent, 'session_count');
+  const ratio = avgAbsent > 0 ? (avgPresent / avgAbsent).toFixed(1) : null;
+
+  const cycle1L3    = reasoning.find(r => r.cycle === 1)?.l3 ?? 0;
+  const lastCycleL3 = reasoning[reasoning.length - 1]?.l3 ?? 0;
+  const l3Growth    = cycle1L3 > 0 ? (lastCycleL3 / cycle1L3).toFixed(1) : '—';
+  const cycle1Clarf = scaffolding.find(s => s.cycle === 1)?.clarf ?? 0;
+  const lastClarf   = scaffolding[scaffolding.length - 1]?.clarf ?? 0;
+  const clarfDecline = cycle1Clarf > 0 ? Math.round((1 - lastClarf / cycle1Clarf) * 100) : 0;
+  const totalCerts   = rows.reduce((s, r) => s + (r.certifications_earned_total || 0), 0);
+
+  const roleColors = ['#ddd6fe', '#a78bfa', '#7c3aed'];
+  const roleKeys = [
+    { key: 'teaching'          as const, label: 'Teaching intent'        },
+    { key: 'community'         as const, label: 'Community application'  },
+    { key: 'enterprise'        as const, label: 'Enterprise orientation' },
+    { key: 'intergenerational' as const, label: 'Intergenerational'      },
+  ];
+
+  return (
+    <div className="mb-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2 mb-0.5">
+            <TrendingUp size={15} className="text-teal-600" />
+            <span className="text-xs font-bold text-teal-700 uppercase tracking-wider">
+              Longitudinal evidence · persistent learners
+            </span>
+          </div>
+          <p className="text-[11px] text-gray-400">
+            Hallinan, Hao, Davidson &amp; Clergy (2026) · World Development submission · {persistent.length} assessment rows · {cycles.length} cycles
+          </p>
+        </div>
+        <span className="text-[10px] text-gray-400 italic">Jul 2025 – present · zero prior computer access</span>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'L3 reasoning growth', value: `${l3Growth}×`,     sub: `cycle 1 → ${cycles.length}`,    color: 'text-teal-700',   bg: 'bg-teal-50',   border: 'border-teal-100'   },
+          { label: 'Less AI scaffolding', value: `${clarfDecline}%`, sub: 'clarifications/session',        color: 'text-blue-700',   bg: 'bg-blue-50',   border: 'border-blue-100'   },
+          { label: 'Certifications',      value: totalCerts,         sub: `across ${rows.length} rows`,    color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-100' },
+          { label: 'Mentor effect',       value: ratio ? `${ratio}×` : '—', sub: 'sessions present vs absent', color: 'text-amber-700',  bg: 'bg-amber-50',  border: 'border-amber-100'  },
+        ].map(s => (
+          <div key={s.label} className={`${s.bg} border ${s.border} rounded-xl p-3.5`}>
+            <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+            <p className="text-[11px] font-semibold text-gray-600 mt-0.5">{s.label}</p>
+            <p className="text-[10px] text-gray-400">{s.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+
+        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Reasoning level composition</p>
+          {reasoning.map(r => (
+            <div key={r.cycle} className="mb-2">
+              <span className="text-[10px] text-gray-400">Cycle {r.cycle} (n={r.n})</span>
+              <div className="flex h-5 rounded overflow-hidden w-full mt-1">
+                <div style={{ width: `${r.l0}%`, background: '#e5e7eb' }} title={`L0: ${r.l0.toFixed(0)}%`} />
+                <div style={{ width: `${r.l1}%`, background: '#1a4a6e' }} title={`L1: ${r.l1.toFixed(0)}%`} className="flex items-center justify-center">
+                  {r.l1 > 10 && <span className="text-[8px] text-blue-200 font-bold">L1 {r.l1.toFixed(0)}%</span>}
+                </div>
+                <div style={{ width: `${r.l2}%`, background: '#1a5c5c' }} title={`L2: ${r.l2.toFixed(0)}%`} className="flex items-center justify-center">
+                  {r.l2 > 10 && <span className="text-[8px] text-teal-200 font-bold">{r.l2.toFixed(0)}%</span>}
+                </div>
+                <div style={{ width: `${r.l3}%`, background: r.cycle === cycles[cycles.length - 1] ? '#1D9E75' : '#0F6E56' }} title={`L3: ${r.l3.toFixed(0)}%`} className="flex items-center justify-center">
+                  {r.l3 > 8 && <span className="text-[8px] text-green-100 font-bold">L3 {r.l3.toFixed(0)}%</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+          <div className="flex gap-3 mt-2 flex-wrap">
+            {[{ bg: '#e5e7eb', label: 'L0' }, { bg: '#1a4a6e', label: 'L1' }, { bg: '#1a5c5c', label: 'L2' }, { bg: '#1D9E75', label: 'L3 ↑' }].map(l => (
+              <span key={l.label} className="flex items-center gap-1 text-[10px] text-gray-400">
+                <span style={{ background: l.bg, width: 8, height: 8, borderRadius: 2, display: 'inline-block' }} />{l.label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-4">
+          <div>
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">AI scaffolding demand</p>
+            {scaffolding.map(s => (
+              <div key={s.cycle} className="mb-2">
+                <div className="flex justify-between mb-1 text-[10px]">
+                  <span className="text-gray-400">Cycle {s.cycle}</span>
+                  <span className="font-mono text-teal-700 font-bold">
+                    {s.clarf.toFixed(1)} · <span className="text-green-600">{s.convergingPct}% converging</span>
+                  </span>
+                </div>
+                <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-teal-500 rounded-full" style={{ width: `${(s.clarf / maxClarf) * 100}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div>
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Role readiness signals</p>
+            {roleKeys.map(item => (
+              <div key={item.key} className="mb-2">
+                <p className="text-[10px] text-gray-400 mb-1">{item.label}</p>
+                <div className="flex gap-1 items-end h-6">
+                  {roleReadiness.map((r, i) => (
+                    <div key={r.cycle} className="flex-1 rounded-sm"
+                      style={{ height: `${Math.max(4, r[item.key])}%`, background: roleColors[Math.min(i, 2)] }}
+                      title={`Cycle ${r.cycle}: ${r[item.key]}%`} />
+                  ))}
+                </div>
+                <div className="flex mt-0.5">
+                  {roleReadiness.map((r, i) => (
+                    <span key={r.cycle} className="flex-1 text-center text-[9px]"
+                      style={{ color: i === roleReadiness.length - 1 ? '#7c3aed' : '#9ca3af', fontWeight: i === roleReadiness.length - 1 ? 700 : 400 }}>
+                      {r[item.key]}%
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Natural experiment · mentor presence</p>
+          {ratio && (
+            <div className="text-center mb-4">
+              <p className="text-4xl font-black text-gray-900">{ratio}×</p>
+              <p className="text-[11px] text-gray-500 mt-1">sessions when mentor present<br />vs. absent</p>
+            </div>
+          )}
+          <div className="space-y-2">
+            {[
+              { dot: '#2A7B88', strong: 'Jul–Oct 2025',      text: 'Launch. Davidson present daily.' },
+              { dot: '#E65100', strong: 'Nov 2025–Feb 2026', text: 'Davidson absent. Engagement near-zero despite live technology.' },
+              { dot: '#2E7D32', strong: 'Mar 2026+',              text: 'Davidson returns. Record session month.' },
+            ].map(e => (
+              <div key={e.strong} className="flex gap-2 items-start">
+                <div style={{ background: e.dot, width: 7, height: 7, borderRadius: '50%', flexShrink: 0, marginTop: 4 }} />
+                <p className="text-[11px] text-gray-500 leading-relaxed">
+                  <strong className="text-gray-700">{e.strong}:</strong> {e.text}
+                </p>
+              </div>
+            ))}
+          </div>
+          {mentorAbsent.length > 0 && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="bg-red-50 border border-red-100 rounded-lg p-2.5 text-center">
+                <p className="text-xs font-bold text-red-700">{avgAbsent.toFixed(1)}</p>
+                <p className="text-[10px] text-red-400">sessions/learner<br/>absent</p>
+              </div>
+              <div className="bg-green-50 border border-green-100 rounded-lg p-2.5 text-center">
+                <p className="text-xs font-bold text-green-700">{avgPresent.toFixed(1)}</p>
+                <p className="text-[10px] text-green-400">sessions/learner<br/>present</p>
+              </div>
+            </div>
+          )}
+          <p className="text-[10px] text-gray-400 mt-3 italic">
+            Technology, connectivity, and curriculum unchanged. The facilitator is the mechanism.
+          </p>
+        </div>
+
+      </div>
+
+      <div className="border-t border-gray-100 pt-1" />
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════════
    PlatformGlobalPanel
    ═══════════════════════════════════════════════════════════════════════════════ */
 
@@ -2510,12 +2782,15 @@ const AdminStudentDashboard: React.FC = () => {
         )}
 
         {activeTab === 'platform-global' && (
-          <PlatformGlobalPanel
-            onSelectOrg={(orgId, orgName) => {
-              setAdminSelectedOrgId(orgId);
-              setActiveTab('student');
-            }}
-          />
+          <>
+            <LongitudinalGlobalPanel />
+            <PlatformGlobalPanel
+              onSelectOrg={(orgId, orgName) => {
+                setAdminSelectedOrgId(orgId);
+                setActiveTab('student');
+              }}
+            />
+          </>
         )}
 
         {activeTab === 'model-overview' && (
