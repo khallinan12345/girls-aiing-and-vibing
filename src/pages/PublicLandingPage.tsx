@@ -226,24 +226,26 @@ const PublicLandingPage: React.FC = () => {
   const [programs, setPrograms]   = useState<ResearchProgram[]>([]);
   const [questions, setQuestions] = useState<GuidingQuestion[]>([]);
 
-  // ── Persistent learner longitudinal data from dashboard_stats ─────────────
-  interface LongRow {
-    learner_token: string;
+  // ── Public aggregate view: one row per cohort_month ─────────────────────
+  interface PubMonthRow {
     cohort_month: string;
-    session_count: number;
-    scaffold_clarification_per_session: number;
-    scaffold_convergence_trend: string;
-    role_teaching_intent_count: number;
-    role_community_application_count: number;
-    role_enterprise_orientation_count: number;
-    role_intergenerational_count: number;
-    certifications_earned_total: number;
-    cognitive_score: number | null;
-    critical_thinking_score: number | null;
-    problem_solving_score: number | null;
-    creativity_score: number | null;
+    site: string;
+    learner_count: number;
+    total_sessions: number;
+    avg_cognitive: number | null;
+    avg_critical_thinking: number | null;
+    avg_problem_solving: number | null;
+    avg_creativity: number | null;
+    avg_clarification: number | null;
+    total_certs: number;
+    teaching_intent_count: number;
+    community_application_count: number;
+    enterprise_orientation_count: number;
+    intergenerational_count: number;
+    converging_count: number;
+    insufficient_data_count: number;
   }
-  const [longRows, setLongRows] = useState<LongRow[]>([]);
+  const [longRows, setLongRows] = useState<PubMonthRow[]>([]);
   const [longLoading, setLongLoading] = useState(true);
 
   useEffect(() => {
@@ -284,38 +286,17 @@ const PublicLandingPage: React.FC = () => {
       if (qData)    setQuestions(qData as GuidingQuestion[]);
 
       // ── Paginated fetch of dashboard_stats for longitudinal panel ────────
-      const LONG_FIELDS = [
-        'learner_token', 'cohort_month', 'session_count',
-        'scaffold_clarification_per_session', 'scaffold_convergence_trend',
-        'role_teaching_intent_count', 'role_community_application_count',
-        'role_enterprise_orientation_count', 'role_intergenerational_count',
-        'certifications_earned_total',
-        'cognitive_score', 'critical_thinking_score', 'problem_solving_score', 'creativity_score',
-      ].join(',');
+      // Simple query on the public aggregate view — no auth required, no raw rows
+      const { data: pubData, error: pubErr } = await supabase
+        .from('dashboard_stats_public')
+        .select('*')
+        .order('cohort_month', { ascending: true });
 
-      const PAGE = 1000;
-      let longData: LongRow[] = [];
-      let from = 0;
-      let keepGoing = true;
-      while (keepGoing) {
-        const { data: batch, error: bErr } = await supabase
-          .from('dashboard_stats')
-          .select(LONG_FIELDS)
-          .order('cohort_month', { ascending: true })
-          .range(from, from + PAGE - 1);
-        if (bErr || !batch) break;
-        longData = longData.concat(batch as LongRow[]);
-        if (batch.length < PAGE) keepGoing = false;
-        else { from += PAGE; if (longData.length >= 20000) keepGoing = false; }
+      if (pubErr) {
+        console.error('[PublicLandingPage] dashboard_stats_public error:', pubErr.message, pubErr.code);
       }
-      // Deduplicate to one row per learner per cohort_month (daily rows repeat monthly aggregates)
-      const seen = new Set<string>();
-      const deduped: LongRow[] = [];
-      longData.forEach(r => {
-        const key = `${r.learner_token}|${r.cohort_month}`;
-        if (!seen.has(key)) { seen.add(key); deduped.push(r); }
-      });
-      setLongRows(deduped);
+      console.log('[PublicLandingPage] dashboard_stats_public rows:', pubData?.length ?? 0, pubData?.[0]);
+      setLongRows((pubData as PubMonthRow[]) || []);
       setLongLoading(false);
     })();
   }, []);
@@ -686,87 +667,55 @@ const PublicLandingPage: React.FC = () => {
                   );
                   if (longRows.length === 0) return null;
 
-                  // ── Compute cycles client-side ──────────────────────────────
-                  const monthsByLearner: Record<string, string[]> = {};
-                  longRows.forEach(r => {
-                    if (!monthsByLearner[r.learner_token]) monthsByLearner[r.learner_token] = [];
-                    if (!monthsByLearner[r.learner_token].includes(r.cohort_month))
-                      monthsByLearner[r.learner_token].push(r.cohort_month);
-                  });
-                  Object.values(monthsByLearner).forEach(m => m.sort());
-
-                  const rowsWithCycle = longRows.map(r => ({
-                    ...r,
-                    cycle: (monthsByLearner[r.learner_token]?.indexOf(r.cohort_month) ?? 0) + 1,
-                  }));
-
-                  const persistent = rowsWithCycle.filter(r =>
-                    (monthsByLearner[r.learner_token]?.length ?? 0) >= 2
+                  // ── All months sorted chronologically ───────────────────────
+                  const months = [...longRows].sort((a, b) =>
+                    a.cohort_month.localeCompare(b.cohort_month)
                   );
 
-                  const byCycle: Record<number, typeof rowsWithCycle> = {};
-                  persistent.forEach(r => {
-                    if (!byCycle[r.cycle]) byCycle[r.cycle] = [];
-                    byCycle[r.cycle].push(r);
-                  });
+                  // Month index = cycle number (1-based)
+                  const totalMonths   = months.length;
+                  const totalLearners = months.reduce((s, m) => s + (m.learner_count || 0), 0);
+                  const totalCerts    = months.reduce((s, m) => s + (Number(m.total_certs) || 0), 0);
 
-                  const maxCycle = Math.max(...persistent.map(r => r.cycle), 0);
-                  const cycles = Array.from({ length: maxCycle }, (_, i) => i + 1)
-                    .filter(c => byCycle[c]?.length > 0);
+                  // Low-engagement flag: avg sessions/learner < 2
+                  const isLow = (m: typeof months[0]) =>
+                    m.learner_count > 0 && (m.total_sessions / m.learner_count) < 2;
 
-                  const avgF = (arr: typeof rowsWithCycle, key: keyof typeof rowsWithCycle[0]) => {
-                    const vals = arr.map(r => Number(r[key])).filter(v => !isNaN(v) && v > 0);
-                    return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
-                  };
-                  const pct = (n: number, t: number) => t ? Math.round((n / t) * 100) : 0;
-                  const totSess = (arr: typeof rowsWithCycle) =>
-                    arr.reduce((s, r) => s + (Number(r.session_count) || 0), 0);
-                  const avgSessPerLearner = (c: number) =>
-                    byCycle[c]?.length > 0 ? totSess(byCycle[c]) / byCycle[c].length : 0;
-                  const isLow = (c: number) => avgSessPerLearner(c) < 2;
-
-                  // Hero stats
-                  const scaffByCycle = cycles.map(c => ({
-                    cycle: c, n: byCycle[c].length,
-                    sessions: totSess(byCycle[c]),
-                    clarf: avgF(byCycle[c], 'scaffold_clarification_per_session'),
-                    low: isLow(c),
-                  }));
-                  const validScaf = scaffByCycle.filter(s => !s.low);
-                  const c1Clarf = validScaf[0]?.clarf ?? 0;
-                  const lastClarf = validScaf[validScaf.length - 1]?.clarf ?? 0;
+                  // Scaffolding: clarifications/session per month
+                  const validScaf = months.filter(m => !isLow(m) && (m.avg_clarification ?? 0) > 0);
+                  const c1Clarf   = validScaf[0]?.avg_clarification ?? 0;
+                  const lastClarf = validScaf[validScaf.length - 1]?.avg_clarification ?? 0;
                   const clarfDecline = c1Clarf > 0 && validScaf.length > 1
                     ? Math.round((1 - lastClarf / c1Clarf) * 100) : null;
+                  const maxClarfVal = Math.max(...months.map(m => m.avg_clarification ?? 0), 1);
 
-                  const totalCerts = longRows.reduce((s, r) =>
-                    s + (Number(r.certifications_earned_total) || 0), 0);
+                  // Converging %: exclude insufficient_data from denominator
+                  const convergingPct = (m: typeof months[0]) => {
+                    const valid = m.learner_count - m.insufficient_data_count;
+                    return valid > 0 ? Math.round((m.converging_count / valid) * 100) : null;
+                  };
 
-                  // Mentor effect
-                  const MENTOR_ABSENT_MONTHS = ['2025-11-01','2025-12-01','2026-01-01','2026-02-01'];
-                  const absentRows  = rowsWithCycle.filter(r => MENTOR_ABSENT_MONTHS.includes(r.cohort_month));
-                  const presentRows = rowsWithCycle.filter(r => !MENTOR_ABSENT_MONTHS.includes(r.cohort_month));
-                  const avgAbsent  = absentRows.length  ? totSess(absentRows)  / absentRows.length  : 0;
-                  const avgPresent = presentRows.length ? totSess(presentRows) / presentRows.length : 0;
+                  // Mentor experiment: Nov 2025 – Feb 2026 = absence period
+                  const ABSENT = ['2025-11-01','2025-12-01','2026-01-01','2026-02-01'];
+                  const absentMonths  = months.filter(m => ABSENT.includes(m.cohort_month));
+                  const presentMonths = months.filter(m => !ABSENT.includes(m.cohort_month));
+                  const avgSess = (arr: typeof months) => {
+                    const totalS = arr.reduce((s, m) => s + (m.total_sessions || 0), 0);
+                    const totalL = arr.reduce((s, m) => s + (m.learner_count  || 0), 0);
+                    return totalL > 0 ? totalS / totalL : 0;
+                  };
+                  const avgAbsent  = avgSess(absentMonths);
+                  const avgPresent = avgSess(presentMonths);
 
-                  // Role readiness
-                  const roleData = cycles.map(c => ({
-                    cycle: c, n: byCycle[c].length, low: isLow(c),
-                    teaching:    pct(byCycle[c].filter(r => (Number(r.role_teaching_intent_count) || 0) > 0).length, byCycle[c].length),
-                    community:   pct(byCycle[c].filter(r => (Number(r.role_community_application_count) || 0) > 0).length, byCycle[c].length),
-                    enterprise:  pct(byCycle[c].filter(r => (Number(r.role_enterprise_orientation_count) || 0) > 0).length, byCycle[c].length),
-                    intergenerational: pct(byCycle[c].filter(r => (Number(r.role_intergenerational_count) || 0) > 0).length, byCycle[c].length),
-                  }));
-
-                  const uniqueMonths   = new Set(longRows.map(r => r.cohort_month)).size;
-                  const uniqueLearners = new Set(longRows.map(r => r.learner_token)).size;
-
-                  const maxClarfVal = Math.max(...scaffByCycle.map(s => s.clarf), 1);
+                  // Role readiness: % of learners per month with each signal
+                  const rolePct = (m: typeof months[0], key: keyof typeof months[0]) =>
+                    m.learner_count > 0 ? Math.round((Number(m[key]) / m.learner_count) * 100) : 0;
 
                   const roleKeys = [
-                    { key: 'teaching'          as const, label: 'Teaching intent'       },
-                    { key: 'community'         as const, label: 'Community application' },
-                    { key: 'enterprise'        as const, label: 'Enterprise orient.'    },
-                    { key: 'intergenerational' as const, label: 'Intergenerational'     },
+                    { key: 'teaching_intent_count'      as const, label: 'Teaching intent'       },
+                    { key: 'community_application_count' as const, label: 'Community application' },
+                    { key: 'enterprise_orientation_count'as const, label: 'Enterprise orient.'    },
+                    { key: 'intergenerational_count'     as const, label: 'Intergenerational'     },
                   ];
 
                   return (
@@ -776,24 +725,26 @@ const PublicLandingPage: React.FC = () => {
                       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem", marginBottom: "1.75rem" }}>
                         <div>
                           <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.45rem" }}>
-                            Longitudinal Evidence · Persistent Learners
+                            Longitudinal Evidence · {totalMonths} Months of Data
                           </div>
                           <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.1rem,3vw,1.55rem)", fontWeight: 700, color: "#fff", margin: "0 0 0.4rem" }}>
                             What happens when learners stay
                           </h3>
                           <p style={{ fontSize: "0.83rem", color: "rgba(255,255,255,0.45)", lineHeight: 1.65, margin: 0, maxWidth: 560 }}>
-                            {uniqueLearners} learners · {persistent.length} with 2+ months · {uniqueMonths} months of data · zero prior computer access.{" "}
+                            {totalMonths} monthly cohorts · {totalLearners.toLocaleString()} total learner-months · zero prior computer access.{" "}
                             <em>Hallinan, Hao, Davidson &amp; Clergy (2026), World Development submission.</em>
                           </p>
                           <p style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.28)", marginTop: "0.35rem" }}>
-                            Cycle = one monthly assessment period. ⚠ = fewer than 2 sessions/learner — treat with caution.
+                            Each bar = one monthly cohort. ⚠ = fewer than 2 sessions per learner — treat with caution.
                           </p>
                         </div>
                         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", flexShrink: 0 }}>
                           {[
-                            { num: clarfDecline !== null ? `${clarfDecline}%` : "—", label: "less AI scaffolding",  color: "#4ade80" },
-                            { num: totalCerts > 0 ? totalCerts : "—",              label: "certifications earned", color: "#fbbf24" },
-                            { num: avgAbsent === 0 && absentRows.length > 0 ? "0 vs " + avgPresent.toFixed(0) : "—",
+                            { num: clarfDecline !== null ? `${clarfDecline}%` : "—", label: "less AI scaffolding",    color: "#4ade80" },
+                            { num: totalCerts > 0 ? totalCerts : "—",                label: "certifications earned",  color: "#fbbf24" },
+                            { num: avgAbsent === 0 && absentMonths.length > 0
+                                ? "0 vs " + Math.round(avgPresent)
+                                : "—",
                               label: "sessions absent vs present", color: "#f87171" },
                           ].map(s => (
                             <div key={s.label} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "0.75rem 1rem", textAlign: "center", minWidth: 90 }}>
@@ -815,28 +766,35 @@ const PublicLandingPage: React.FC = () => {
                           <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.28)", marginBottom: "0.85rem", lineHeight: 1.5 }}>
                             Avg AI clarification prompts per session. Falling = learner directing the AI, not being guided by it.
                           </div>
-                          {scaffByCycle.map(s => (
-                            <div key={s.cycle} style={{ marginBottom: "0.6rem", opacity: s.low ? 0.5 : 1 }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
-                                <span style={{ fontSize: "0.71rem", color: "rgba(255,255,255,0.5)" }}>
-                                  Cycle {s.cycle} · {s.n} learners{s.low ? " ⚠" : ""}
-                                </span>
-                                <span style={{ fontSize: "0.71rem", fontWeight: 700, color: s.low ? "rgba(255,255,255,0.25)" : "#4ade80" }}>
-                                  {s.clarf.toFixed(1)}
-                                </span>
+                          {months.map((m, i) => {
+                            const clarf = m.avg_clarification ?? 0;
+                            const low   = isLow(m);
+                            const convPct = convergingPct(m);
+                            const label = new Date(m.cohort_month).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+                            return (
+                              <div key={m.cohort_month} style={{ marginBottom: "0.55rem", opacity: low ? 0.45 : 1 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
+                                  <span style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.45)" }}>
+                                    {label} · n={m.learner_count}{low ? " ⚠" : ""}
+                                  </span>
+                                  <span style={{ fontSize: "0.68rem", fontWeight: 700, color: low ? "rgba(255,255,255,0.2)" : "#4ade80" }}>
+                                    {clarf.toFixed(1)}
+                                    {convPct !== null && !low &&
+                                      <span style={{ color: "rgba(74,222,128,0.55)", fontWeight: 400 }}> · {convPct}% →</span>
+                                    }
+                                  </span>
+                                </div>
+                                <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 99, overflow: "hidden" }}>
+                                  <div style={{ height: "100%", width: `${(clarf / maxClarfVal) * 100}%`, background: low ? "rgba(255,255,255,0.08)" : "#4ade80", borderRadius: 99 }} />
+                                </div>
                               </div>
-                              <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 99, overflow: "hidden" }}>
-                                <div style={{ height: "100%", width: `${(s.clarf / maxClarfVal) * 100}%`, background: s.low ? "rgba(255,255,255,0.1)" : "#4ade80", borderRadius: 99 }} />
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                           {clarfDecline !== null && (
                             <div style={{ marginTop: "0.85rem", padding: "0.6rem 0.75rem", background: "rgba(74,222,128,0.07)", borderRadius: 8 }}>
-                              <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.35)", marginBottom: "2px" }}>Decline cycle 1 → latest valid cycle</div>
+                              <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.3)", marginBottom: "2px" }}>Decline across valid months</div>
                               <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", color: "#4ade80", lineHeight: 1 }}>{clarfDecline}%</div>
-                              <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.25)", marginTop: "2px" }}>
-                                Associative · no control group
-                              </div>
+                              <div style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.22)", marginTop: "2px" }}>Associative · no control group</div>
                             </div>
                           )}
                         </div>
@@ -847,46 +805,40 @@ const PublicLandingPage: React.FC = () => {
                             Role readiness signals
                           </div>
                           <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.28)", marginBottom: "0.85rem", lineHeight: 1.5 }}>
-                            % of learners per cycle showing evidence of applying learning beyond the platform — detected via AI transcript analysis.
+                            % of learners per month showing evidence of applying learning beyond the platform — detected via AI transcript analysis.
                           </div>
                           {roleKeys.map(item => (
                             <div key={item.key} style={{ marginBottom: "0.85rem" }}>
                               <div style={{ fontSize: "0.71rem", color: "rgba(255,255,255,0.5)", marginBottom: "5px" }}>{item.label}</div>
-                              <div style={{ display: "flex", gap: "3px", alignItems: "flex-end", height: 28 }}>
-                                {roleData.map((r, i) => (
-                                  <div key={r.cycle} style={{
-                                    flex: 1, display: "flex", flexDirection: "column",
-                                    alignItems: "center", justifyContent: "flex-end", height: "100%",
-                                    opacity: r.low ? 0.4 : 1,
-                                  }} title={r.low ? `Cycle ${r.cycle}: ⚠ low sessions` : `Cycle ${r.cycle}`}>
-                                    <div style={{
-                                      width: "100%",
-                                      height: `${(r[item.key] / 100) * 28}px`,
-                                      background: `rgba(217,119,6,${0.25 + (i / Math.max(roleData.length - 1, 1)) * 0.75})`,
-                                      borderRadius: "2px 2px 0 0",
-                                    }} />
-                                  </div>
-                                ))}
+                              <div style={{ display: "flex", gap: "2px", alignItems: "flex-end", height: 28 }}>
+                                {months.map((m, i) => {
+                                  const val = rolePct(m, item.key);
+                                  const low = isLow(m);
+                                  const opacity = 0.25 + (i / Math.max(months.length - 1, 1)) * 0.75;
+                                  return (
+                                    <div key={m.cohort_month} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%", opacity: low ? 0.3 : 1 }}
+                                      title={`${new Date(m.cohort_month).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}: ${low ? '⚠ low sessions' : val + '%'}`}>
+                                      <div style={{ width: "100%", height: `${Math.max(2, (val / 100) * 28)}px`, background: `rgba(217,119,6,${opacity})`, borderRadius: "2px 2px 0 0" }} />
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              <div style={{ display: "flex", marginTop: "3px" }}>
-                                {roleData.map((r, i) => (
-                                  <span key={r.cycle} style={{
-                                    flex: 1, fontSize: "0.65rem", textAlign: "center",
-                                    color: r.low ? "rgba(251,191,36,0.5)" : i === roleData.length - 1 ? "#d97706" : "rgba(255,255,255,0.25)",
-                                    fontWeight: i === roleData.length - 1 ? 700 : 400,
-                                  }}>
-                                    {r.low ? "⚠" : `${r[item.key]}%`}
-                                  </span>
-                                ))}
+                              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "3px" }}>
+                                <span style={{ fontSize: "0.62rem", color: "rgba(255,255,255,0.25)" }}>
+                                  {new Date(months[0].cohort_month).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}
+                                </span>
+                                <span style={{ fontSize: "0.62rem", color: "#d97706", fontWeight: 700 }}>
+                                  {rolePct(months[months.length - 1], item.key)}% latest
+                                </span>
                               </div>
                             </div>
                           ))}
-                          <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.22)", marginTop: "0.3rem", lineHeight: 1.5 }}>
-                            Bars left → right = cycle 1 → {maxCycle}. Darker = later cycle.
+                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.22)", marginTop: "0.3rem", lineHeight: 1.5 }}>
+                            Bars left → right = {new Date(months[0].cohort_month).toLocaleDateString('en-US',{month:'short',year:'2-digit'})} → {new Date(months[months.length-1].cohort_month).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}. Darker = more recent.
                           </div>
                         </div>
 
-                        {/* Mentor experiment */}
+                        {/* Natural experiment */}
                         <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
                           <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.4rem" }}>
                             Natural experiment
@@ -894,7 +846,7 @@ const PublicLandingPage: React.FC = () => {
                           <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.28)", marginBottom: "0.85rem", lineHeight: 1.5 }}>
                             Nov 2025–Feb 2026: Davidson absent. Technology, Starlink, and curriculum unchanged.
                           </div>
-                          {absentRows.length > 0 ? (
+                          {absentMonths.length > 0 ? (
                             <>
                               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginBottom: "0.85rem" }}>
                                 <div style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 8, padding: "0.75rem", textAlign: "center" }}>
@@ -913,11 +865,11 @@ const PublicLandingPage: React.FC = () => {
                               </p>
                             </>
                           ) : (
-                            <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.3)", fontStyle: "italic" }}>
+                            <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.3)", fontStyle: "italic", marginBottom: "0.85rem" }}>
                               Absence period data loading…
                             </div>
                           )}
-                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.22)", lineHeight: 1.55, marginTop: "0.5rem" }}>
+                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.22)", lineHeight: 1.55 }}>
                             The facilitator is the mechanism — not the technology.
                           </div>
                           <div style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.18)", lineHeight: 1.5, marginTop: "0.4rem" }}>
@@ -928,12 +880,14 @@ const PublicLandingPage: React.FC = () => {
                       </div>
 
                       <div style={{ marginTop: "1.1rem", fontSize: "0.73rem", color: "rgba(255,255,255,0.22)", lineHeight: 1.6 }}>
-                        All longitudinal claims are associative; no control group was employed. ⚠ cycles have fewer than 2 sessions per learner and should be treated with caution.
+                        All longitudinal claims are associative; no control group was employed.
+                        ⚠ months with fewer than 2 sessions per learner are dimmed and should be treated with caution.
                       </div>
                     </div>
                   );
                 })()}
 
+                {/* What does this data mean? */}
                 {/* What does this data mean? */}
                 {/* What does this data mean? */}
                 <div style={{
