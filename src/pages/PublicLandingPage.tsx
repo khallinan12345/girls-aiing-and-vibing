@@ -226,6 +226,26 @@ const PublicLandingPage: React.FC = () => {
   const [programs, setPrograms]   = useState<ResearchProgram[]>([]);
   const [questions, setQuestions] = useState<GuidingQuestion[]>([]);
 
+  // ── Persistent learner longitudinal data from dashboard_stats ─────────────
+  interface LongRow {
+    learner_token: string;
+    cohort_month: string;
+    session_count: number;
+    scaffold_clarification_per_session: number;
+    scaffold_convergence_trend: string;
+    role_teaching_intent_count: number;
+    role_community_application_count: number;
+    role_enterprise_orientation_count: number;
+    role_intergenerational_count: number;
+    certifications_earned_total: number;
+    cognitive_score: number | null;
+    critical_thinking_score: number | null;
+    problem_solving_score: number | null;
+    creativity_score: number | null;
+  }
+  const [longRows, setLongRows] = useState<LongRow[]>([]);
+  const [longLoading, setLongLoading] = useState(true);
+
   useEffect(() => {
     (async () => {
       const COLS = [
@@ -262,6 +282,41 @@ const PublicLandingPage: React.FC = () => {
       ]);
       if (progData) setPrograms(progData as ResearchProgram[]);
       if (qData)    setQuestions(qData as GuidingQuestion[]);
+
+      // ── Paginated fetch of dashboard_stats for longitudinal panel ────────
+      const LONG_FIELDS = [
+        'learner_token', 'cohort_month', 'session_count',
+        'scaffold_clarification_per_session', 'scaffold_convergence_trend',
+        'role_teaching_intent_count', 'role_community_application_count',
+        'role_enterprise_orientation_count', 'role_intergenerational_count',
+        'certifications_earned_total',
+        'cognitive_score', 'critical_thinking_score', 'problem_solving_score', 'creativity_score',
+      ].join(',');
+
+      const PAGE = 1000;
+      let longData: LongRow[] = [];
+      let from = 0;
+      let keepGoing = true;
+      while (keepGoing) {
+        const { data: batch, error: bErr } = await supabase
+          .from('dashboard_stats')
+          .select(LONG_FIELDS)
+          .order('cohort_month', { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (bErr || !batch) break;
+        longData = longData.concat(batch as LongRow[]);
+        if (batch.length < PAGE) keepGoing = false;
+        else { from += PAGE; if (longData.length >= 20000) keepGoing = false; }
+      }
+      // Deduplicate to one row per learner per cohort_month (daily rows repeat monthly aggregates)
+      const seen = new Set<string>();
+      const deduped: LongRow[] = [];
+      longData.forEach(r => {
+        const key = `${r.learner_token}|${r.cohort_month}`;
+        if (!seen.has(key)) { seen.add(key); deduped.push(r); }
+      });
+      setLongRows(deduped);
+      setLongLoading(false);
     })();
   }, []);
 
@@ -623,208 +678,263 @@ const PublicLandingPage: React.FC = () => {
                 )}
 
                 {/* ── Longitudinal: Persistent Learner Trajectories ─────── */}
-                <div style={{
-                  marginTop: "2.5rem",
-                  background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  borderRadius: 16, padding: "2rem",
-                }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem", marginBottom: "1.75rem" }}>
-                    <div>
-                      <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.45rem" }}>
-                        Longitudinal Evidence · Persistent Learners
-                      </div>
-                      <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.1rem,3vw,1.55rem)", fontWeight: 700, color: "#fff", margin: "0 0 0.4rem" }}>
-                        What happens when learners stay
-                      </h3>
-                      <p style={{ fontSize: "0.83rem", color: "rgba(255,255,255,0.45)", lineHeight: 1.65, margin: 0, maxWidth: 560 }}>
-                        33 learners with 2+ monthly assessments across 11 months. Zero prior computer access.
-                        Data from: <em>Hallinan, Hao, Davidson &amp; Clergy (2026), World Development submission.</em>
-                      </p>
+                {(() => {
+                  if (longLoading) return (
+                    <div style={{ marginTop: "2.5rem", padding: "2rem", textAlign: "center", color: "rgba(255,255,255,0.3)", fontSize: "0.83rem" }}>
+                      Loading longitudinal data…
                     </div>
-                    <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", flexShrink: 0 }}>
-                      {[
-                        { num: "2.3×", label: "L3 reasoning growth", color: "#a78bfa" },
-                        { num: "58%", label: "less AI scaffolding", color: "#4ade80" },
-                        { num: "$6.69", label: "per certification", color: "#fbbf24" },
-                      ].map(s => (
-                        <div key={s.label} style={{
-                          background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
-                          borderRadius: 10, padding: "0.75rem 1rem", textAlign: "center", minWidth: 90,
-                        }}>
-                          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.num}</div>
-                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.38)", marginTop: "0.25rem", lineHeight: 1.4 }}>{s.label}</div>
+                  );
+                  if (longRows.length === 0) return null;
+
+                  // ── Compute cycles client-side ──────────────────────────────
+                  const monthsByLearner: Record<string, string[]> = {};
+                  longRows.forEach(r => {
+                    if (!monthsByLearner[r.learner_token]) monthsByLearner[r.learner_token] = [];
+                    if (!monthsByLearner[r.learner_token].includes(r.cohort_month))
+                      monthsByLearner[r.learner_token].push(r.cohort_month);
+                  });
+                  Object.values(monthsByLearner).forEach(m => m.sort());
+
+                  const rowsWithCycle = longRows.map(r => ({
+                    ...r,
+                    cycle: (monthsByLearner[r.learner_token]?.indexOf(r.cohort_month) ?? 0) + 1,
+                  }));
+
+                  const persistent = rowsWithCycle.filter(r =>
+                    (monthsByLearner[r.learner_token]?.length ?? 0) >= 2
+                  );
+
+                  const byCycle: Record<number, typeof rowsWithCycle> = {};
+                  persistent.forEach(r => {
+                    if (!byCycle[r.cycle]) byCycle[r.cycle] = [];
+                    byCycle[r.cycle].push(r);
+                  });
+
+                  const maxCycle = Math.max(...persistent.map(r => r.cycle), 0);
+                  const cycles = Array.from({ length: maxCycle }, (_, i) => i + 1)
+                    .filter(c => byCycle[c]?.length > 0);
+
+                  const avgF = (arr: typeof rowsWithCycle, key: keyof typeof rowsWithCycle[0]) => {
+                    const vals = arr.map(r => Number(r[key])).filter(v => !isNaN(v) && v > 0);
+                    return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+                  };
+                  const pct = (n: number, t: number) => t ? Math.round((n / t) * 100) : 0;
+                  const totSess = (arr: typeof rowsWithCycle) =>
+                    arr.reduce((s, r) => s + (Number(r.session_count) || 0), 0);
+                  const avgSessPerLearner = (c: number) =>
+                    byCycle[c]?.length > 0 ? totSess(byCycle[c]) / byCycle[c].length : 0;
+                  const isLow = (c: number) => avgSessPerLearner(c) < 2;
+
+                  // Hero stats
+                  const scaffByCycle = cycles.map(c => ({
+                    cycle: c, n: byCycle[c].length,
+                    sessions: totSess(byCycle[c]),
+                    clarf: avgF(byCycle[c], 'scaffold_clarification_per_session'),
+                    low: isLow(c),
+                  }));
+                  const validScaf = scaffByCycle.filter(s => !s.low);
+                  const c1Clarf = validScaf[0]?.clarf ?? 0;
+                  const lastClarf = validScaf[validScaf.length - 1]?.clarf ?? 0;
+                  const clarfDecline = c1Clarf > 0 && validScaf.length > 1
+                    ? Math.round((1 - lastClarf / c1Clarf) * 100) : null;
+
+                  const totalCerts = longRows.reduce((s, r) =>
+                    s + (Number(r.certifications_earned_total) || 0), 0);
+
+                  // Mentor effect
+                  const MENTOR_ABSENT_MONTHS = ['2025-11-01','2025-12-01','2026-01-01','2026-02-01'];
+                  const absentRows  = rowsWithCycle.filter(r => MENTOR_ABSENT_MONTHS.includes(r.cohort_month));
+                  const presentRows = rowsWithCycle.filter(r => !MENTOR_ABSENT_MONTHS.includes(r.cohort_month));
+                  const avgAbsent  = absentRows.length  ? totSess(absentRows)  / absentRows.length  : 0;
+                  const avgPresent = presentRows.length ? totSess(presentRows) / presentRows.length : 0;
+
+                  // Role readiness
+                  const roleData = cycles.map(c => ({
+                    cycle: c, n: byCycle[c].length, low: isLow(c),
+                    teaching:    pct(byCycle[c].filter(r => (Number(r.role_teaching_intent_count) || 0) > 0).length, byCycle[c].length),
+                    community:   pct(byCycle[c].filter(r => (Number(r.role_community_application_count) || 0) > 0).length, byCycle[c].length),
+                    enterprise:  pct(byCycle[c].filter(r => (Number(r.role_enterprise_orientation_count) || 0) > 0).length, byCycle[c].length),
+                    intergenerational: pct(byCycle[c].filter(r => (Number(r.role_intergenerational_count) || 0) > 0).length, byCycle[c].length),
+                  }));
+
+                  const uniqueMonths   = new Set(longRows.map(r => r.cohort_month)).size;
+                  const uniqueLearners = new Set(longRows.map(r => r.learner_token)).size;
+
+                  const maxClarfVal = Math.max(...scaffByCycle.map(s => s.clarf), 1);
+
+                  const roleKeys = [
+                    { key: 'teaching'          as const, label: 'Teaching intent'       },
+                    { key: 'community'         as const, label: 'Community application' },
+                    { key: 'enterprise'        as const, label: 'Enterprise orient.'    },
+                    { key: 'intergenerational' as const, label: 'Intergenerational'     },
+                  ];
+
+                  return (
+                    <div style={{ marginTop: "2.5rem", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: "2rem" }}>
+
+                      {/* Header */}
+                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem", marginBottom: "1.75rem" }}>
+                        <div>
+                          <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.45rem" }}>
+                            Longitudinal Evidence · Persistent Learners
+                          </div>
+                          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.1rem,3vw,1.55rem)", fontWeight: 700, color: "#fff", margin: "0 0 0.4rem" }}>
+                            What happens when learners stay
+                          </h3>
+                          <p style={{ fontSize: "0.83rem", color: "rgba(255,255,255,0.45)", lineHeight: 1.65, margin: 0, maxWidth: 560 }}>
+                            {uniqueLearners} learners · {persistent.length} with 2+ months · {uniqueMonths} months of data · zero prior computer access.{" "}
+                            <em>Hallinan, Hao, Davidson &amp; Clergy (2026), World Development submission.</em>
+                          </p>
+                          <p style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.28)", marginTop: "0.35rem" }}>
+                            Cycle = one monthly assessment period. ⚠ = fewer than 2 sessions/learner — treat with caution.
+                          </p>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Reasoning composition stacked bars */}
-                  <div style={{ marginBottom: "1.75rem" }}>
-                    <div style={{ fontSize: "0.69rem", fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.9rem" }}>
-                      Reasoning level composition — from prompted response to self-directed enterprise planning
-                    </div>
-                    {[
-                      { label: "1st assess. (n=19)", l0: 8.1, l1: 68.5, l2: 21.5, l3: 10.9, highlight: false },
-                      { label: "2nd assess. (n=24)", l0: 8.0, l1: 60.0, l2: 25.1, l3: 18.8, highlight: false },
-                      { label: "3rd assess. (n=16)", l0: 8.9, l1: 54.2, l2: 23.2, l3: 24.8, highlight: false },
-
-                    ].map(row => (
-                      <div key={row.label} style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "8px" }}>
-                        <div style={{ width: 128, fontSize: "0.72rem", color: "rgba(255,255,255,0.38)", textAlign: "right", flexShrink: 0 }}>{row.label}</div>
-                        <div style={{ flex: 1, height: 26, display: "flex", borderRadius: 5, overflow: "hidden" }}>
-                          <div style={{ width: `${row.l0}%`, background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            {row.l0 > 5 && <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", fontWeight: 600 }}>{row.l0}%</span>}
-                          </div>
-                          <div style={{ width: `${row.l1}%`, background: "#1a4a6e", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            <span style={{ fontSize: "9px", color: "#5a9abf", fontWeight: 600 }}>L1 {row.l1}%</span>
-                          </div>
-                          <div style={{ width: `${row.l2}%`, background: "#1a5c5c", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            <span style={{ fontSize: "9px", color: "#4aabab", fontWeight: 600 }}>{row.l2}%</span>
-                          </div>
-                          <div style={{
-                            width: `${row.l3}%`,
-                            background: row.highlight ? "#22c58b" : "#15764a",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                          }}>
-                            <span style={{ fontSize: "9px", color: row.highlight ? "#093c25" : "#4adb96", fontWeight: 700 }}>
-                              L3 {row.l3}%{row.highlight ? " ↑3×" : ""}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    <div style={{ display: "flex", gap: "1rem", marginTop: "0.65rem", flexWrap: "wrap" }}>
-                      {[
-                        { bg: "rgba(255,255,255,0.06)", label: "L0 Definitional" },
-                        { bg: "#1a4a6e", label: "L1 Responsive (prompted)" },
-                        { bg: "#1a5c5c", label: "L2 Elaborative" },
-                        { bg: "#22c58b", label: "L3 Structured — enterprise-ready" },
-                      ].map(l => (
-                        <div key={l.label} style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "0.7rem", color: "rgba(255,255,255,0.38)" }}>
-                          <div style={{ width: 10, height: 10, borderRadius: 2, background: l.bg, border: "1px solid rgba(255,255,255,0.1)", flexShrink: 0 }} />
-                          {l.label}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Three columns: scaffolding + role readiness + enterprise */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: "1rem" }}>
-
-                    {/* Scaffolding decline */}
-                    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
-                      <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.75rem" }}>
-                        AI scaffolding demand
-                      </div>
-                      {[
-                        { label: "1st (n=19)", val: 6.63, pct: 100, caution: false },
-                        { label: "2nd (n=24)", val: 3.97, pct: 60, caution: false },
-                        { label: "3rd (n=16)", val: 2.79, pct: 42, caution: false },
-                      ].map(row => (
-                        <div key={row.label} style={{ marginBottom: "0.6rem" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
-                            <span style={{ fontSize: "0.71rem", color: row.caution ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.5)" }}>{row.label}</span>
-                            <span style={{ fontSize: "0.71rem", fontWeight: 700, color: row.caution ? "rgba(255,255,255,0.2)" : "#4ade80" }}>{row.val}</span>
-                          </div>
-                          <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 99, overflow: "hidden" }}>
-                            <div style={{ height: "100%", width: `${row.pct}%`, background: row.caution ? "rgba(255,255,255,0.1)" : "#4ade80", borderRadius: 99 }} />
-                          </div>
-                        </div>
-                      ))}
-                      <div style={{ fontSize: "0.69rem", color: "rgba(255,255,255,0.25)", marginTop: "0.5rem", lineHeight: 1.5 }}>
-                        Clarifications/session. 58% decline by 3rd cycle.
-                      </div>
-                      <div style={{ marginTop: "0.85rem", padding: "0.6rem 0.75rem", background: "rgba(74,222,128,0.07)", borderRadius: 8 }}>
-                        <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.35)", marginBottom: "2px" }}>Converging at 3rd assessment</div>
-                        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", color: "#4ade80", lineHeight: 1 }}>37.5%</div>
-                        <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.25)", marginTop: "2px" }}>up from 10.5% · 0% diverging</div>
-                      </div>
-                    </div>
-
-                    {/* Role readiness */}
-                    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
-                      <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#d97706", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.75rem" }}>
-                        Role readiness signals
-                      </div>
-                      {[
-                        { label: "Teaching intent",       a1: 30, a2: 39, a3: 67 },
-                        { label: "Community application", a1: 36, a2: 52, a3: 67 },
-                        { label: "Enterprise orient.",    a1: 30, a2: 45, a3: 61 },
-                        { label: "Intergenerational",     a1: 27, a2: 48, a3: 50 },
-                      ].map(row => (
-                        <div key={row.label} style={{ marginBottom: "0.85rem" }}>
-                          <div style={{ fontSize: "0.71rem", color: "rgba(255,255,255,0.5)", marginBottom: "5px" }}>{row.label}</div>
-                          <div style={{ display: "flex", gap: "4px", alignItems: "flex-end", height: 28 }}>
-                            {[
-                              { val: row.a1, color: "rgba(217,119,6,0.3)" },
-                              { val: row.a2, color: "rgba(217,119,6,0.6)" },
-                              { val: row.a3, color: "#d97706" },
-                            ].map((bar, bi) => (
-                              <div key={bi} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
-                                <div style={{ width: "100%", height: `${bar.val / 100 * 28}px`, background: bar.color, borderRadius: "2px 2px 0 0" }} />
-                              </div>
-                            ))}
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "3px" }}>
-                            {[row.a1, row.a2, row.a3].map((v, vi) => (
-                              <span key={vi} style={{ fontSize: "0.65rem", color: vi === 2 ? "#d97706" : "rgba(255,255,255,0.25)", fontWeight: vi === 2 ? 700 : 400 }}>{v}%</span>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                      <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.22)", marginTop: "0.3rem", lineHeight: 1.5 }}>
-                        Bars = assess. 1 → 2 → 3. All indicators roughly double.
-                      </div>
-                    </div>
-
-                    {/* Enterprise artifacts */}
-                    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
-                      <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.75rem" }}>
-                        Enterprise capability
-                      </div>
-                      {[
-                        { label: "Artifact quality score", a1: "4.1", a3: "6.5", change: "↑60%", color: "#a78bfa" },
-                        { label: "Mean certs per learner",  a1: "1.7", a3: "31.8", change: "↑19×", color: "#fbbf24" },
-                        { label: "Certified by cycle 3",   a1: "—",  a3: "83%",  change: "",      color: "#4ade80" },
-                        { label: "Producing artifacts",    a1: "68%", a3: "81%", change: "↑13pp", color: "#a78bfa" },
-                      ].map(row => (
-                        <div key={row.label} style={{
-                          display: "flex", justifyContent: "space-between", alignItems: "center",
-                          padding: "0.55rem 0", borderBottom: "1px solid rgba(255,255,255,0.05)",
-                        }}>
-                          <div>
-                            <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.45)" }}>{row.label}</div>
-                            <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.22)", marginTop: "1px" }}>
-                              {row.a1 !== "—" ? `${row.a1} →` : ""} <span style={{ color: row.color }}>{row.a3}</span>
+                        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", flexShrink: 0 }}>
+                          {[
+                            { num: clarfDecline !== null ? `${clarfDecline}%` : "—", label: "less AI scaffolding",  color: "#4ade80" },
+                            { num: totalCerts > 0 ? totalCerts : "—",              label: "certifications earned", color: "#fbbf24" },
+                            { num: avgAbsent === 0 && absentRows.length > 0 ? "0 vs " + avgPresent.toFixed(0) : "—",
+                              label: "sessions absent vs present", color: "#f87171" },
+                          ].map(s => (
+                            <div key={s.label} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "0.75rem 1rem", textAlign: "center", minWidth: 90 }}>
+                              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.4rem", fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.num}</div>
+                              <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.38)", marginTop: "0.25rem", lineHeight: 1.4 }}>{s.label}</div>
                             </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Three columns */}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: "1rem" }}>
+
+                        {/* Scaffolding demand */}
+                        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
+                          <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.4rem" }}>
+                            AI scaffolding demand
                           </div>
-                          {row.change && (
-                            <span style={{ fontSize: "0.78rem", fontWeight: 700, color: row.color, flexShrink: 0 }}>{row.change}</span>
+                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.28)", marginBottom: "0.85rem", lineHeight: 1.5 }}>
+                            Avg AI clarification prompts per session. Falling = learner directing the AI, not being guided by it.
+                          </div>
+                          {scaffByCycle.map(s => (
+                            <div key={s.cycle} style={{ marginBottom: "0.6rem", opacity: s.low ? 0.5 : 1 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
+                                <span style={{ fontSize: "0.71rem", color: "rgba(255,255,255,0.5)" }}>
+                                  Cycle {s.cycle} · {s.n} learners{s.low ? " ⚠" : ""}
+                                </span>
+                                <span style={{ fontSize: "0.71rem", fontWeight: 700, color: s.low ? "rgba(255,255,255,0.25)" : "#4ade80" }}>
+                                  {s.clarf.toFixed(1)}
+                                </span>
+                              </div>
+                              <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 99, overflow: "hidden" }}>
+                                <div style={{ height: "100%", width: `${(s.clarf / maxClarfVal) * 100}%`, background: s.low ? "rgba(255,255,255,0.1)" : "#4ade80", borderRadius: 99 }} />
+                              </div>
+                            </div>
+                          ))}
+                          {clarfDecline !== null && (
+                            <div style={{ marginTop: "0.85rem", padding: "0.6rem 0.75rem", background: "rgba(74,222,128,0.07)", borderRadius: 8 }}>
+                              <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.35)", marginBottom: "2px" }}>Decline cycle 1 → latest valid cycle</div>
+                              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", color: "#4ade80", lineHeight: 1 }}>{clarfDecline}%</div>
+                              <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.25)", marginTop: "2px" }}>
+                                Associative · no control group
+                              </div>
+                            </div>
                           )}
                         </div>
-                      ))}
 
-                      {/* Natural experiment callout */}
-                      <div style={{ marginTop: "1rem", padding: "0.9rem", background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.18)", borderRadius: 10 }}>
-                        <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#a78bfa", marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                          Natural experiment
+                        {/* Role readiness */}
+                        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
+                          <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#d97706", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.4rem" }}>
+                            Role readiness signals
+                          </div>
+                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.28)", marginBottom: "0.85rem", lineHeight: 1.5 }}>
+                            % of learners per cycle showing evidence of applying learning beyond the platform — detected via AI transcript analysis.
+                          </div>
+                          {roleKeys.map(item => (
+                            <div key={item.key} style={{ marginBottom: "0.85rem" }}>
+                              <div style={{ fontSize: "0.71rem", color: "rgba(255,255,255,0.5)", marginBottom: "5px" }}>{item.label}</div>
+                              <div style={{ display: "flex", gap: "3px", alignItems: "flex-end", height: 28 }}>
+                                {roleData.map((r, i) => (
+                                  <div key={r.cycle} style={{
+                                    flex: 1, display: "flex", flexDirection: "column",
+                                    alignItems: "center", justifyContent: "flex-end", height: "100%",
+                                    opacity: r.low ? 0.4 : 1,
+                                  }} title={r.low ? `Cycle ${r.cycle}: ⚠ low sessions` : `Cycle ${r.cycle}`}>
+                                    <div style={{
+                                      width: "100%",
+                                      height: `${(r[item.key] / 100) * 28}px`,
+                                      background: `rgba(217,119,6,${0.25 + (i / Math.max(roleData.length - 1, 1)) * 0.75})`,
+                                      borderRadius: "2px 2px 0 0",
+                                    }} />
+                                  </div>
+                                ))}
+                              </div>
+                              <div style={{ display: "flex", marginTop: "3px" }}>
+                                {roleData.map((r, i) => (
+                                  <span key={r.cycle} style={{
+                                    flex: 1, fontSize: "0.65rem", textAlign: "center",
+                                    color: r.low ? "rgba(251,191,36,0.5)" : i === roleData.length - 1 ? "#d97706" : "rgba(255,255,255,0.25)",
+                                    fontWeight: i === roleData.length - 1 ? 700 : 400,
+                                  }}>
+                                    {r.low ? "⚠" : `${r[item.key]}%`}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                          <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.22)", marginTop: "0.3rem", lineHeight: 1.5 }}>
+                            Bars left → right = cycle 1 → {maxCycle}. Darker = later cycle.
+                          </div>
                         </div>
-                        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.75rem", color: "#fff", lineHeight: 1, marginBottom: "0.3rem" }}>5.4×</div>
-                        <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.4)", lineHeight: 1.55 }}>
-                          engagement when mentor present vs. absent — technology, connectivity, and curriculum unchanged.
-                          The facilitator is the mechanism.
+
+                        {/* Mentor experiment */}
+                        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
+                          <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.4rem" }}>
+                            Natural experiment
+                          </div>
+                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.28)", marginBottom: "0.85rem", lineHeight: 1.5 }}>
+                            Nov 2025–Feb 2026: Davidson absent. Technology, Starlink, and curriculum unchanged.
+                          </div>
+                          {absentRows.length > 0 ? (
+                            <>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginBottom: "0.85rem" }}>
+                                <div style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 8, padding: "0.75rem", textAlign: "center" }}>
+                                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.6rem", fontWeight: 900, color: "#f87171", lineHeight: 1 }}>{avgAbsent.toFixed(1)}</div>
+                                  <div style={{ fontSize: "0.65rem", color: "rgba(248,113,113,0.6)", marginTop: "0.2rem" }}>sessions/learner<br />absent</div>
+                                </div>
+                                <div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.2)", borderRadius: 8, padding: "0.75rem", textAlign: "center" }}>
+                                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.6rem", fontWeight: 900, color: "#4ade80", lineHeight: 1 }}>{avgPresent.toFixed(1)}</div>
+                                  <div style={{ fontSize: "0.65rem", color: "rgba(74,222,128,0.6)", marginTop: "0.2rem" }}>sessions/learner<br />present</div>
+                                </div>
+                              </div>
+                              <p style={{ fontSize: "0.72rem", color: "#f5f0e8", fontWeight: 600, marginBottom: "0.4rem" }}>
+                                {avgAbsent === 0
+                                  ? "Zero sessions during absence — not a decline, a complete stop."
+                                  : `${(avgPresent / avgAbsent).toFixed(1)}× more sessions when mentor present.`}
+                              </p>
+                            </>
+                          ) : (
+                            <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.3)", fontStyle: "italic" }}>
+                              Absence period data loading…
+                            </div>
+                          )}
+                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.22)", lineHeight: 1.55, marginTop: "0.5rem" }}>
+                            The facilitator is the mechanism — not the technology.
+                          </div>
+                          <div style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.18)", lineHeight: 1.5, marginTop: "0.4rem" }}>
+                            Associative · single site · single event · no control group. Directionally unambiguous.
+                          </div>
                         </div>
+
+                      </div>
+
+                      <div style={{ marginTop: "1.1rem", fontSize: "0.73rem", color: "rgba(255,255,255,0.22)", lineHeight: 1.6 }}>
+                        All longitudinal claims are associative; no control group was employed. ⚠ cycles have fewer than 2 sessions per learner and should be treated with caution.
                       </div>
                     </div>
+                  );
+                })()}
 
-                  </div>
-
-                  <div style={{ marginTop: "1.1rem", fontSize: "0.73rem", color: "rgba(255,255,255,0.22)", lineHeight: 1.6 }}>
-                    All longitudinal claims are associative; no control group was employed.
-                  </div>
-                </div>
-
+                {/* What does this data mean? */}
                 {/* What does this data mean? */}
                 <div style={{
                   marginTop: "2.5rem",
