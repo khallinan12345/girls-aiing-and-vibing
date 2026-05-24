@@ -594,7 +594,7 @@ const PublicLandingPage: React.FC = () => {
                     v.learner_count > 0 ? Math.round((Number(v[key]) / v.learner_count) * 100) : 0;
 
                   // Skill chart data — skip low-engagement visits for trendline
-                  const skillVisits = visits.filter(v => !isLow(v) && v.avg_critical_thinking != null);
+                  const skillVisits = visits.filter(v => !isLow(v) && v.visit_rank !== 4 && v.avg_critical_thinking != null);
 
                   const A = { green:"#4ade80", amber:"#fbbf24", purple:"#a78bfa", teal:"#2dd4bf", red:"#f87171", blue:"#60a5fa" };
                   const card: React.CSSProperties = { background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.09)", borderRadius:14, padding:"1.5rem" };
@@ -670,43 +670,67 @@ const PublicLandingPage: React.FC = () => {
                             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"0.78rem" }}>
                               <thead>
                                 <tr style={{ borderBottom:"1px solid rgba(255,255,255,0.1)" }}>
-                                  {["Month of use","n learners","Clarif/session","Change","% Converging","Sessions"].map(h => (
+                                  {["Month of use","n learners","Clarif/session","Change","% Converging","Sessions","Certs"].map(h => (
                                     <th key={h} style={{ padding:"0.4rem 0.6rem", textAlign:"left", fontSize:"0.65rem", fontWeight:700, color:"rgba(255,255,255,0.4)", letterSpacing:"0.07em", textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>
                                   ))}
                                 </tr>
                               </thead>
                               <tbody>
                                 {visits.map((v,i) => {
-                                  const low = isLow(v);
-                                  const cv  = v.avg_clarification ?? 0;
-                                  const cp  = convPct(v);
-                                  const decPct = (c1Clarf > 0 && v.visit_rank > 1 && !low)
+                                  const low        = isLow(v);
+                                  const cv         = v.avg_clarification ?? 0;
+                                  const cp         = convPct(v);
+                                  const decPct     = (c1Clarf > 0 && v.visit_rank > 1 && !low)
                                     ? Math.round((1 - cv / c1Clarf) * 100) : null;
+                                  const isDisrupted = v.visit_rank === 4;
+                                  const isSmallN    = v.learner_count < 5;
+                                  const rowOpacity  = isSmallN ? 0.5 : low ? 0.45 : 1;
                                   return (
-                                    <tr key={i} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)", opacity:low ? 0.45 : 1 }}>
-                                      <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.85)", fontWeight:600, whiteSpace:"nowrap" }}>
-                                        Mo.{v.visit_rank}{low ? " ⚠" : ""}
-                                      </td>
-                                      <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.5)", fontFamily:"monospace" }}>
-                                        {v.learner_count}
-                                      </td>
-                                      <td style={{ padding:"0.45rem 0.6rem", fontFamily:"monospace", fontWeight:700,
-                                        color: cv===0 ? "rgba(255,255,255,0.2)" : cv<3 ? A.green : cv>8 ? A.red : A.amber }}>
-                                        {cv > 0 ? cv.toFixed(2) : "—"}
-                                      </td>
-                                      <td style={{ padding:"0.45rem 0.6rem", fontWeight:700,
-                                        color: decPct==null ? "rgba(255,255,255,0.2)" : decPct>0 ? A.green : A.red }}>
-                                        {decPct==null ? "—" : decPct>0 ? `−${decPct}%` : `+${Math.abs(decPct)}%`}
-                                      </td>
-                                      <td style={{ padding:"0.45rem 0.6rem",
-                                        color: cp==null ? "rgba(255,255,255,0.2)" : cp>=25 ? A.green : cp>0 ? A.teal : "rgba(255,255,255,0.3)",
-                                        fontWeight: cp!=null && cp>0 ? 700 : 400 }}>
-                                        {cp==null ? "—" : `${cp}%`}
-                                      </td>
-                                      <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.35)", fontFamily:"monospace", fontSize:"0.72rem" }}>
-                                        {v.total_sessions > 0 ? v.total_sessions.toLocaleString() : "—"}
-                                      </td>
-                                    </tr>
+                                    <React.Fragment key={i}>
+                                      <tr style={{ borderBottom: isDisrupted ? "none" : "1px solid rgba(255,255,255,0.04)", opacity: rowOpacity }}>
+                                        <td style={{ padding:"0.45rem 0.6rem", color: isDisrupted ? A.red : "rgba(255,255,255,0.85)", fontWeight:600, whiteSpace:"nowrap" }}>
+                                          Mo.{v.visit_rank}
+                                          {low ? " ⚠" : ""}
+                                          {isDisrupted ? " 🔴" : ""}
+                                          {isSmallN && !isDisrupted ? ` (n=${v.learner_count})` : ""}
+                                        </td>
+                                        <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.5)", fontFamily:"monospace" }}>
+                                          {v.learner_count}
+                                        </td>
+                                        <td style={{ padding:"0.45rem 0.6rem", fontFamily:"monospace", fontWeight:700,
+                                          color: cv===0 ? "rgba(255,255,255,0.2)" : cv<3 ? A.green : cv>8 ? A.red : A.amber }}>
+                                          {cv > 0 ? cv.toFixed(2) : "—"}
+                                        </td>
+                                        <td style={{ padding:"0.45rem 0.6rem", fontWeight:700,
+                                          color: decPct==null ? "rgba(255,255,255,0.2)" : decPct>0 ? A.green : A.red }}>
+                                          {decPct==null ? "—" : decPct>0 ? `−${decPct}%` : `+${Math.abs(decPct)}%`}
+                                        </td>
+                                        <td style={{ padding:"0.45rem 0.6rem",
+                                          color: cp==null ? "rgba(255,255,255,0.2)" : cp>=25 ? A.green : cp>0 ? A.teal : "rgba(255,255,255,0.3)",
+                                          fontWeight: cp!=null && cp>0 ? 700 : 400 }}>
+                                          {cp==null ? "—" : `${cp}%`}
+                                        </td>
+                                        <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.35)", fontFamily:"monospace", fontSize:"0.72rem" }}>
+                                          {v.total_sessions > 0 ? v.total_sessions.toLocaleString() : "—"}
+                                        </td>
+                                        <td style={{ padding:"0.45rem 0.6rem", color: (v.total_certs ?? 0) > 0 ? A.amber : "rgba(255,255,255,0.2)", fontFamily:"monospace", fontWeight:700, fontSize:"0.72rem" }}>
+                                          {(v.total_certs ?? 0) > 0 ? v.total_certs : "—"}
+                                        </td>
+                                      </tr>
+                                      {isDisrupted && (
+                                        <tr>
+                                          <td colSpan={7} style={{ padding:"0.3rem 0.6rem 0.6rem", borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+                                            <div style={{ display:"flex", alignItems:"flex-start", gap:"0.4rem", background:"rgba(248,113,113,0.08)", border:"1px solid rgba(248,113,113,0.18)", borderRadius:6, padding:"0.45rem 0.65rem" }}>
+                                              <span style={{ fontSize:"0.75rem", flexShrink:0 }}>🔴</span>
+                                              <span style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.5)", lineHeight:1.55 }}>
+                                                <strong style={{ color:"rgba(248,113,113,0.9)" }}>Disruption — Mo.4:</strong>{" "}
+                                                Community access severely reduced during this period due to two simultaneous crises: rainy season solar power outages eliminated reliable electricity, and the programme's on-the-ground leader suffered a home fire requiring family relocation. Sessions dropped from 136 (Mo.3) to 15. Spike in clarifications (11.44) reflects learners re-engaging after a gap, not regression. Data from this month should be interpreted with caution.
+                                              </span>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </React.Fragment>
                                   );
                                 })}
                               </tbody>
@@ -714,6 +738,8 @@ const PublicLandingPage: React.FC = () => {
                           </div>
                           <p style={note}>
                             Mo.N = every learner's Nth month of use. ⚠ = fewer than 2 sessions per learner on average — scores unreliable.
+                            🔴 Mo.4 = disruption period (solar power outage + leader home fire) — interpret with caution.
+                            Mo.6 (n=4) and Mo.7 (n=1) are shown for completeness but fall below the 5-learner anonymity threshold — findings not generalisable.
                             All claims are associative · no control group.
                           </p>
                         </div>
@@ -738,7 +764,8 @@ const PublicLandingPage: React.FC = () => {
                         </div>
                         <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1.25rem", lineHeight:1.55, maxWidth:700 }}>
                           Scores measured from AI session transcripts. Each point = average score for all learners at that stage.
-                          Low-engagement months (⚠) are excluded from trendlines.
+                          Low-engagement months (⚠) and the Mo.4 disruption period (🔴) are excluded from trendlines.
+                          Mo.6 and Mo.7 shown but flagged — very small cohorts (n=4 and n=1).
                         </p>
                         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1rem" }}>
                           {([
@@ -834,6 +861,8 @@ const PublicLandingPage: React.FC = () => {
                           Mo.3 only those who returned for a third, and so on. Smaller n at higher months is expected and healthy — it means
                           the platform is continuously enrolling new learners while a committed core keeps returning.
                           Skill gains at Mo.3+ are the strongest signal of genuine capability formation.
+                          The Mo.4 dip reflects a real-world disruption — simultaneous rainy season power outages and a community leader crisis — not a learning regression.
+                          Mo.6 (n=4) and Mo.7 (n=1) represent the programme's earliest and most committed learners; shown for transparency but too small for statistical inference.
                         </p>
                       </div>
 
