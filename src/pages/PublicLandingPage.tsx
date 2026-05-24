@@ -227,35 +227,33 @@ const PublicLandingPage: React.FC = () => {
   const [questions, setQuestions] = useState<GuidingQuestion[]>([]);
 
   // ── Public aggregate view: one row per cohort_month ─────────────────────
-  interface PubMonthRow {
-    cohort_month: string;
-    site: string;
-    learner_count: number;
-    new_learner_count: number;
-    returning_learner_count: number;
+  // One row per "visit rank" = nth month of use across all learners
+  interface PubVisitRow {
+    visit_rank: number;          // 1 = learner's 1st month, 2 = 2nd, etc.
+    learner_count: number;       // how many learners have this many months of use
     total_sessions: number;
-    total_certs: number;
     avg_cognitive: number | null;
     avg_critical_thinking: number | null;
     avg_problem_solving: number | null;
     avg_creativity: number | null;
-    avg_cognitive_new: number | null;
-    avg_ct_new: number | null;
-    avg_ps_new: number | null;
-    avg_creativity_new: number | null;
-    avg_cognitive_ret: number | null;
-    avg_ct_ret: number | null;
-    avg_ps_ret: number | null;
-    avg_creativity_ret: number | null;
     avg_clarification: number | null;
+    converging_count: number;
+    insufficient_data_count: number;
     teaching_intent_count: number;
     community_application_count: number;
     enterprise_orientation_count: number;
     intergenerational_count: number;
-    converging_count: number;
-    insufficient_data_count: number;
   }
-  const [longRows, setLongRows] = useState<PubMonthRow[]>([]);
+  interface AllTimeRow {
+    total_learners: number;
+    total_sessions: number;
+    total_certs: number;
+    months_of_data: number;
+    first_month: string;
+    latest_month: string;
+  }
+  const [longRows, setLongRows]     = useState<PubVisitRow[]>([]);
+  const [allTime,  setAllTime]      = useState<AllTimeRow | null>(null);
   const [longLoading, setLongLoading] = useState(true);
 
   useEffect(() => {
@@ -296,17 +294,16 @@ const PublicLandingPage: React.FC = () => {
       if (qData)    setQuestions(qData as GuidingQuestion[]);
 
       // ── Paginated fetch of dashboard_stats for longitudinal panel ────────
-      // Simple query on the public aggregate view — no auth required, no raw rows
-      const { data: pubData, error: pubErr } = await supabase
-        .from('dashboard_stats_public')
-        .select('*')
-        .order('cohort_month', { ascending: true });
-
-      if (pubErr) {
-        console.error('[PublicLandingPage] dashboard_stats_public error:', pubErr.message, pubErr.code);
-      }
-      console.log('[PublicLandingPage] dashboard_stats_public rows:', pubData?.length ?? 0, pubData?.[0]);
-      setLongRows((pubData as PubMonthRow[]) || []);
+      // Fetch by-visit-rank data and all-time summary (both public/anon)
+      const [{ data: visitData, error: visitErr }, { data: atData, error: atErr }] = await Promise.all([
+        supabase.from('dashboard_stats_public').select('*').order('visit_rank', { ascending: true }),
+        supabase.from('dashboard_stats_alltime').select('*').single(),
+      ]);
+      if (visitErr) console.error('[PublicLandingPage] visit rows error:', visitErr.message);
+      if (atErr)    console.error('[PublicLandingPage] alltime error:',    atErr.message);
+      console.log('[PublicLandingPage] visit rows:', visitData?.length ?? 0, 'alltime:', atData);
+      setLongRows((visitData as PubVisitRow[]) || []);
+      setAllTime(atData as AllTimeRow ?? null);
       setLongLoading(false);
     })();
   }, []);
@@ -538,21 +535,20 @@ const PublicLandingPage: React.FC = () => {
               <p style={{ color: "rgba(255,255,255,0.35)", textAlign: "center" }}>Loading data…</p>
             ) : (
               <>
-                {/* ── All-time impact stats ────────────────────────── */}
+                {/* ── All-time impact stats (from dashboard_stats_alltime) ── */}
                 {(() => {
-                  const totalSessions = longRows.reduce((s,m) => s + (m.total_sessions||0), 0);
-                  const totalCerts    = longRows.reduce((s,m) => s + (m.total_certs||0), 0);
-                  const uniqueLearners = longRows.length
-                    ? longRows[longRows.length-1].learner_count
-                    : (latest?.learner_count ?? 0);
+                  const learners  = allTime?.total_learners  ?? latest?.learner_count  ?? 0;
+                  const sessions  = allTime?.total_sessions  ?? latest?.sessions_count ?? 0;
+                  const certs     = allTime?.total_certs     ?? latest?.certs_total    ?? 0;
+                  const maxVisits = longRows.length > 0 ? Math.max(...longRows.map(r => r.visit_rank)) : 0;
                   return (
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:"1rem", marginBottom:"2.5rem" }}>
                       {([
-                        { val: uniqueLearners,                              label:"Learners",         sub:"enrolled to date",   color:"#d97706" },
-                        { val: totalSessions > 0 ? totalSessions.toLocaleString() : (latest?.sessions_count?.toLocaleString() ?? 0), label:"AI Sessions", sub:"all time", color:"#7c3aed" },
-                        { val: totalCerts > 0 ? totalCerts : (latest?.certs_total ?? 0), label:"Certifications", sub:"earned", color:"#fbbf24" },
-                        { val: longRows.length > 0 ? longRows.length + " months" : "—", label:"Deployment", sub:"Jul 2025 – present", color:"#4ade80" },
-                      ] as {val:string|number,label:string,sub:string,color:string}[]).map(s => (
+                        { val: learners,                               label:"Learners",        sub:"enrolled to date",  color:"#d97706" },
+                        { val: sessions > 0 ? sessions.toLocaleString() : "—", label:"AI Sessions", sub:"all time",    color:"#7c3aed" },
+                        { val: certs > 0    ? certs                    : "—",  label:"Certifications", sub:"earned",   color:"#fbbf24" },
+                        { val: maxVisits > 0 ? `${maxVisits}+ months`  : "—",  label:"Learner retention", sub:"most persistent learners", color:"#4ade80" },
+                      ] as {val:string|number, label:string, sub:string, color:string}[]).map(s => (
                         <div key={s.label} style={{ background:"rgba(255,255,255,0.05)", border:`1px solid ${s.color}22`, borderRadius:14, padding:"1.25rem 1rem", textAlign:"center" }}>
                           <div style={{ fontFamily:"'Playfair Display',serif", fontSize:"clamp(1.8rem,4vw,2.6rem)", fontWeight:900, color:s.color, lineHeight:1 }}>{s.val}</div>
                           <div style={{ fontSize:"0.78rem", fontWeight:600, color:"#fff", marginTop:"0.4rem" }}>{s.label}</div>
@@ -572,62 +568,96 @@ const PublicLandingPage: React.FC = () => {
                   );
                   if (longRows.length === 0) return null;
 
-                  const months = [...longRows].sort((a,b) => a.cohort_month.localeCompare(b.cohort_month));
-                  const totalMonths = months.length;
-                  const fmtMonth = (iso: string) =>
-                    new Date(iso).toLocaleDateString('en-US',{month:'short',year:'2-digit'});
-                  const isLow = (m: typeof months[0]) =>
-                    m.learner_count > 0 && (m.total_sessions / m.learner_count) < 2;
+                  // longRows: one row per visit_rank (months of use)
+                  // visit_rank 1 = every learner's 1st month, 2 = 2nd, etc.
+                  const visits = [...longRows].sort((a,b) => a.visit_rank - b.visit_rank);
+                  const maxVisits = visits[visits.length - 1]?.visit_rank ?? 0;
 
-                  const withNum = months.map((m,i) => ({...m, month_num: i+1}));
-                  const maxClarf = Math.max(...withNum.map(m => m.avg_clarification ?? 0), 1);
-                  const validClarf = withNum.filter(m => !isLow(m) && (m.avg_clarification ?? 0) > 0);
+                  // Low-engagement flag: fewer than 2 sessions per learner
+                  const isLow = (v: typeof visits[0]) =>
+                    v.learner_count > 0 && (v.total_sessions / v.learner_count) < 2;
+
+                  // Scaffolding helpers
+                  const validClarf = visits.filter(v => !isLow(v) && (v.avg_clarification ?? 0) > 0);
+                  const c1Clarf    = validClarf[0]?.avg_clarification ?? 0;
                   const clarfDecline = validClarf.length > 1
-                    ? Math.round((1 - (validClarf[validClarf.length-1].avg_clarification! / validClarf[0].avg_clarification!)) * 100)
+                    ? Math.round((1 - validClarf[validClarf.length-1].avg_clarification! / c1Clarf) * 100)
                     : null;
-                  const convPct = (m: typeof months[0]) => {
-                    const valid = m.learner_count - m.insufficient_data_count;
-                    return valid > 0 ? Math.round((m.converging_count / valid) * 100) : null;
+                  const maxClarf = Math.max(...visits.map(v => v.avg_clarification ?? 0), 1);
+
+                  const convPct = (v: typeof visits[0]) => {
+                    const denom = v.learner_count - v.insufficient_data_count;
+                    return denom > 0 ? Math.round((v.converging_count / denom) * 100) : null;
                   };
-                  const rolePct = (m: typeof months[0], key: keyof typeof months[0]) =>
-                    m.learner_count > 0 ? Math.round((Number(m[key]) / m.learner_count) * 100) : 0;
-                  const totalCerts = months.reduce((s,m) => s + (m.total_certs||0), 0);
-                  const cogRetMonths = withNum.filter(m =>
-                    m.avg_cognitive_ret != null && (m.returning_learner_count||0) >= 2
-                  );
 
-                  const scafRows = withNum.map(m => {
-                    const c1 = validClarf[0]?.avg_clarification ?? 0;
-                    const cv = m.avg_clarification ?? 0;
-                    const decPct = (c1 > 0 && m.month_num > 1 && !isLow(m))
-                      ? Math.round((1 - cv/c1)*100) : null;
-                    return { ...m, decPct, cp: convPct(m) };
-                  });
+                  const rolePct = (v: typeof visits[0], key: keyof typeof visits[0]) =>
+                    v.learner_count > 0 ? Math.round((Number(v[key]) / v.learner_count) * 100) : 0;
 
-                  const A = { green:"#4ade80", amber:"#fbbf24", purple:"#a78bfa", teal:"#2dd4bf", red:"#f87171" };
+                  // Skill chart data — skip low-engagement visits for trendline
+                  const skillVisits = visits.filter(v => !isLow(v) && v.avg_critical_thinking != null);
+
+                  const A = { green:"#4ade80", amber:"#fbbf24", purple:"#a78bfa", teal:"#2dd4bf", red:"#f87171", blue:"#60a5fa" };
                   const card: React.CSSProperties = { background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.09)", borderRadius:14, padding:"1.5rem" };
                   const lbl: React.CSSProperties  = { fontSize:"0.67rem", fontWeight:700 as const, letterSpacing:"0.1em", textTransform:"uppercase" as const, marginBottom:"0.6rem" };
                   const note: React.CSSProperties = { fontSize:"0.7rem", color:"rgba(255,255,255,0.35)", lineHeight:1.6, marginTop:"0.75rem" };
 
+                  // SVG mini line chart helper
+                  const MiniLine = ({
+                    data, color, label, yMax = 100,
+                  }: { data: {x:number, y:number}[], color:string, label:string, yMax?:number }) => {
+                    if (data.length < 2) return null;
+                    const W=400, H=90, PL=28, PR=6, PT=8, PB=24;
+                    const iW=W-PL-PR, iH=H-PT-PB;
+                    const xs = data.map(d=>d.x);
+                    const minX=Math.min(...xs), maxX=Math.max(...xs);
+                    const xP=(x:number)=>PL+(maxX===minX?0.5:(x-minX)/(maxX-minX))*iW;
+                    const yP=(y:number)=>PT+(1-y/yMax)*iH;
+                    const path = data.map((d,i)=>`${i===0?"M":"L"}${xP(d.x).toFixed(1)},${yP(d.y).toFixed(1)}`).join(" ");
+                    const ticks = [0, 25, 50, 75, 100].filter(t => t <= yMax);
+                    return (
+                      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", display:"block" }}>
+                        {ticks.map(t=>(
+                          <g key={t}>
+                            <line x1={PL} x2={W-PR} y1={yP(t)} y2={yP(t)} stroke="rgba(255,255,255,0.05)" strokeWidth={1}/>
+                            <text x={PL-3} y={yP(t)+4} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.22)">{t}</text>
+                          </g>
+                        ))}
+                        {data.map((d,i)=>(
+                          <text key={i} x={xP(d.x)} y={H-3} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.3)">
+                            Mo.{d.x}
+                          </text>
+                        ))}
+                        <path d={path} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round"/>
+                        {data.map((d,i)=>(
+                          <circle key={i} cx={xP(d.x)} cy={yP(d.y)} r={3.5} fill={color}/>
+                        ))}
+                        {data.map((d,i)=>(
+                          <text key={i} x={xP(d.x)} y={yP(d.y)-7} textAnchor="middle" fontSize={8.5} fontWeight="bold" fill={color}>{d.y}</text>
+                        ))}
+                      </svg>
+                    );
+                  };
+
                   return (
                     <div style={{ marginTop:"1rem" }}>
 
-                      {/* Header */}
+                      {/* Section header */}
                       <div style={{ marginBottom:"2rem" }}>
                         <div style={{ fontSize:"0.68rem", fontWeight:700, color:A.amber, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:"0.45rem" }}>
-                          Longitudinal Evidence · {totalMonths} Months · Persistent Learners
+                          Longitudinal Evidence · {maxVisits} Months of Use Tracked · Persistent Learners
                         </div>
                         <h3 style={{ fontFamily:"'Playfair Display',serif", fontSize:"clamp(1.3rem,3vw,1.9rem)", fontWeight:700, color:"#fff", margin:"0 0 0.5rem" }}>
                           What happens when learners return
                         </h3>
                         <p style={{ fontSize:"0.85rem", color:"rgba(255,255,255,0.5)", lineHeight:1.65, maxWidth:640, margin:0 }}>
-                          Data from {totalMonths} monthly cohorts, AI-assessed from session transcripts.
-                          Months marked ⚠ have fewer than 2 sessions per learner — treat with caution.
+                          Each column represents learners at that stage of their journey — Mo.1 = everyone's first month,
+                          Mo.2 = every learner's second month, and so on.
+                          Months marked ⚠ have fewer than 2 sessions per learner on average.
                           All findings are associative; no control group.
                         </p>
                       </div>
 
-                      {/* Row 1: Scaffolding table + hero */}
+                      {/* Row 1: Scaffolding table + decline hero */}
                       <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:"1.25rem", marginBottom:"1.25rem", alignItems:"start" }}>
 
                         <div style={card}>
@@ -640,36 +670,41 @@ const PublicLandingPage: React.FC = () => {
                             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"0.78rem" }}>
                               <thead>
                                 <tr style={{ borderBottom:"1px solid rgba(255,255,255,0.1)" }}>
-                                  {["Month","Clarif/session","Change","% Converging","Sessions"].map(h => (
+                                  {["Month of use","n learners","Clarif/session","Change","% Converging","Sessions"].map(h => (
                                     <th key={h} style={{ padding:"0.4rem 0.6rem", textAlign:"left", fontSize:"0.65rem", fontWeight:700, color:"rgba(255,255,255,0.4)", letterSpacing:"0.07em", textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>
                                   ))}
                                 </tr>
                               </thead>
                               <tbody>
-                                {scafRows.map((m,i) => {
-                                  const low = isLow(m);
-                                  const cv = m.avg_clarification ?? 0;
-                                  const isNote = m.month_num === 5 && m.cp === 100;
+                                {visits.map((v,i) => {
+                                  const low = isLow(v);
+                                  const cv  = v.avg_clarification ?? 0;
+                                  const cp  = convPct(v);
+                                  const decPct = (c1Clarf > 0 && v.visit_rank > 1 && !low)
+                                    ? Math.round((1 - cv / c1Clarf) * 100) : null;
                                   return (
-                                    <tr key={i} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)", opacity:low?0.5:1 }}>
-                                      <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.85)", fontWeight:500, whiteSpace:"nowrap" }}>
-                                        Mo.{m.month_num} (n={m.learner_count}){low?" ⚠":""}
+                                    <tr key={i} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)", opacity:low ? 0.45 : 1 }}>
+                                      <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.85)", fontWeight:600, whiteSpace:"nowrap" }}>
+                                        Mo.{v.visit_rank}{low ? " ⚠" : ""}
+                                      </td>
+                                      <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.5)", fontFamily:"monospace" }}>
+                                        {v.learner_count}
                                       </td>
                                       <td style={{ padding:"0.45rem 0.6rem", fontFamily:"monospace", fontWeight:700,
-                                        color: cv===0?"rgba(255,255,255,0.2)": cv<3?A.green: cv>8?A.red:A.amber }}>
-                                        {cv>0 ? cv.toFixed(2) : "—"}
+                                        color: cv===0 ? "rgba(255,255,255,0.2)" : cv<3 ? A.green : cv>8 ? A.red : A.amber }}>
+                                        {cv > 0 ? cv.toFixed(2) : "—"}
                                       </td>
                                       <td style={{ padding:"0.45rem 0.6rem", fontWeight:700,
-                                        color: m.decPct==null?"rgba(255,255,255,0.2)": m.decPct>0?A.green:A.red }}>
-                                        {m.decPct==null?"—": m.decPct>0?`−${m.decPct}%`:`+${Math.abs(m.decPct)}%`}
+                                        color: decPct==null ? "rgba(255,255,255,0.2)" : decPct>0 ? A.green : A.red }}>
+                                        {decPct==null ? "—" : decPct>0 ? `−${decPct}%` : `+${Math.abs(decPct)}%`}
                                       </td>
                                       <td style={{ padding:"0.45rem 0.6rem",
-                                        color: m.cp==null?"rgba(255,255,255,0.2)": m.cp>=25?A.green: m.cp>0?A.teal:"rgba(255,255,255,0.3)",
-                                        fontWeight: m.cp!=null&&m.cp>0?700:400 }}>
-                                        {m.cp==null?"—":`${m.cp}%${isNote?"†":""}`}
+                                        color: cp==null ? "rgba(255,255,255,0.2)" : cp>=25 ? A.green : cp>0 ? A.teal : "rgba(255,255,255,0.3)",
+                                        fontWeight: cp!=null && cp>0 ? 700 : 400 }}>
+                                        {cp==null ? "—" : `${cp}%`}
                                       </td>
                                       <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.35)", fontFamily:"monospace", fontSize:"0.72rem" }}>
-                                        {m.total_sessions>0 ? m.total_sessions.toLocaleString() : "—"}
+                                        {v.total_sessions > 0 ? v.total_sessions.toLocaleString() : "—"}
                                       </td>
                                     </tr>
                                   );
@@ -678,200 +713,127 @@ const PublicLandingPage: React.FC = () => {
                             </table>
                           </div>
                           <p style={note}>
-                            ⚠ months with &lt;2 sessions/learner · † month 5 convergence based on n=1 valid-trend learner ·
-                            Months 1–3 show the core trend · All claims associative · no control group
+                            Mo.N = every learner's Nth month of use. ⚠ = fewer than 2 sessions per learner on average — scores unreliable.
+                            All claims are associative · no control group.
                           </p>
                         </div>
 
                         {clarfDecline !== null && (
-                          <div style={{...card, textAlign:"center", minWidth:148, borderColor:`${A.green}33`}}>
+                          <div style={{...card, textAlign:"center", minWidth:140, borderColor:`${A.green}33`}}>
                             <div style={{...lbl, color:A.green}}>Scaffolding decline</div>
                             <div style={{ fontFamily:"'Playfair Display',serif", fontSize:"3.4rem", fontWeight:900, color:A.green, lineHeight:1 }}>
                               {clarfDecline}%
                             </div>
                             <div style={{ fontSize:"0.72rem", color:"rgba(255,255,255,0.45)", marginTop:"0.4rem", lineHeight:1.5 }}>
-                              fewer AI prompts<br/>per session<br/>Mo.1 → Mo.5
+                              fewer AI prompts<br/>per session<br/>Mo.1 → latest
                             </div>
-                            {totalCerts > 0 && (
-                              <>
-                                <div style={{ height:1, background:"rgba(255,255,255,0.07)", margin:"1rem 0" }} />
-                                <div style={{...lbl, color:A.amber}}>Certifications</div>
-                                <div style={{ fontFamily:"'Playfair Display',serif", fontSize:"2.6rem", fontWeight:900, color:A.amber, lineHeight:1 }}>
-                                  {totalCerts}
-                                </div>
-                                <div style={{ fontSize:"0.7rem", color:"rgba(255,255,255,0.38)", marginTop:"0.3rem" }}>earned all time</div>
-                              </>
-                            )}
                           </div>
                         )}
                       </div>
 
-                      {/* Row 2: Cognitive skills + Role readiness */}
-                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1.25rem", marginBottom:"1.25rem" }}>
-
-                        {/* Cognitive skills SVG line chart */}
-                        <div style={card}>
-                          <div style={{...lbl, color:A.purple}}>Cognitive skills — returning vs new learners (0–100)</div>
-                          <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1rem", lineHeight:1.55 }}>
-                            Returning learners consistently score higher than first-time visitors.
-                            The gap reflects genuine capability formation, not a selection effect.
-                          </p>
-                          {(() => {
-                            const allM = withNum.filter(m => m.avg_cognitive_new != null || m.avg_cognitive_ret != null);
-                            if (allM.length < 2) return (
-                              <div style={{ fontSize:"0.78rem", color:"rgba(255,255,255,0.3)", fontStyle:"italic", padding:"1rem 0" }}>
-                                Accumulating data… ({allM.length} month{allM.length!==1?"s":""} with data)
-                              </div>
-                            );
-                            const W=520, H=140, PL=28, PR=8, PT=12, PB=28;
-                            const iW=W-PL-PR, iH=H-PT-PB;
-                            const xP=(i:number)=>PL+(i/Math.max(allM.length-1,1))*iW;
-                            const yP=(v:number)=>PT+(1-v/100)*iH;
-                            const retPts = allM.filter(m => m.avg_cognitive_ret!=null);
-                            const newPts = allM.filter(m => m.avg_cognitive_new!=null);
-                            const rPath = retPts.map((m,i)=>`${i===0?"M":"L"}${xP(allM.indexOf(m)).toFixed(1)},${yP(m.avg_cognitive_ret!).toFixed(1)}`).join(" ");
-                            const nPath = newPts.map((m,i)=>`${i===0?"M":"L"}${xP(allM.indexOf(m)).toFixed(1)},${yP(m.avg_cognitive_new!).toFixed(1)}`).join(" ");
-                            const fillPts = [
-                              ...retPts.map(m=>`${xP(allM.indexOf(m)).toFixed(1)},${yP(m.avg_cognitive_ret!).toFixed(1)}`),
-                              ...[...newPts].reverse().map(m=>`${xP(allM.indexOf(m)).toFixed(1)},${yP(m.avg_cognitive_new!).toFixed(1)}`),
-                            ].join(" ");
-                            return (
-                              <div>
-                                <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", minWidth:240 }}>
-                                  {[0,25,50,75,100].map(v=>(
-                                    <g key={v}>
-                                      <line x1={PL} x2={W-PR} y1={yP(v)} y2={yP(v)} stroke="rgba(255,255,255,0.06)" strokeWidth={1}/>
-                                      <text x={PL-3} y={yP(v)+4} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.25)">{v}</text>
-                                    </g>
-                                  ))}
-                                  {allM.map((m,i)=>(
-                                    <text key={i} x={xP(i)} y={H-4} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.3)">{fmtMonth(m.cohort_month)}</text>
-                                  ))}
-                                  {retPts.length>=2 && newPts.length>=2 && <polygon points={fillPts} fill="rgba(167,139,250,0.09)"/>}
-                                  {retPts.length>=2 && <path d={rPath} fill="none" stroke={A.purple} strokeWidth={2.5} strokeLinejoin="round"/>}
-                                  {newPts.length>=2 && <path d={nPath} fill="none" stroke="rgba(255,255,255,0.28)" strokeWidth={1.5} strokeDasharray="4,3" strokeLinejoin="round"/>}
-                                  {retPts.map((m,i)=><circle key={i} cx={xP(allM.indexOf(m))} cy={yP(m.avg_cognitive_ret!)} r={3} fill={A.purple}/>)}
-                                  {newPts.map((m,i)=><circle key={i} cx={xP(allM.indexOf(m))} cy={yP(m.avg_cognitive_new!)} r={2.5} fill="rgba(255,255,255,0.45)"/>)}
-                                </svg>
-                                <div style={{ display:"flex", gap:"1.2rem", marginTop:"0.5rem", flexWrap:"wrap" }}>
-                                  <span style={{ fontSize:"0.7rem", color:A.purple, display:"flex", alignItems:"center", gap:5 }}>
-                                    <svg width="18" height="4" style={{flexShrink:0}}><line x1="0" y1="2" x2="18" y2="2" stroke={A.purple} strokeWidth="2.5"/></svg>
-                                    Returning learners
-                                  </span>
-                                  <span style={{ fontSize:"0.7rem", color:"rgba(255,255,255,0.38)", display:"flex", alignItems:"center", gap:5 }}>
-                                    <svg width="18" height="4" style={{flexShrink:0}}><line x1="0" y1="2" x2="18" y2="2" stroke="rgba(255,255,255,0.38)" strokeWidth="1.5" strokeDasharray="4,3"/></svg>
-                                    First-time learners
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })()}
-                          <p style={note}>
-                            Cognitive score 0–100, AI-assessed monthly. Score reflects comprehension, reasoning depth,
-                            and quality of AI interactions. New learner scores naturally start lower — this is expected.
-                          </p>
+                      {/* Row 2: Skill charts (2×2 grid) */}
+                      <div style={{ marginBottom:"1.25rem" }}>
+                        <div style={{...lbl, color:A.purple, marginBottom:"0.75rem"}}>
+                          Skill development by months of use — persistent learners (0–100)
                         </div>
+                        <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1.25rem", lineHeight:1.55, maxWidth:700 }}>
+                          Scores measured from AI session transcripts. Each point = average score for all learners at that stage.
+                          Low-engagement months (⚠) are excluded from trendlines.
+                        </p>
+                        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1rem" }}>
+                          {([
+                            { key:"avg_critical_thinking" as const, label:"Critical Thinking", color:A.teal   },
+                            { key:"avg_problem_solving"   as const, label:"Problem Solving",   color:A.green  },
+                            { key:"avg_creativity"        as const, label:"Creativity",         color:A.purple },
+                            { key:"avg_cognitive"         as const, label:"Cognitive",          color:A.amber  },
+                          ] as {key: keyof typeof visits[0], label:string, color:string}[]).map(skill => {
+                            const pts = skillVisits
+                              .filter(v => v[skill.key] != null)
+                              .map(v => ({ x: v.visit_rank, y: Number(v[skill.key]) }));
+                            return (
+                              <div key={skill.key} style={card}>
+                                <div style={{ fontSize:"0.7rem", fontWeight:700, color:skill.color, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"0.5rem" }}>
+                                  {skill.label}
+                                </div>
+                                {pts.length >= 2 ? (
+                                  <MiniLine data={pts} color={skill.color} label={skill.label} />
+                                ) : (
+                                  <div style={{ fontSize:"0.75rem", color:"rgba(255,255,255,0.25)", fontStyle:"italic", padding:"1rem 0", textAlign:"center" }}>
+                                    Accumulating data…
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
 
-                        {/* Role readiness bar charts */}
-                        <div style={card}>
-                          <div style={{...lbl, color:A.amber}}>Role readiness signals — % of learners per month</div>
-                          <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1rem", lineHeight:1.55 }}>
-                            Detected via AI transcript analysis — unprompted evidence of applying learning beyond the platform.
-                          </p>
+                      {/* Row 3: Role readiness bar charts */}
+                      <div style={{ ...card, marginBottom:"1.25rem" }}>
+                        <div style={{...lbl, color:A.amber}}>
+                          Role readiness signals by months of use — % of learners per stage
+                        </div>
+                        <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1.25rem", lineHeight:1.55 }}>
+                          Detected via AI transcript analysis — unprompted evidence of applying learning beyond the platform.
+                          Each bar group = one signal; bars left→right = Mo.1, Mo.2, Mo.3…
+                        </p>
+                        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(180px,1fr))", gap:"1.25rem" }}>
                           {([
                             { key:"teaching_intent_count"        as const, label:"Teaching intent",       desc:"plans to teach peers, family, or neighbours" },
                             { key:"community_application_count"  as const, label:"Community application", desc:"applied AI to a real local problem" },
                             { key:"enterprise_orientation_count" as const, label:"Enterprise orientation", desc:"referenced a business or income plan" },
                             { key:"intergenerational_count"      as const, label:"Intergenerational",     desc:"knowledge shared across age groups" },
-                          ] as {key:keyof typeof months[0], label:string, desc:string}[]).map(item => {
-                            const vals = months.map(m => rolePct(m, item.key));
+                          ] as {key: keyof typeof visits[0], label:string, desc:string}[]).map(item => {
+                            const vals = visits.map(v => ({ pct: rolePct(v, item.key), low: isLow(v), rank: v.visit_rank }));
+                            const maxPct = Math.max(...vals.map(v => v.pct), 1);
                             return (
-                              <div key={String(item.key)} style={{ marginBottom:"1rem" }}>
-                                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"0.3rem" }}>
-                                  <span style={{ fontSize:"0.75rem", color:"rgba(255,255,255,0.75)", fontWeight:600 }}>{item.label}</span>
-                                  <span style={{ fontSize:"0.7rem", color:A.amber, fontWeight:700 }}>{vals[vals.length-1]}% latest</span>
-                                </div>
-                                <div style={{ display:"flex", alignItems:"flex-end", gap:2, height:38 }}>
-                                  {months.map((m,i) => {
-                                    const v = vals[i];
-                                    const barH = Math.max(2,(v/100)*38);
-                                    const opacity = 0.25 + (i/Math.max(months.length-1,1))*0.75;
+                              <div key={String(item.key)}>
+                                <div style={{ fontSize:"0.75rem", fontWeight:600, color:"rgba(255,255,255,0.8)", marginBottom:"0.35rem" }}>{item.label}</div>
+                                <div style={{ fontSize:"0.65rem", color:"rgba(255,255,255,0.3)", marginBottom:"0.6rem", lineHeight:1.4 }}>{item.desc}</div>
+                                <div style={{ display:"flex", alignItems:"flex-end", gap:2, height:64 }}>
+                                  {vals.map((v,i) => {
+                                    const barH = Math.max(2, (v.pct/100)*64);
+                                    const alpha = 0.2 + (i/Math.max(vals.length-1,1))*0.8;
                                     return (
-                                      <div key={i} style={{ flex:1, height:`${barH}px`, borderRadius:"2px 2px 0 0",
-                                        background:`rgba(251,191,36,${opacity})`, opacity:isLow(m)?0.25:1, minWidth:4 }}
-                                        title={`${fmtMonth(m.cohort_month)}: ${v}%${isLow(m)?" ⚠":""}`}
-                                      />
+                                      <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", minWidth:0, gap:2 }}>
+                                        {v.pct > 0 && !v.low && (
+                                          <span style={{ fontSize:"0.55rem", color:A.amber, fontWeight:700, lineHeight:1 }}>{v.pct}%</span>
+                                        )}
+                                        <div style={{
+                                          width:"100%", height:`${barH}px`,
+                                          background: v.low ? "rgba(255,255,255,0.06)" : `rgba(251,191,36,${alpha})`,
+                                          borderRadius:"2px 2px 0 0",
+                                          border: v.low ? "1px dashed rgba(255,255,255,0.1)" : "none",
+                                          minHeight:2,
+                                        }}
+                                          title={`Mo.${v.rank}: ${v.pct}%${v.low?" (⚠ low sessions)":""}`}
+                                        />
+                                      </div>
                                     );
                                   })}
                                 </div>
-                                <div style={{ display:"flex", justifyContent:"space-between", marginTop:2 }}>
-                                  <span style={{ fontSize:"0.6rem", color:"rgba(255,255,255,0.2)" }}>{fmtMonth(months[0].cohort_month)}</span>
-                                  <span style={{ fontSize:"0.6rem", color:"rgba(255,255,255,0.2)" }}>{fmtMonth(months[months.length-1].cohort_month)}</span>
+                                <div style={{ display:"flex", justifyContent:"space-between", borderTop:"1px solid rgba(255,255,255,0.05)", paddingTop:"0.25rem", marginTop:"0.1rem" }}>
+                                  <span style={{ fontSize:"0.58rem", color:"rgba(255,255,255,0.2)" }}>Mo.1</span>
+                                  <span style={{ fontSize:"0.58rem", color:"rgba(255,255,255,0.2)" }}>Mo.{maxVisits}</span>
                                 </div>
                               </div>
                             );
                           })}
-                          <p style={note}>
-                            Bars left → right: {fmtMonth(months[0].cohort_month)} → {fmtMonth(months[months.length-1].cohort_month)}.
-                            Darker = more recent. ⚠ months dimmed.
-                          </p>
                         </div>
-                      </div>
-
-                      {/* Row 3: Scaffolding bar chart */}
-                      <div style={{...card, marginBottom:"1.25rem"}}>
-                        <div style={{...lbl, color:A.green}}>Clarifications per session — full {totalMonths}-month timeline</div>
-                        <div style={{ display:"flex", alignItems:"flex-end", gap:3, height:88, marginBottom:"0.35rem" }}>
-                          {withNum.map((m,i) => {
-                            const v = m.avg_clarification ?? 0;
-                            const low = isLow(m);
-                            const barH = v>0 ? Math.max(4,(v/maxClarf)*88) : 4;
-                            return (
-                              <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", minWidth:0, gap:2 }}>
-                                <span style={{ fontSize:"0.58rem", color:"rgba(255,255,255,0.5)", fontFamily:"monospace", fontWeight:700 }}>
-                                  {v>0 ? v.toFixed(1) : ""}
-                                </span>
-                                <div style={{ width:"100%", height:`${barH}px`, borderRadius:"3px 3px 0 0",
-                                  background: low?"rgba(255,255,255,0.08)": v<3?A.green: v<6?A.amber:A.red,
-                                  border: low?"1px dashed rgba(255,255,255,0.12)":"none",
-                                  opacity: low?0.45:1 }}
-                                  title={`${fmtMonth(m.cohort_month)}: ${v.toFixed(2)}${low?" ⚠":""}`}
-                                />
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div style={{ display:"flex", borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:"0.3rem" }}>
-                          {withNum.map((m,i) => (
-                            <div key={i} style={{ flex:1, textAlign:"center", fontSize:"0.58rem",
-                              color:isLow(m)?"rgba(255,255,255,0.18)":"rgba(255,255,255,0.38)", whiteSpace:"nowrap" }}>
-                              {fmtMonth(m.cohort_month)}{isLow(m)?" ⚠":""}
-                            </div>
-                          ))}
-                        </div>
-                        <div style={{ display:"flex", gap:"1.25rem", marginTop:"0.75rem", flexWrap:"wrap" }}>
-                          {([
-                            { color:A.green,                    label:"< 3 — learner-directed" },
-                            { color:A.amber,                    label:"3–8 — mixed" },
-                            { color:A.red,                      label:"> 8 — AI-guided" },
-                            { color:"rgba(255,255,255,0.12)",   label:"⚠ sparse sessions" },
-                          ] as {color:string,label:string}[]).map(l => (
-                            <span key={l.label} style={{ display:"flex", alignItems:"center", gap:5, fontSize:"0.68rem", color:"rgba(255,255,255,0.5)" }}>
-                              <span style={{ width:10, height:10, borderRadius:2, background:l.color, flexShrink:0, display:"inline-block" }}/>
-                              {l.label}
-                            </span>
-                          ))}
-                        </div>
+                        <p style={note}>
+                          Bars left→right = Mo.1 to Mo.{maxVisits} (months of use). Darker = more months of use. ⚠ months dimmed.
+                        </p>
                       </div>
 
                       {/* Composition note */}
                       <div style={{ background:"rgba(167,139,250,0.06)", border:"1px solid rgba(167,139,250,0.15)", borderRadius:12, padding:"1rem 1.25rem", display:"flex", gap:"0.75rem", alignItems:"flex-start" }}>
                         <span style={{ fontSize:"1.1rem", flexShrink:0 }}>📈</span>
                         <p style={{ margin:0, fontSize:"0.8rem", color:"rgba(255,255,255,0.55)", lineHeight:1.7 }}>
-                          <strong style={{ color:"#c4b5fd", fontWeight:700 }}>Understanding score trends.</strong>{" "}
-                          Month-over-month averages reflect cohort composition as much as individual growth.
-                          When new learners join, the cohort average shifts downward even as returning learners continue to progress.
-                          The cognitive skills chart above separates these effects — returning learner scores are the better signal of genuine capability formation.
+                          <strong style={{ color:"#c4b5fd", fontWeight:700 }}>Understanding these charts.</strong>{" "}
+                          Mo.1 shows every learner's first month — a large, diverse group. Mo.2 shows only learners who returned for a second month,
+                          Mo.3 only those who returned for a third, and so on. Smaller n at higher months is expected and healthy — it means
+                          the platform is continuously enrolling new learners while a committed core keeps returning.
+                          Skill gains at Mo.3+ are the strongest signal of genuine capability formation.
                         </p>
                       </div>
 
