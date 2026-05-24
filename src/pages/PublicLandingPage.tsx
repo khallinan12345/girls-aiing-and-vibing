@@ -570,7 +570,7 @@ const PublicLandingPage: React.FC = () => {
 
                   // longRows: one row per visit_rank (months of use)
                   // visit_rank 1 = every learner's 1st month, 2 = 2nd, etc.
-                  const visits = [...longRows].sort((a,b) => a.visit_rank - b.visit_rank);
+                  const visits = [...longRows].sort((a,b) => a.visit_rank - b.visit_rank).filter(v => v.learner_count >= 5);
                   const maxVisits = visits[visits.length - 1]?.visit_rank ?? 0;
 
                   // Low-engagement flag: fewer than 2 sessions per learner
@@ -739,7 +739,7 @@ const PublicLandingPage: React.FC = () => {
                           <p style={note}>
                             Mo.N = every learner's Nth month of use. ⚠ = fewer than 2 sessions per learner on average — scores unreliable.
                             🔴 Mo.4 = disruption period (solar power outage + leader home fire) — interpret with caution.
-                            Mo.6 (n=4) and Mo.7 (n=1) are shown for completeness but fall below the 5-learner anonymity threshold — findings not generalisable.
+                            Months with fewer than 5 learners are not shown (k-anonymity threshold).
                             All claims are associative · no control group.
                           </p>
                         </div>
@@ -764,8 +764,7 @@ const PublicLandingPage: React.FC = () => {
                         </div>
                         <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1.25rem", lineHeight:1.55, maxWidth:700 }}>
                           Scores measured from AI session transcripts. Each point = average score for all learners at that stage.
-                          Low-engagement months (⚠) and the Mo.4 disruption period (🔴) are excluded from trendlines.
-                          Mo.6 and Mo.7 shown but flagged — very small cohorts (n=4 and n=1).
+                          Low-engagement months (⚠), the Mo.4 disruption period (🔴), and months below the 5-learner k-anonymity threshold are excluded from trendlines.
                         </p>
                         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1rem" }}>
                           {([
@@ -862,7 +861,7 @@ const PublicLandingPage: React.FC = () => {
                           the platform is continuously enrolling new learners while a committed core keeps returning.
                           Skill gains at Mo.3+ are the strongest signal of genuine capability formation.
                           The Mo.4 dip reflects a real-world disruption — simultaneous rainy season power outages and a community leader crisis — not a learning regression.
-                          Mo.6 (n=4) and Mo.7 (n=1) represent the programme's earliest and most committed learners; shown for transparency but too small for statistical inference.
+                          Months with fewer than 5 learners are not shown in accordance with k-anonymity privacy standards.
                         </p>
                       </div>
 
