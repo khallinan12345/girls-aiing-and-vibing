@@ -231,13 +231,23 @@ const PublicLandingPage: React.FC = () => {
     cohort_month: string;
     site: string;
     learner_count: number;
+    new_learner_count: number;
+    returning_learner_count: number;
     total_sessions: number;
+    total_certs: number;
     avg_cognitive: number | null;
     avg_critical_thinking: number | null;
     avg_problem_solving: number | null;
     avg_creativity: number | null;
+    avg_cognitive_new: number | null;
+    avg_ct_new: number | null;
+    avg_ps_new: number | null;
+    avg_creativity_new: number | null;
+    avg_cognitive_ret: number | null;
+    avg_ct_ret: number | null;
+    avg_ps_ret: number | null;
+    avg_creativity_ret: number | null;
     avg_clarification: number | null;
-    total_certs: number;
     teaching_intent_count: number;
     community_application_count: number;
     enterprise_orientation_count: number;
@@ -528,361 +538,343 @@ const PublicLandingPage: React.FC = () => {
               <p style={{ color: "rgba(255,255,255,0.35)", textAlign: "center" }}>Loading data…</p>
             ) : (
               <>
-                {/* Primary stat grid */}
-                <div className="stat-g" style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))",
-                  gap: "1rem", marginBottom: "2rem",
-                }}>
-                  <StatCard value={latest?.learner_count  ?? 0} label="Learners Enrolled"    accent="#d97706" />
-                  <StatCard value={latest?.assessed_count ?? 0} label="Assessed This Month"  accent="#0d9488" />
-                  <StatCard value={latest?.sessions_count ?? 0} label="Learning Sessions"    accent="#7c3aed" />
-                  <StatCard value={latest?.certs_total    ?? 0} label="Proficiency Sessions" sub="sessions achieving mastery" accent="#fbbf24" />
-                  <StatCard value={latest?.role_ready_count ?? 0} label="Role-Ready" sub="applying skills beyond the platform" accent="#4ade80" />
-                  <StatCard value={latest?.converging_count ?? 0} label="Reducing AI Reliance" sub="needing less scaffolding" accent="#a78bfa" />
-                </div>
-
-                {/* Score breakdown */}
-                <div className="score-g" style={{
-                  display: "grid", gridTemplateColumns: "1fr 1fr",
-                  gap: "1.5rem",
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.07)",
-                  borderRadius: 16, padding: "2rem",
-                }}>
-                  <div>
-                    <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#d97706", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "1.1rem" }}>
-                      Skill Dimensions (0–100)
-                    </div>
-                    <ScoreBar label="Cognitive"         value={latest?.cognitive_mean}         color="#d97706" />
-                    <ScoreBar label="Critical Thinking" value={latest?.critical_thinking_mean}  color="#0d9488" />
-                    <ScoreBar label="Problem Solving"   value={latest?.problem_solving_mean}    color="#7c3aed" />
-                    <ScoreBar label="Creativity"        value={latest?.creativity_mean}         color="#f472b6" />
-                    <ScoreBar label="Productive Use"    value={latest?.pue_mean}                color="#4ade80" />
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
-                    <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#0d9488", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.75rem" }}>
-                      Cohort Overall Average
-                    </div>
-                    <div style={{
-                      fontFamily: "'Playfair Display', serif",
-                      fontSize: "clamp(3rem,8vw,5rem)",
-                      fontWeight: 900, color: "#fff", lineHeight: 1,
-                    }}>
-                      {latest?.avg_mean?.toFixed(1) ?? "—"}
-                    </div>
-                    <div style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.38)", marginTop: "0.4rem", marginBottom: "1rem" }}>out of 100</div>
-
-                    {/* Scaffolding convergence bar */}
-                    {latest?.structured_l3_pct != null && (
-                      <div style={{ width: "100%", marginBottom: "1rem" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem" }}>
-                          <span style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.55)" }}>Independent AI Use</span>
-                          <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#a78bfa" }}>{latest.structured_l3_pct.toFixed(0)}%</span>
+                {/* ── All-time impact stats ────────────────────────── */}
+                {(() => {
+                  const totalSessions = longRows.reduce((s,m) => s + (m.total_sessions||0), 0);
+                  const totalCerts    = longRows.reduce((s,m) => s + (m.total_certs||0), 0);
+                  const uniqueLearners = longRows.length
+                    ? longRows[longRows.length-1].learner_count
+                    : (latest?.learner_count ?? 0);
+                  return (
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:"1rem", marginBottom:"2.5rem" }}>
+                      {([
+                        { val: uniqueLearners,                              label:"Learners",         sub:"enrolled to date",   color:"#d97706" },
+                        { val: totalSessions > 0 ? totalSessions.toLocaleString() : (latest?.sessions_count?.toLocaleString() ?? 0), label:"AI Sessions", sub:"all time", color:"#7c3aed" },
+                        { val: totalCerts > 0 ? totalCerts : (latest?.certs_total ?? 0), label:"Certifications", sub:"earned", color:"#fbbf24" },
+                        { val: longRows.length > 0 ? longRows.length + " months" : "—", label:"Deployment", sub:"Jul 2025 – present", color:"#4ade80" },
+                      ] as {val:string|number,label:string,sub:string,color:string}[]).map(s => (
+                        <div key={s.label} style={{ background:"rgba(255,255,255,0.05)", border:`1px solid ${s.color}22`, borderRadius:14, padding:"1.25rem 1rem", textAlign:"center" }}>
+                          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:"clamp(1.8rem,4vw,2.6rem)", fontWeight:900, color:s.color, lineHeight:1 }}>{s.val}</div>
+                          <div style={{ fontSize:"0.78rem", fontWeight:600, color:"#fff", marginTop:"0.4rem" }}>{s.label}</div>
+                          <div style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.38)", marginTop:"0.15rem" }}>{s.sub}</div>
                         </div>
-                        <div style={{ height: 4, background: "rgba(255,255,255,0.09)", borderRadius: 99, overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${latest.structured_l3_pct}%`, background: "#a78bfa", borderRadius: 99, transition: "width 1.4s cubic-bezier(0.16,1,0.3,1)" }} />
-                        </div>
-                        <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.35)", marginTop: "0.2rem" }}>learners using AI without guided scaffolding</div>
-                      </div>
-                    )}
-
-                    <p style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.45)", lineHeight: 1.68, margin: 0, maxWidth: 260 }}>
-                      Scores are AI-assessed monthly. As learners grow, many move from structured guided modules toward independent, self-directed AI use — asking their own questions, exploring beyond the curriculum.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Longitudinal table */}
-                {allRows.length > 1 && (
-                  <div style={{ marginTop: "2rem" }}>
-                    <div style={{ fontSize: "0.69rem", fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.7rem" }}>
-                      Month-over-Month Progress
+                      ))}
                     </div>
-                    <div style={{ overflowX: "auto" }}>
-                      <table className="long-table">
-                        <thead>
-                          <tr>
-                            <th>Period</th>
-                            <th>Learners</th>
-                            <th>Assessed</th>
-                            <th>Sessions</th>
-                            <th>Avg Score</th>
-                            <th>Δ</th>
-                            <th>Role-Ready</th>
-                            <th>Certs</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {allRows.map((row, i) => (
-                            <tr key={i}>
-                              <td>{row.period_label}</td>
-                              <td>{row.learner_count}</td>
-                              <td>{row.assessed_count}</td>
-                              <td>{row.sessions_count?.toLocaleString()}</td>
-                              <td>{row.avg_mean?.toFixed(1) ?? "—"}</td>
-                              <td style={{
-                                color: row.avg_delta == null ? "rgba(255,255,255,0.25)"
-                                  : row.avg_delta >= 0 ? "#4ade80" : "#f87171",
-                                fontWeight: 700,
-                              }}>
-                                {row.avg_delta == null ? "—"
-                                  : `${row.avg_delta >= 0 ? "+" : ""}${row.avg_delta.toFixed(1)}`}
-                              </td>
-                              <td>{row.role_ready_count ?? "—"}</td>
-                              <td>{row.certs_total ?? "—"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Cohort growth note */}
-                    <div style={{
-                      marginTop: "1.25rem",
-                      background: "rgba(217,119,6,0.1)",
-                      border: "1px solid rgba(217,119,6,0.25)",
-                      borderRadius: 10,
-                      padding: "1rem 1.25rem",
-                      display: "flex", alignItems: "flex-start", gap: "0.75rem",
-                    }}>
-                      <span style={{ fontSize: "1.1rem", flexShrink: 0, marginTop: "0.05rem" }}>📈</span>
-                      <p style={{ margin: 0, fontSize: "0.82rem", color: "rgba(255,255,255,0.6)", lineHeight: 1.72 }}>
-                        <strong style={{ color: "#fbbf24", fontWeight: 700 }}>We are continuously enrolling new learners.</strong>{" "}
-                        Month-over-month score changes reflect cohort composition as much as individual growth —
-                        when many new learners join at once, the cohort average naturally shifts downward even as
-                        established learners continue to progress. A growing learner count is itself a sign of
-                        expanding reach, not declining performance.
-                      </p>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* ── Longitudinal: Persistent Learner Trajectories ─────── */}
                 {(() => {
                   if (longLoading) return (
-                    <div style={{ marginTop: "2.5rem", padding: "2rem", textAlign: "center", color: "rgba(255,255,255,0.3)", fontSize: "0.83rem" }}>
+                    <div style={{ padding:"2rem", textAlign:"center", color:"rgba(255,255,255,0.3)", fontSize:"0.83rem" }}>
                       Loading longitudinal data…
                     </div>
                   );
                   if (longRows.length === 0) return null;
 
-                  // ── All months sorted chronologically ───────────────────────
-                  const months = [...longRows].sort((a, b) =>
-                    a.cohort_month.localeCompare(b.cohort_month)
-                  );
-
-                  // Month index = cycle number (1-based)
-                  const totalMonths   = months.length;
-                  const totalLearners = months.reduce((s, m) => s + (m.learner_count || 0), 0);
-                  const totalCerts    = months.reduce((s, m) => s + (Number(m.total_certs) || 0), 0);
-
-                  // Low-engagement flag: avg sessions/learner < 2
+                  const months = [...longRows].sort((a,b) => a.cohort_month.localeCompare(b.cohort_month));
+                  const totalMonths = months.length;
+                  const fmtMonth = (iso: string) =>
+                    new Date(iso).toLocaleDateString('en-US',{month:'short',year:'2-digit'});
                   const isLow = (m: typeof months[0]) =>
                     m.learner_count > 0 && (m.total_sessions / m.learner_count) < 2;
 
-                  // Scaffolding: clarifications/session per month
-                  const validScaf = months.filter(m => !isLow(m) && (m.avg_clarification ?? 0) > 0);
-                  const c1Clarf   = validScaf[0]?.avg_clarification ?? 0;
-                  const lastClarf = validScaf[validScaf.length - 1]?.avg_clarification ?? 0;
-                  const clarfDecline = c1Clarf > 0 && validScaf.length > 1
-                    ? Math.round((1 - lastClarf / c1Clarf) * 100) : null;
-                  const maxClarfVal = Math.max(...months.map(m => m.avg_clarification ?? 0), 1);
-
-                  // Converging %: exclude insufficient_data from denominator
-                  const convergingPct = (m: typeof months[0]) => {
+                  const withNum = months.map((m,i) => ({...m, month_num: i+1}));
+                  const maxClarf = Math.max(...withNum.map(m => m.avg_clarification ?? 0), 1);
+                  const validClarf = withNum.filter(m => !isLow(m) && (m.avg_clarification ?? 0) > 0);
+                  const clarfDecline = validClarf.length > 1
+                    ? Math.round((1 - (validClarf[validClarf.length-1].avg_clarification! / validClarf[0].avg_clarification!)) * 100)
+                    : null;
+                  const convPct = (m: typeof months[0]) => {
                     const valid = m.learner_count - m.insufficient_data_count;
                     return valid > 0 ? Math.round((m.converging_count / valid) * 100) : null;
                   };
-
-                  // Mentor experiment: Nov 2025 – Feb 2026 = absence period
-                  const ABSENT = ['2025-11-01','2025-12-01','2026-01-01','2026-02-01'];
-                  const absentMonths  = months.filter(m => ABSENT.includes(m.cohort_month));
-                  const presentMonths = months.filter(m => !ABSENT.includes(m.cohort_month));
-                  const avgSess = (arr: typeof months) => {
-                    const totalS = arr.reduce((s, m) => s + (m.total_sessions || 0), 0);
-                    const totalL = arr.reduce((s, m) => s + (m.learner_count  || 0), 0);
-                    return totalL > 0 ? totalS / totalL : 0;
-                  };
-                  const avgAbsent  = avgSess(absentMonths);
-                  const avgPresent = avgSess(presentMonths);
-
-                  // Role readiness: % of learners per month with each signal
                   const rolePct = (m: typeof months[0], key: keyof typeof months[0]) =>
                     m.learner_count > 0 ? Math.round((Number(m[key]) / m.learner_count) * 100) : 0;
+                  const totalCerts = months.reduce((s,m) => s + (m.total_certs||0), 0);
+                  const cogRetMonths = withNum.filter(m =>
+                    m.avg_cognitive_ret != null && (m.returning_learner_count||0) >= 2
+                  );
 
-                  const roleKeys = [
-                    { key: 'teaching_intent_count'      as const, label: 'Teaching intent'       },
-                    { key: 'community_application_count' as const, label: 'Community application' },
-                    { key: 'enterprise_orientation_count'as const, label: 'Enterprise orient.'    },
-                    { key: 'intergenerational_count'     as const, label: 'Intergenerational'     },
-                  ];
+                  const scafRows = withNum.map(m => {
+                    const c1 = validClarf[0]?.avg_clarification ?? 0;
+                    const cv = m.avg_clarification ?? 0;
+                    const decPct = (c1 > 0 && m.month_num > 1 && !isLow(m))
+                      ? Math.round((1 - cv/c1)*100) : null;
+                    return { ...m, decPct, cp: convPct(m) };
+                  });
+
+                  const A = { green:"#4ade80", amber:"#fbbf24", purple:"#a78bfa", teal:"#2dd4bf", red:"#f87171" };
+                  const card: React.CSSProperties = { background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.09)", borderRadius:14, padding:"1.5rem" };
+                  const lbl: React.CSSProperties  = { fontSize:"0.67rem", fontWeight:700 as const, letterSpacing:"0.1em", textTransform:"uppercase" as const, marginBottom:"0.6rem" };
+                  const note: React.CSSProperties = { fontSize:"0.7rem", color:"rgba(255,255,255,0.35)", lineHeight:1.6, marginTop:"0.75rem" };
 
                   return (
-                    <div style={{ marginTop: "2.5rem", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: "2rem" }}>
+                    <div style={{ marginTop:"1rem" }}>
 
                       {/* Header */}
-                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem", marginBottom: "1.75rem" }}>
-                        <div>
-                          <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.45rem" }}>
-                            Longitudinal Evidence · {totalMonths} Months of Data
-                          </div>
-                          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.1rem,3vw,1.55rem)", fontWeight: 700, color: "#fff", margin: "0 0 0.4rem" }}>
-                            What happens when learners stay
-                          </h3>
-                          <p style={{ fontSize: "0.83rem", color: "rgba(255,255,255,0.45)", lineHeight: 1.65, margin: 0, maxWidth: 560 }}>
-                            {totalMonths} monthly cohorts · {totalLearners.toLocaleString()} total learner-months · zero prior computer access.{" "}
-                            <em>Hallinan, Hao, Davidson &amp; Clergy (2026), World Development submission.</em>
-                          </p>
-                          <p style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.28)", marginTop: "0.35rem" }}>
-                            Each bar = one monthly cohort. ⚠ = fewer than 2 sessions per learner — treat with caution.
-                          </p>
+                      <div style={{ marginBottom:"2rem" }}>
+                        <div style={{ fontSize:"0.68rem", fontWeight:700, color:A.amber, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:"0.45rem" }}>
+                          Longitudinal Evidence · {totalMonths} Months · Persistent Learners
                         </div>
-                        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", flexShrink: 0 }}>
-                          {[
-                            { num: clarfDecline !== null ? `${clarfDecline}%` : "—", label: "less AI scaffolding",    color: "#4ade80" },
-                            { num: totalCerts > 0 ? totalCerts : "—",                label: "certifications earned",  color: "#fbbf24" },
-                            { num: avgAbsent === 0 && absentMonths.length > 0
-                                ? "0 vs " + Math.round(avgPresent)
-                                : "—",
-                              label: "sessions absent vs present", color: "#f87171" },
-                          ].map(s => (
-                            <div key={s.label} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "0.75rem 1rem", textAlign: "center", minWidth: 90 }}>
-                              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.4rem", fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.num}</div>
-                              <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.38)", marginTop: "0.25rem", lineHeight: 1.4 }}>{s.label}</div>
-                            </div>
-                          ))}
-                        </div>
+                        <h3 style={{ fontFamily:"'Playfair Display',serif", fontSize:"clamp(1.3rem,3vw,1.9rem)", fontWeight:700, color:"#fff", margin:"0 0 0.5rem" }}>
+                          What happens when learners return
+                        </h3>
+                        <p style={{ fontSize:"0.85rem", color:"rgba(255,255,255,0.5)", lineHeight:1.65, maxWidth:640, margin:0 }}>
+                          Data from {totalMonths} monthly cohorts, AI-assessed from session transcripts.
+                          Months marked ⚠ have fewer than 2 sessions per learner — treat with caution.
+                          All findings are associative; no control group.
+                        </p>
                       </div>
 
-                      {/* Three columns */}
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: "1rem" }}>
+                      {/* Row 1: Scaffolding table + hero */}
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:"1.25rem", marginBottom:"1.25rem", alignItems:"start" }}>
 
-                        {/* Scaffolding demand */}
-                        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
-                          <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.4rem" }}>
-                            AI scaffolding demand
+                        <div style={card}>
+                          <div style={{...lbl, color:A.green}}>AI Scaffolding Demand — Clarifications per Session</div>
+                          <p style={{ fontSize:"0.75rem", color:"rgba(255,255,255,0.45)", marginBottom:"1rem", lineHeight:1.55 }}>
+                            How many times per session the AI needed to re-prompt or redirect the learner.
+                            Falling values = learner forming their own questions and directing the conversation independently.
+                          </p>
+                          <div style={{ overflowX:"auto" }}>
+                            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"0.78rem" }}>
+                              <thead>
+                                <tr style={{ borderBottom:"1px solid rgba(255,255,255,0.1)" }}>
+                                  {["Month","Clarif/session","Change","% Converging","Sessions"].map(h => (
+                                    <th key={h} style={{ padding:"0.4rem 0.6rem", textAlign:"left", fontSize:"0.65rem", fontWeight:700, color:"rgba(255,255,255,0.4)", letterSpacing:"0.07em", textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {scafRows.map((m,i) => {
+                                  const low = isLow(m);
+                                  const cv = m.avg_clarification ?? 0;
+                                  const isNote = m.month_num === 5 && m.cp === 100;
+                                  return (
+                                    <tr key={i} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)", opacity:low?0.5:1 }}>
+                                      <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.85)", fontWeight:500, whiteSpace:"nowrap" }}>
+                                        Mo.{m.month_num} (n={m.learner_count}){low?" ⚠":""}
+                                      </td>
+                                      <td style={{ padding:"0.45rem 0.6rem", fontFamily:"monospace", fontWeight:700,
+                                        color: cv===0?"rgba(255,255,255,0.2)": cv<3?A.green: cv>8?A.red:A.amber }}>
+                                        {cv>0 ? cv.toFixed(2) : "—"}
+                                      </td>
+                                      <td style={{ padding:"0.45rem 0.6rem", fontWeight:700,
+                                        color: m.decPct==null?"rgba(255,255,255,0.2)": m.decPct>0?A.green:A.red }}>
+                                        {m.decPct==null?"—": m.decPct>0?`−${m.decPct}%`:`+${Math.abs(m.decPct)}%`}
+                                      </td>
+                                      <td style={{ padding:"0.45rem 0.6rem",
+                                        color: m.cp==null?"rgba(255,255,255,0.2)": m.cp>=25?A.green: m.cp>0?A.teal:"rgba(255,255,255,0.3)",
+                                        fontWeight: m.cp!=null&&m.cp>0?700:400 }}>
+                                        {m.cp==null?"—":`${m.cp}%${isNote?"†":""}`}
+                                      </td>
+                                      <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.35)", fontFamily:"monospace", fontSize:"0.72rem" }}>
+                                        {m.total_sessions>0 ? m.total_sessions.toLocaleString() : "—"}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
-                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.28)", marginBottom: "0.85rem", lineHeight: 1.5 }}>
-                            Avg AI clarification prompts per session. Falling = learner directing the AI, not being guided by it.
+                          <p style={note}>
+                            ⚠ months with &lt;2 sessions/learner · † month 5 convergence based on n=1 valid-trend learner ·
+                            Months 1–3 show the core trend · All claims associative · no control group
+                          </p>
+                        </div>
+
+                        {clarfDecline !== null && (
+                          <div style={{...card, textAlign:"center", minWidth:148, borderColor:`${A.green}33`}}>
+                            <div style={{...lbl, color:A.green}}>Scaffolding decline</div>
+                            <div style={{ fontFamily:"'Playfair Display',serif", fontSize:"3.4rem", fontWeight:900, color:A.green, lineHeight:1 }}>
+                              {clarfDecline}%
+                            </div>
+                            <div style={{ fontSize:"0.72rem", color:"rgba(255,255,255,0.45)", marginTop:"0.4rem", lineHeight:1.5 }}>
+                              fewer AI prompts<br/>per session<br/>Mo.1 → Mo.5
+                            </div>
+                            {totalCerts > 0 && (
+                              <>
+                                <div style={{ height:1, background:"rgba(255,255,255,0.07)", margin:"1rem 0" }} />
+                                <div style={{...lbl, color:A.amber}}>Certifications</div>
+                                <div style={{ fontFamily:"'Playfair Display',serif", fontSize:"2.6rem", fontWeight:900, color:A.amber, lineHeight:1 }}>
+                                  {totalCerts}
+                                </div>
+                                <div style={{ fontSize:"0.7rem", color:"rgba(255,255,255,0.38)", marginTop:"0.3rem" }}>earned all time</div>
+                              </>
+                            )}
                           </div>
-                          {months.map((m, i) => {
-                            const clarf = m.avg_clarification ?? 0;
-                            const low   = isLow(m);
-                            const convPct = convergingPct(m);
-                            const label = new Date(m.cohort_month).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+                        )}
+                      </div>
+
+                      {/* Row 2: Cognitive skills + Role readiness */}
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1.25rem", marginBottom:"1.25rem" }}>
+
+                        {/* Cognitive skills SVG line chart */}
+                        <div style={card}>
+                          <div style={{...lbl, color:A.purple}}>Cognitive skills — returning vs new learners (0–100)</div>
+                          <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1rem", lineHeight:1.55 }}>
+                            Returning learners consistently score higher than first-time visitors.
+                            The gap reflects genuine capability formation, not a selection effect.
+                          </p>
+                          {(() => {
+                            const allM = withNum.filter(m => m.avg_cognitive_new != null || m.avg_cognitive_ret != null);
+                            if (allM.length < 2) return (
+                              <div style={{ fontSize:"0.78rem", color:"rgba(255,255,255,0.3)", fontStyle:"italic", padding:"1rem 0" }}>
+                                Accumulating data… ({allM.length} month{allM.length!==1?"s":""} with data)
+                              </div>
+                            );
+                            const W=520, H=140, PL=28, PR=8, PT=12, PB=28;
+                            const iW=W-PL-PR, iH=H-PT-PB;
+                            const xP=(i:number)=>PL+(i/Math.max(allM.length-1,1))*iW;
+                            const yP=(v:number)=>PT+(1-v/100)*iH;
+                            const retPts = allM.filter(m => m.avg_cognitive_ret!=null);
+                            const newPts = allM.filter(m => m.avg_cognitive_new!=null);
+                            const rPath = retPts.map((m,i)=>`${i===0?"M":"L"}${xP(allM.indexOf(m)).toFixed(1)},${yP(m.avg_cognitive_ret!).toFixed(1)}`).join(" ");
+                            const nPath = newPts.map((m,i)=>`${i===0?"M":"L"}${xP(allM.indexOf(m)).toFixed(1)},${yP(m.avg_cognitive_new!).toFixed(1)}`).join(" ");
+                            const fillPts = [
+                              ...retPts.map(m=>`${xP(allM.indexOf(m)).toFixed(1)},${yP(m.avg_cognitive_ret!).toFixed(1)}`),
+                              ...[...newPts].reverse().map(m=>`${xP(allM.indexOf(m)).toFixed(1)},${yP(m.avg_cognitive_new!).toFixed(1)}`),
+                            ].join(" ");
                             return (
-                              <div key={m.cohort_month} style={{ marginBottom: "0.55rem", opacity: low ? 0.45 : 1 }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
-                                  <span style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.45)" }}>
-                                    {label} · n={m.learner_count}{low ? " ⚠" : ""}
+                              <div>
+                                <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", minWidth:240 }}>
+                                  {[0,25,50,75,100].map(v=>(
+                                    <g key={v}>
+                                      <line x1={PL} x2={W-PR} y1={yP(v)} y2={yP(v)} stroke="rgba(255,255,255,0.06)" strokeWidth={1}/>
+                                      <text x={PL-3} y={yP(v)+4} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.25)">{v}</text>
+                                    </g>
+                                  ))}
+                                  {allM.map((m,i)=>(
+                                    <text key={i} x={xP(i)} y={H-4} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.3)">{fmtMonth(m.cohort_month)}</text>
+                                  ))}
+                                  {retPts.length>=2 && newPts.length>=2 && <polygon points={fillPts} fill="rgba(167,139,250,0.09)"/>}
+                                  {retPts.length>=2 && <path d={rPath} fill="none" stroke={A.purple} strokeWidth={2.5} strokeLinejoin="round"/>}
+                                  {newPts.length>=2 && <path d={nPath} fill="none" stroke="rgba(255,255,255,0.28)" strokeWidth={1.5} strokeDasharray="4,3" strokeLinejoin="round"/>}
+                                  {retPts.map((m,i)=><circle key={i} cx={xP(allM.indexOf(m))} cy={yP(m.avg_cognitive_ret!)} r={3} fill={A.purple}/>)}
+                                  {newPts.map((m,i)=><circle key={i} cx={xP(allM.indexOf(m))} cy={yP(m.avg_cognitive_new!)} r={2.5} fill="rgba(255,255,255,0.45)"/>)}
+                                </svg>
+                                <div style={{ display:"flex", gap:"1.2rem", marginTop:"0.5rem", flexWrap:"wrap" }}>
+                                  <span style={{ fontSize:"0.7rem", color:A.purple, display:"flex", alignItems:"center", gap:5 }}>
+                                    <svg width="18" height="4" style={{flexShrink:0}}><line x1="0" y1="2" x2="18" y2="2" stroke={A.purple} strokeWidth="2.5"/></svg>
+                                    Returning learners
                                   </span>
-                                  <span style={{ fontSize: "0.68rem", fontWeight: 700, color: low ? "rgba(255,255,255,0.2)" : "#4ade80" }}>
-                                    {clarf.toFixed(1)}
-                                    {convPct !== null && !low &&
-                                      <span style={{ color: "rgba(74,222,128,0.55)", fontWeight: 400 }}> · {convPct}% →</span>
-                                    }
+                                  <span style={{ fontSize:"0.7rem", color:"rgba(255,255,255,0.38)", display:"flex", alignItems:"center", gap:5 }}>
+                                    <svg width="18" height="4" style={{flexShrink:0}}><line x1="0" y1="2" x2="18" y2="2" stroke="rgba(255,255,255,0.38)" strokeWidth="1.5" strokeDasharray="4,3"/></svg>
+                                    First-time learners
                                   </span>
                                 </div>
-                                <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 99, overflow: "hidden" }}>
-                                  <div style={{ height: "100%", width: `${(clarf / maxClarfVal) * 100}%`, background: low ? "rgba(255,255,255,0.08)" : "#4ade80", borderRadius: 99 }} />
+                              </div>
+                            );
+                          })()}
+                          <p style={note}>
+                            Cognitive score 0–100, AI-assessed monthly. Score reflects comprehension, reasoning depth,
+                            and quality of AI interactions. New learner scores naturally start lower — this is expected.
+                          </p>
+                        </div>
+
+                        {/* Role readiness bar charts */}
+                        <div style={card}>
+                          <div style={{...lbl, color:A.amber}}>Role readiness signals — % of learners per month</div>
+                          <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1rem", lineHeight:1.55 }}>
+                            Detected via AI transcript analysis — unprompted evidence of applying learning beyond the platform.
+                          </p>
+                          {([
+                            { key:"teaching_intent_count"        as const, label:"Teaching intent",       desc:"plans to teach peers, family, or neighbours" },
+                            { key:"community_application_count"  as const, label:"Community application", desc:"applied AI to a real local problem" },
+                            { key:"enterprise_orientation_count" as const, label:"Enterprise orientation", desc:"referenced a business or income plan" },
+                            { key:"intergenerational_count"      as const, label:"Intergenerational",     desc:"knowledge shared across age groups" },
+                          ] as {key:keyof typeof months[0], label:string, desc:string}[]).map(item => {
+                            const vals = months.map(m => rolePct(m, item.key));
+                            return (
+                              <div key={String(item.key)} style={{ marginBottom:"1rem" }}>
+                                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"0.3rem" }}>
+                                  <span style={{ fontSize:"0.75rem", color:"rgba(255,255,255,0.75)", fontWeight:600 }}>{item.label}</span>
+                                  <span style={{ fontSize:"0.7rem", color:A.amber, fontWeight:700 }}>{vals[vals.length-1]}% latest</span>
+                                </div>
+                                <div style={{ display:"flex", alignItems:"flex-end", gap:2, height:38 }}>
+                                  {months.map((m,i) => {
+                                    const v = vals[i];
+                                    const barH = Math.max(2,(v/100)*38);
+                                    const opacity = 0.25 + (i/Math.max(months.length-1,1))*0.75;
+                                    return (
+                                      <div key={i} style={{ flex:1, height:`${barH}px`, borderRadius:"2px 2px 0 0",
+                                        background:`rgba(251,191,36,${opacity})`, opacity:isLow(m)?0.25:1, minWidth:4 }}
+                                        title={`${fmtMonth(m.cohort_month)}: ${v}%${isLow(m)?" ⚠":""}`}
+                                      />
+                                    );
+                                  })}
+                                </div>
+                                <div style={{ display:"flex", justifyContent:"space-between", marginTop:2 }}>
+                                  <span style={{ fontSize:"0.6rem", color:"rgba(255,255,255,0.2)" }}>{fmtMonth(months[0].cohort_month)}</span>
+                                  <span style={{ fontSize:"0.6rem", color:"rgba(255,255,255,0.2)" }}>{fmtMonth(months[months.length-1].cohort_month)}</span>
                                 </div>
                               </div>
                             );
                           })}
-                          {clarfDecline !== null && (
-                            <div style={{ marginTop: "0.85rem", padding: "0.6rem 0.75rem", background: "rgba(74,222,128,0.07)", borderRadius: 8 }}>
-                              <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.3)", marginBottom: "2px" }}>Decline across valid months</div>
-                              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", color: "#4ade80", lineHeight: 1 }}>{clarfDecline}%</div>
-                              <div style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.22)", marginTop: "2px" }}>Associative · no control group</div>
-                            </div>
-                          )}
+                          <p style={note}>
+                            Bars left → right: {fmtMonth(months[0].cohort_month)} → {fmtMonth(months[months.length-1].cohort_month)}.
+                            Darker = more recent. ⚠ months dimmed.
+                          </p>
                         </div>
+                      </div>
 
-                        {/* Role readiness */}
-                        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
-                          <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#d97706", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.4rem" }}>
-                            Role readiness signals
-                          </div>
-                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.28)", marginBottom: "0.85rem", lineHeight: 1.5 }}>
-                            % of learners per month showing evidence of applying learning beyond the platform — detected via AI transcript analysis.
-                          </div>
-                          {roleKeys.map(item => (
-                            <div key={item.key} style={{ marginBottom: "0.85rem" }}>
-                              <div style={{ fontSize: "0.71rem", color: "rgba(255,255,255,0.5)", marginBottom: "5px" }}>{item.label}</div>
-                              <div style={{ display: "flex", gap: "2px", alignItems: "flex-end", height: 28 }}>
-                                {months.map((m, i) => {
-                                  const val = rolePct(m, item.key);
-                                  const low = isLow(m);
-                                  const opacity = 0.25 + (i / Math.max(months.length - 1, 1)) * 0.75;
-                                  return (
-                                    <div key={m.cohort_month} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%", opacity: low ? 0.3 : 1 }}
-                                      title={`${new Date(m.cohort_month).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}: ${low ? '⚠ low sessions' : val + '%'}`}>
-                                      <div style={{ width: "100%", height: `${Math.max(2, (val / 100) * 28)}px`, background: `rgba(217,119,6,${opacity})`, borderRadius: "2px 2px 0 0" }} />
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "3px" }}>
-                                <span style={{ fontSize: "0.62rem", color: "rgba(255,255,255,0.25)" }}>
-                                  {new Date(months[0].cohort_month).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}
+                      {/* Row 3: Scaffolding bar chart */}
+                      <div style={{...card, marginBottom:"1.25rem"}}>
+                        <div style={{...lbl, color:A.green}}>Clarifications per session — full {totalMonths}-month timeline</div>
+                        <div style={{ display:"flex", alignItems:"flex-end", gap:3, height:88, marginBottom:"0.35rem" }}>
+                          {withNum.map((m,i) => {
+                            const v = m.avg_clarification ?? 0;
+                            const low = isLow(m);
+                            const barH = v>0 ? Math.max(4,(v/maxClarf)*88) : 4;
+                            return (
+                              <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", minWidth:0, gap:2 }}>
+                                <span style={{ fontSize:"0.58rem", color:"rgba(255,255,255,0.5)", fontFamily:"monospace", fontWeight:700 }}>
+                                  {v>0 ? v.toFixed(1) : ""}
                                 </span>
-                                <span style={{ fontSize: "0.62rem", color: "#d97706", fontWeight: 700 }}>
-                                  {rolePct(months[months.length - 1], item.key)}% latest
-                                </span>
+                                <div style={{ width:"100%", height:`${barH}px`, borderRadius:"3px 3px 0 0",
+                                  background: low?"rgba(255,255,255,0.08)": v<3?A.green: v<6?A.amber:A.red,
+                                  border: low?"1px dashed rgba(255,255,255,0.12)":"none",
+                                  opacity: low?0.45:1 }}
+                                  title={`${fmtMonth(m.cohort_month)}: ${v.toFixed(2)}${low?" ⚠":""}`}
+                                />
                               </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{ display:"flex", borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:"0.3rem" }}>
+                          {withNum.map((m,i) => (
+                            <div key={i} style={{ flex:1, textAlign:"center", fontSize:"0.58rem",
+                              color:isLow(m)?"rgba(255,255,255,0.18)":"rgba(255,255,255,0.38)", whiteSpace:"nowrap" }}>
+                              {fmtMonth(m.cohort_month)}{isLow(m)?" ⚠":""}
                             </div>
                           ))}
-                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.22)", marginTop: "0.3rem", lineHeight: 1.5 }}>
-                            Bars left → right = {new Date(months[0].cohort_month).toLocaleDateString('en-US',{month:'short',year:'2-digit'})} → {new Date(months[months.length-1].cohort_month).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}. Darker = more recent.
-                          </div>
                         </div>
-
-                        {/* Natural experiment */}
-                        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "1.25rem" }}>
-                          <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: "0.4rem" }}>
-                            Natural experiment
-                          </div>
-                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.28)", marginBottom: "0.85rem", lineHeight: 1.5 }}>
-                            Nov 2025–Feb 2026: Davidson absent. Technology, Starlink, and curriculum unchanged.
-                          </div>
-                          {absentMonths.length > 0 ? (
-                            <>
-                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginBottom: "0.85rem" }}>
-                                <div style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 8, padding: "0.75rem", textAlign: "center" }}>
-                                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.6rem", fontWeight: 900, color: "#f87171", lineHeight: 1 }}>{avgAbsent.toFixed(1)}</div>
-                                  <div style={{ fontSize: "0.65rem", color: "rgba(248,113,113,0.6)", marginTop: "0.2rem" }}>sessions/learner<br />absent</div>
-                                </div>
-                                <div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.2)", borderRadius: 8, padding: "0.75rem", textAlign: "center" }}>
-                                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.6rem", fontWeight: 900, color: "#4ade80", lineHeight: 1 }}>{avgPresent.toFixed(1)}</div>
-                                  <div style={{ fontSize: "0.65rem", color: "rgba(74,222,128,0.6)", marginTop: "0.2rem" }}>sessions/learner<br />present</div>
-                                </div>
-                              </div>
-                              <p style={{ fontSize: "0.72rem", color: "#f5f0e8", fontWeight: 600, marginBottom: "0.4rem" }}>
-                                {avgAbsent === 0
-                                  ? "Zero sessions during absence — not a decline, a complete stop."
-                                  : `${(avgPresent / avgAbsent).toFixed(1)}× more sessions when mentor present.`}
-                              </p>
-                            </>
-                          ) : (
-                            <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.3)", fontStyle: "italic", marginBottom: "0.85rem" }}>
-                              Absence period data loading…
-                            </div>
-                          )}
-                          <div style={{ fontSize: "0.67rem", color: "rgba(255,255,255,0.22)", lineHeight: 1.55 }}>
-                            The facilitator is the mechanism — not the technology.
-                          </div>
-                          <div style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.18)", lineHeight: 1.5, marginTop: "0.4rem" }}>
-                            Associative · single site · single event · no control group. Directionally unambiguous.
-                          </div>
+                        <div style={{ display:"flex", gap:"1.25rem", marginTop:"0.75rem", flexWrap:"wrap" }}>
+                          {([
+                            { color:A.green,                    label:"< 3 — learner-directed" },
+                            { color:A.amber,                    label:"3–8 — mixed" },
+                            { color:A.red,                      label:"> 8 — AI-guided" },
+                            { color:"rgba(255,255,255,0.12)",   label:"⚠ sparse sessions" },
+                          ] as {color:string,label:string}[]).map(l => (
+                            <span key={l.label} style={{ display:"flex", alignItems:"center", gap:5, fontSize:"0.68rem", color:"rgba(255,255,255,0.5)" }}>
+                              <span style={{ width:10, height:10, borderRadius:2, background:l.color, flexShrink:0, display:"inline-block" }}/>
+                              {l.label}
+                            </span>
+                          ))}
                         </div>
-
                       </div>
 
-                      <div style={{ marginTop: "1.1rem", fontSize: "0.73rem", color: "rgba(255,255,255,0.22)", lineHeight: 1.6 }}>
-                        All longitudinal claims are associative; no control group was employed.
-                        ⚠ months with fewer than 2 sessions per learner are dimmed and should be treated with caution.
+                      {/* Composition note */}
+                      <div style={{ background:"rgba(167,139,250,0.06)", border:"1px solid rgba(167,139,250,0.15)", borderRadius:12, padding:"1rem 1.25rem", display:"flex", gap:"0.75rem", alignItems:"flex-start" }}>
+                        <span style={{ fontSize:"1.1rem", flexShrink:0 }}>📈</span>
+                        <p style={{ margin:0, fontSize:"0.8rem", color:"rgba(255,255,255,0.55)", lineHeight:1.7 }}>
+                          <strong style={{ color:"#c4b5fd", fontWeight:700 }}>Understanding score trends.</strong>{" "}
+                          Month-over-month averages reflect cohort composition as much as individual growth.
+                          When new learners join, the cohort average shifts downward even as returning learners continue to progress.
+                          The cognitive skills chart above separates these effects — returning learner scores are the better signal of genuine capability formation.
+                        </p>
                       </div>
+
                     </div>
                   );
                 })()}
