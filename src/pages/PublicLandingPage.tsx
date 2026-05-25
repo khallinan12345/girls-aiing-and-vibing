@@ -933,15 +933,15 @@ const PublicLandingPage: React.FC = () => {
                       {/* Row 2: Session-band capability arc */}
                       {bandRows.length > 0 && (() => {
                         const bands = bandRows;
-                        const bandLabels = ['Early\n<50 sessions', 'Developing\n50–99', 'Established\n100–129', 'Core\n130+'];
-                        const W = 800, H = 200, PL = 36, PR = 12, PT = 12, PB = 32;
+                        const W = 560, H = 220, PL = 44, PR = 16, PT = 16, PB = 40;
                         const iW = W - PL - PR, iH = H - PT - PB;
                         const barW = iW / bands.length;
                         const maxScore = 100;
-
-                        const xP = (i: number, offset = 0) => PL + i * barW + barW * 0.1 + offset;
-                        const bw = barW * 0.8;
+                        const xMid = (i: number) => PL + i * barW + barW / 2;
+                        const bw = barW * 0.75;
+                        const xLeft = (i: number) => PL + i * barW + barW * 0.125;
                         const yP = (v: number) => PT + (1 - v / maxScore) * iH;
+                        const bandShortNames = ['Early', 'Developing', 'Established', 'Core'];
 
                         const skills = [
                           { key: 'cognitive' as const,          color: '#fbbf24', label: 'Cognitive' },
@@ -961,31 +961,31 @@ const PublicLandingPage: React.FC = () => {
                             <div style={{...lbl, color:A.purple, marginBottom:"0.5rem"}}>
                               Capability arc by cumulative sessions — skills peak, then community application rises
                             </div>
-                            <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1.25rem", lineHeight:1.55, maxWidth:700 }}>
-                              Skill scores (left axis) peak in the Developing band (50–99 sessions) as learners master the curriculum.
-                              Beyond 100 sessions, scores plateau as learners shift toward self-directed community application — visible in the rising role readiness signals (right axis).
-                              This is not regression: it is graduation from the rubric into real-world use.
+                            <p style={{ fontSize:"0.82rem", color:"rgba(255,255,255,0.5)", marginBottom:"1.25rem", lineHeight:1.6, maxWidth:700 }}>
+                              Skill scores peak in the Developing band (50–99 sessions) as learners master the curriculum.
+                              Beyond 100 sessions, scores plateau as learners shift to self-directed community application —
+                              visible in the rising role readiness signals. This is not regression: it is graduation from the rubric into real-world use.
                             </p>
 
                             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1rem", marginBottom:"1rem" }}>
 
-                              {/* Skill score bars by band */}
+                              {/* Skill score bars */}
                               <div style={card}>
-                                <div style={{ fontSize:"0.68rem", fontWeight:700, color:A.purple, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"0.5rem" }}>
+                                <div style={{ fontSize:"0.75rem", fontWeight:700, color:A.purple, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:"0.6rem" }}>
                                   Skill scores by session band (0–100)
                                 </div>
-                                <div style={{ display:"flex", flexWrap:"wrap", gap:"8px", marginBottom:"0.75rem" }}>
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:"10px", marginBottom:"0.85rem" }}>
                                   {skills.map(s => (
-                                    <span key={s.key} style={{ display:"flex", alignItems:"center", gap:4, fontSize:"0.65rem", color:"rgba(255,255,255,0.5)" }}>
-                                      <span style={{ width:8, height:8, borderRadius:1, background:s.color, flexShrink:0 }} />{s.label}
+                                    <span key={s.key} style={{ display:"flex", alignItems:"center", gap:5, fontSize:"0.75rem", color:"rgba(255,255,255,0.7)" }}>
+                                      <span style={{ width:10, height:10, borderRadius:2, background:s.color, flexShrink:0 }} />{s.label}
                                     </span>
                                   ))}
                                 </div>
                                 <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", display:"block" }}>
                                   {[0,25,50,75,100].map(t => (
                                     <g key={t}>
-                                      <line x1={PL} x2={W-PR} y1={yP(t)} y2={yP(t)} stroke="rgba(255,255,255,0.05)" strokeWidth={1}/>
-                                      <text x={PL-4} y={yP(t)+4} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.2)">{t}</text>
+                                      <line x1={PL} x2={W-PR} y1={yP(t)} y2={yP(t)} stroke="rgba(255,255,255,0.07)" strokeWidth={1}/>
+                                      <text x={PL-6} y={yP(t)+4} textAnchor="end" fontSize={12} fill="rgba(255,255,255,0.45)">{t}</text>
                                     </g>
                                   ))}
                                   {bands.map((band, bi) => {
@@ -994,69 +994,62 @@ const PublicLandingPage: React.FC = () => {
                                       <g key={band.session_band}>
                                         {skills.map((sk, si) => {
                                           const val = band[sk.key] ?? 0;
-                                          const x = xP(bi) + si * skillBw;
+                                          const x = xLeft(bi) + si * skillBw;
                                           const bh = (val / maxScore) * iH;
                                           return (
                                             <g key={sk.key}>
-                                              <rect x={x} y={yP(val)} width={skillBw - 1} height={bh}
-                                                fill={sk.color} opacity={0.8} />
-                                              {si === 1 && (
-                                                <text x={xP(bi) + bw/2} y={H-4} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.35)">
-                                                  {band.session_band.replace('1. ','').replace('2. ','').replace('3. ','').replace('4. ','')}
-                                                </text>
-                                              )}
+                                              <rect x={x} y={yP(val)} width={skillBw - 2} height={bh} fill={sk.color} opacity={0.85}/>
                                             </g>
                                           );
                                         })}
-                                        {/* n label */}
-                                        <text x={xP(bi) + bw/2} y={PT+8} textAnchor="middle" fontSize={7.5} fill="rgba(255,255,255,0.25)">
+                                        <text x={xMid(bi)} y={H-10} textAnchor="middle" fontSize={13} fill="rgba(255,255,255,0.7)" fontWeight="600">
+                                          {bandShortNames[bi]}
+                                        </text>
+                                        <text x={xMid(bi)} y={H-24} textAnchor="middle" fontSize={11} fill="rgba(255,255,255,0.35)">
                                           n={band.n_learners}
                                         </text>
+                                        {bi === 1 && (
+                                          <text x={xMid(bi)} y={yP((bands[1]?.critical_thinking ?? 0)) - 10} textAnchor="middle"
+                                            fontSize={13} fill={A.teal} fontWeight="bold">▲ peak</text>
+                                        )}
                                       </g>
                                     );
                                   })}
-                                  {/* Peak annotation */}
-                                  <text x={xP(1) + bw/2} y={yP((bands[1]?.critical_thinking ?? 0) + 5) - 6} textAnchor="middle"
-                                    fontSize={8} fill={A.teal} fontWeight="bold">peak</text>
                                 </svg>
-                                <p style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.25)", marginTop:"0.4rem", lineHeight:1.5 }}>
+                                <p style={{ fontSize:"0.75rem", color:"rgba(255,255,255,0.4)", marginTop:"0.5rem", lineHeight:1.5 }}>
                                   Peak at 50–99 sessions. Plateau beyond 100 reflects shift to self-directed use, not regression.
                                 </p>
                               </div>
 
-                              {/* Role readiness rising */}
+                              {/* Role readiness lines */}
                               <div style={card}>
-                                <div style={{ fontSize:"0.68rem", fontWeight:700, color:A.amber, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"0.5rem" }}>
+                                <div style={{ fontSize:"0.75rem", fontWeight:700, color:A.amber, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:"0.6rem" }}>
                                   Community role readiness — % of learners per band
                                 </div>
-                                <div style={{ display:"flex", flexWrap:"wrap", gap:"8px", marginBottom:"0.75rem" }}>
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:"10px", marginBottom:"0.85rem" }}>
                                   {roleSignals.map(s => (
-                                    <span key={s.key} style={{ display:"flex", alignItems:"center", gap:4, fontSize:"0.65rem", color:"rgba(255,255,255,0.5)" }}>
-                                      <span style={{ width:8, height:8, borderRadius:1, background:s.color, flexShrink:0 }} />{s.label}
+                                    <span key={s.key} style={{ display:"flex", alignItems:"center", gap:5, fontSize:"0.75rem", color:"rgba(255,255,255,0.7)" }}>
+                                      <span style={{ width:10, height:10, borderRadius:2, background:s.color, flexShrink:0 }} />{s.label}
                                     </span>
                                   ))}
                                 </div>
                                 <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", display:"block" }}>
                                   {[0,25,50,75,100].map(t => (
                                     <g key={t}>
-                                      <line x1={PL} x2={W-PR} y1={yP(t)} y2={yP(t)} stroke="rgba(255,255,255,0.05)" strokeWidth={1}/>
-                                      <text x={PL-4} y={yP(t)+4} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.2)">{t}%</text>
+                                      <line x1={PL} x2={W-PR} y1={yP(t)} y2={yP(t)} stroke="rgba(255,255,255,0.07)" strokeWidth={1}/>
+                                      <text x={PL-6} y={yP(t)+4} textAnchor="end" fontSize={12} fill="rgba(255,255,255,0.45)">{t}%</text>
                                     </g>
                                   ))}
-                                  {/* Lines connecting bands */}
                                   {roleSignals.map(sig => {
-                                    const pts = bands.map((band, bi) => ({
-                                      x: xP(bi) + bw/2,
-                                      y: yP(band[sig.key] ?? 0)
-                                    }));
+                                    const pts = bands.map((band, bi) => ({ x: xMid(bi), y: yP(band[sig.key] ?? 0) }));
                                     const path = pts.map((p,i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
                                     return (
                                       <g key={sig.key}>
-                                        <path d={path} fill="none" stroke={sig.color} strokeWidth={2} strokeLinejoin="round" opacity={0.8}/>
-                                        {pts.map((p,i) => (
+                                        <path d={path} fill="none" stroke={sig.color} strokeWidth={2.5} strokeLinejoin="round" opacity={0.85}/>
+                                        {pts.map((p, i) => (
                                           <g key={i}>
-                                            <circle cx={p.x} cy={p.y} r={3.5} fill={sig.color}/>
-                                            <text x={p.x} y={p.y-7} textAnchor="middle" fontSize={8} fill={sig.color} fontWeight="bold">
+                                            <circle cx={p.x} cy={p.y} r={4} fill={sig.color}/>
+                                            <text x={p.x} y={p.y - 10} textAnchor="middle" fontSize={12} fill={sig.color} fontWeight="bold">
                                               {bands[i][sig.key]?.toFixed(0)}%
                                             </text>
                                           </g>
@@ -1065,13 +1058,13 @@ const PublicLandingPage: React.FC = () => {
                                     );
                                   })}
                                   {bands.map((band, bi) => (
-                                    <text key={bi} x={xP(bi) + bw/2} y={H-4} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.35)">
-                                      {band.session_band.replace(/^\d+\. /, '')}
+                                    <text key={bi} x={xMid(bi)} y={H-10} textAnchor="middle" fontSize={13} fill="rgba(255,255,255,0.7)" fontWeight="600">
+                                      {bandShortNames[bi]}
                                     </text>
                                   ))}
                                 </svg>
-                                <p style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.25)", marginTop:"0.4rem", lineHeight:1.5 }}>
-                                  Community application and enterprise orientation both reach 75% in the Core band — learners applying AI beyond the platform.
+                                <p style={{ fontSize:"0.75rem", color:"rgba(255,255,255,0.4)", marginTop:"0.5rem", lineHeight:1.5 }}>
+                                  Community application and enterprise orientation reach 75% in the Core band.
                                 </p>
                               </div>
                             </div>
@@ -1079,15 +1072,16 @@ const PublicLandingPage: React.FC = () => {
                             {/* Band summary cards */}
                             <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"0.6rem" }}>
                               {bands.map((band, bi) => {
-                                const bandName = band.session_band.replace(/^\d+\. /, '');
                                 const colors = [A.teal, A.green, A.amber, A.purple];
                                 const c = colors[bi];
                                 const isCore = bi === 3;
                                 return (
-                                  <div key={band.session_band} style={{ background:`rgba(255,255,255,0.03)`, border:`1px solid ${c}22`, borderRadius:10, padding:"0.75rem" }}>
-                                    <div style={{ fontSize:"0.62rem", fontWeight:700, color:c, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"0.3rem" }}>{bandName}</div>
-                                    <div style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.35)", marginBottom:"0.5rem" }}>n={band.n_learners} learners</div>
-                                    <div style={{ fontSize:"0.72rem", color:"rgba(255,255,255,0.6)", lineHeight:1.55 }}>
+                                  <div key={band.session_band} style={{ background:"rgba(255,255,255,0.04)", border:`1px solid ${c}33`, borderRadius:10, padding:"0.85rem" }}>
+                                    <div style={{ fontSize:"0.72rem", fontWeight:700, color:c, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"0.3rem" }}>
+                                      {bandShortNames[bi]}
+                                    </div>
+                                    <div style={{ fontSize:"0.72rem", color:"rgba(255,255,255,0.4)", marginBottom:"0.5rem" }}>n={band.n_learners} learners</div>
+                                    <div style={{ fontSize:"0.78rem", color:"rgba(255,255,255,0.7)", lineHeight:1.55 }}>
                                       {isCore
                                         ? `75% community application · 75% enterprise — graduated from curriculum into real use`
                                         : `CT: ${band.critical_thinking ?? '—'} · PS: ${band.problem_solving ?? '—'} · Clarif: ${band.avg_clarification ?? '—'}/session`
