@@ -496,7 +496,77 @@ const PublicLandingPage: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Impact Stats ─────────────────────────────────────────────────── */}
+        {/* ── Programmes ──────────────────────────────────────────────────── */}
+        <section id="programmes" style={{ background: "#fff", padding: "5rem 2rem" }}>
+          <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+            <div style={{ marginBottom: "2.5rem" }}>
+              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#d97706", marginBottom: "0.6rem" }}>
+                What We Teach
+              </div>
+              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.7rem,4vw,2.6rem)", fontWeight: 700, color: "#1a1208", margin: "0 0 0.75rem" }}>
+                Four pathways to capability
+              </h2>
+              <p style={{ color: "rgba(26,18,8,0.58)", maxWidth: 580, lineHeight: 1.72, margin: 0 }}>
+                Every pathway is AI-scaffolded, locally grounded, and designed to meet learners
+                exactly where they are — from zero digital experience to job-ready skills.
+              </p>
+            </div>
+            <div className="prog-grid">
+              <ProgramCard
+                icon={<Brain size={22} />}
+                title="English Skills & AI Learning"
+                accent="#0d9488" bg="#f0fdfa"
+                desc="Foundation-first learning that builds English fluency alongside AI literacy — starting from zero, adapted to each learner's communication level."
+                items={[
+                  "Adaptive English reading and writing",
+                  "AI concepts, ethics, and responsible use",
+                  "AI-900 and AI Ready Skills certification prep",
+                  "Socratic tutoring that meets you at your level",
+                ]}
+              />
+              <ProgramCard
+                icon={<Code size={22} />}
+                title="Tech Skills Workshop"
+                accent="#7c3aed" bg="#faf5ff"
+                desc="Hands-on technical training in the tools that open doors to remote work, freelancing, and entrepreneurship."
+                items={[
+                  "Vibe coding and web development",
+                  "Full-stack app development",
+                  "AI workflow and agent development",
+                  "AI for business — strategy and operations",
+                  "Microsoft AI-900, AB-730, GitHub GH-300",
+                ]}
+              />
+              <ProgramCard
+                icon={<ImagePlus size={22} />}
+                title="AI Creative Studio"
+                accent="#d97706" bg="#fffbeb"
+                desc="Creative AI tools that unlock new income streams and community storytelling capabilities."
+                items={[
+                  "AI image generation and editing",
+                  "AI voice creation and narration",
+                  "AI video production and studio",
+                  "AI content creation for business",
+                ]}
+              />
+              <ProgramCard
+                icon={<Globe size={22} />}
+                title="Community Impact AI"
+                accent="#16a34a" bg="#f0fdf4"
+                desc="AI-assisted consulting grounded in the real economic and ecological contexts of Oloibiri, Ibiade, and similar communities."
+                items={[
+                  "Agriculture and cassava farming consultant",
+                  "Fishing and creek ecology advisor",
+                  "Healthcare navigator",
+                  "Entrepreneurship and enterprise planning",
+                  "Animal husbandry advisor",
+                ]}
+              />
+            </div>
+          </div>
+        </section>
+
+                {/* ── Impact Stats ─────────────────────────────────────────────────── */}
         <div id="impact" style={{
           background: "linear-gradient(135deg,#0c160a 0%,#162612 50%,#0c160a 100%)",
           padding: "5rem 2rem", position: "relative", overflow: "hidden",
@@ -670,29 +740,24 @@ const PublicLandingPage: React.FC = () => {
                             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"0.78rem" }}>
                               <thead>
                                 <tr style={{ borderBottom:"1px solid rgba(255,255,255,0.1)" }}>
-                                  {["Month of use","n learners","Clarif/session","Change","% Converging","Sessions","Certs"].map(h => (
+                                  {["Month of use","n learners","Clarif/session","Change","% Converging","Sessions"].map(h => (
                                     <th key={h} style={{ padding:"0.4rem 0.6rem", textAlign:"left", fontSize:"0.65rem", fontWeight:700, color:"rgba(255,255,255,0.4)", letterSpacing:"0.07em", textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>
                                   ))}
                                 </tr>
                               </thead>
                               <tbody>
                                 {visits.map((v,i) => {
-                                  const low        = isLow(v);
-                                  const cv         = v.avg_clarification ?? 0;
-                                  const cp         = convPct(v);
-                                  const decPct     = (c1Clarf > 0 && v.visit_rank > 1 && !low)
+                                  const low         = isLow(v);
+                                  const cv          = v.avg_clarification ?? 0;
+                                  const cp          = convPct(v);
+                                  const decPct      = (c1Clarf > 0 && v.visit_rank > 1 && !low)
                                     ? Math.round((1 - cv / c1Clarf) * 100) : null;
                                   const isDisrupted = v.visit_rank === 4;
-                                  const isSmallN    = v.learner_count < 5;
-                                  const rowOpacity  = isSmallN ? 0.5 : low ? 0.45 : 1;
                                   return (
                                     <React.Fragment key={i}>
-                                      <tr style={{ borderBottom: isDisrupted ? "none" : "1px solid rgba(255,255,255,0.04)", opacity: rowOpacity }}>
+                                      <tr style={{ borderBottom: isDisrupted ? "none" : "1px solid rgba(255,255,255,0.04)", opacity: low ? 0.45 : 1 }}>
                                         <td style={{ padding:"0.45rem 0.6rem", color: isDisrupted ? A.red : "rgba(255,255,255,0.85)", fontWeight:600, whiteSpace:"nowrap" }}>
-                                          Mo.{v.visit_rank}
-                                          {low ? " ⚠" : ""}
-                                          {isDisrupted ? " 🔴" : ""}
-                                          {isSmallN && !isDisrupted ? ` (n=${v.learner_count})` : ""}
+                                          Mo.{v.visit_rank}{low ? " ⚠" : ""}{isDisrupted ? " 🔴" : ""}
                                         </td>
                                         <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.5)", fontFamily:"monospace" }}>
                                           {v.learner_count}
@@ -713,7 +778,7 @@ const PublicLandingPage: React.FC = () => {
                                         <td style={{ padding:"0.45rem 0.6rem", color:"rgba(255,255,255,0.35)", fontFamily:"monospace", fontSize:"0.72rem" }}>
                                           {v.total_sessions > 0 ? v.total_sessions.toLocaleString() : "—"}
                                         </td>
-                                        <td style={{ padding:"0.45rem 0.6rem", color: (v.total_certs ?? 0) > 0 ? A.amber : "rgba(255,255,255,0.2)", fontFamily:"monospace", fontWeight:700, fontSize:"0.72rem" }}>
+                                        <td style={{ padding:"0.45rem 0.6rem", color:(v.total_certs ?? 0) > 0 ? A.amber : "rgba(255,255,255,0.2)", fontFamily:"monospace", fontWeight:700, fontSize:"0.72rem" }}>
                                           {(v.total_certs ?? 0) > 0 ? v.total_certs : "—"}
                                         </td>
                                       </tr>
@@ -724,7 +789,7 @@ const PublicLandingPage: React.FC = () => {
                                               <span style={{ fontSize:"0.75rem", flexShrink:0 }}>🔴</span>
                                               <span style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.5)", lineHeight:1.55 }}>
                                                 <strong style={{ color:"rgba(248,113,113,0.9)" }}>Disruption — Mo.4:</strong>{" "}
-                                                Community access severely reduced during this period due to two simultaneous crises: rainy season solar power outages eliminated reliable electricity, and the programme's on-the-ground leader suffered a home fire requiring family relocation. Sessions dropped from 136 (Mo.3) to 15. Spike in clarifications (11.44) reflects learners re-engaging after a gap, not regression. Data from this month should be interpreted with caution.
+                                                Rainy season solar power outages eliminated reliable electricity, and the programme's on-the-ground leader suffered a home fire requiring family relocation. Sessions dropped from 136 (Mo.3) to 15. The clarification spike reflects learners re-engaging after a gap, not regression.
                                               </span>
                                             </div>
                                           </td>
@@ -738,8 +803,6 @@ const PublicLandingPage: React.FC = () => {
                           </div>
                           <p style={note}>
                             Mo.N = every learner's Nth month of use. ⚠ = fewer than 2 sessions per learner on average — scores unreliable.
-                            🔴 Mo.4 = disruption period (solar power outage + leader home fire) — interpret with caution.
-                            Months with fewer than 5 learners are not shown (k-anonymity threshold).
                             All claims are associative · no control group.
                           </p>
                         </div>
@@ -764,7 +827,7 @@ const PublicLandingPage: React.FC = () => {
                         </div>
                         <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1.25rem", lineHeight:1.55, maxWidth:700 }}>
                           Scores measured from AI session transcripts. Each point = average score for all learners at that stage.
-                          Low-engagement months (⚠), the Mo.4 disruption period (🔴), and months below the 5-learner k-anonymity threshold are excluded from trendlines.
+                          Low-engagement months (⚠) are excluded from trendlines.
                         </p>
                         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1rem" }}>
                           {([
@@ -860,8 +923,6 @@ const PublicLandingPage: React.FC = () => {
                           Mo.3 only those who returned for a third, and so on. Smaller n at higher months is expected and healthy — it means
                           the platform is continuously enrolling new learners while a committed core keeps returning.
                           Skill gains at Mo.3+ are the strongest signal of genuine capability formation.
-                          The Mo.4 dip reflects a real-world disruption — simultaneous rainy season power outages and a community leader crisis — not a learning regression.
-                          Months with fewer than 5 learners are not shown in accordance with k-anonymity privacy standards.
                         </p>
                       </div>
 
@@ -928,6 +989,110 @@ const PublicLandingPage: React.FC = () => {
             )}
           </div>
         </div>
+
+
+        {/* ── Activity Stream Chart ────────────────────────────────────────── */}
+        <section style={{ background: "linear-gradient(135deg,#0c160a 0%,#162612 50%,#0c160a 100%)", padding: "3rem 2rem 4rem" }}>
+          <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+            <div style={{ textAlign:"center", marginBottom:"2rem" }}>
+              <div style={{ fontSize:"0.7rem", fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", color:"#fbbf24", marginBottom:"0.6rem" }}>
+                How learners spend their time
+              </div>
+              <h3 style={{ fontFamily:"'Playfair Display',serif", fontSize:"clamp(1.3rem,3vw,1.9rem)", fontWeight:700, color:"#fff", margin:"0 0 0.5rem" }}>
+                Activity stream composition — Jul 2025 to May 2026
+              </h3>
+              <p style={{ color:"rgba(255,255,255,0.45)", fontSize:"0.85rem", maxWidth:620, margin:"0 auto", lineHeight:1.7 }}>
+                From AI Proficiency and Tech Skills in the early months, through community-led English Foundations in March,
+                to Math and Science launching in late April. Sep–Jan reflects the disruption and cohort consolidation period.
+                May dip = rainy season solar outage + community leader home fire.
+              </p>
+            </div>
+
+            <div style={{ display:"flex", flexWrap:"wrap", gap:"12px", marginBottom:"1.25rem", justifyContent:"center" }}>
+              {[
+                { color:"#534AB7", label:"AI proficiency & skills" },
+                { color:"#1D9E75", label:"Tech skills" },
+                { color:"#D85A30", label:"Community impact" },
+                { color:"#378ADD", label:"English" },
+                { color:"#BA7517", label:"Math" },
+                { color:"#888780", label:"Science" },
+              ].map(s => (
+                <span key={s.label} style={{ display:"flex", alignItems:"center", gap:6, fontSize:"0.75rem", color:"rgba(255,255,255,0.6)" }}>
+                  <span style={{ width:10, height:10, borderRadius:2, background:s.color, flexShrink:0 }} />
+                  {s.label}
+                </span>
+              ))}
+            </div>
+
+            {(() => {
+              const months = ['Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May'];
+              const streams = [
+                { label:'AI Proficiency & Skills', color:'#534AB7', data:[1246,1268,154,218,406,113,82,353,2074,4838,1714] },
+                { label:'Tech Skills',             color:'#1D9E75', data:[ 595, 465, 59, 82, 223, 86,62,  89, 282, 742, 217] },
+                { label:'Community Impact',        color:'#D85A30', data:[   0,   0,  0,  0,   0,  0, 0,   0,  32, 108, 101] },
+                { label:'English',                 color:'#378ADD', data:[   0,   0,  0,  0,   0,  0, 0,   0, 120, 140,  22] },
+                { label:'Math',                    color:'#BA7517', data:[   0,   0,  0,  0,   0,  0, 0,   0,   0,   0,  51] },
+                { label:'Science',                 color:'#888780', data:[   0,   0,  0,  0,   0,  0, 0,   0,   0,   0,   4] },
+              ];
+              const totals = months.map((_,i) => streams.reduce((s,st) => s + st.data[i], 0));
+              const W = 1100, H = 200, PT = 8, PB = 28;
+              const barW = W / months.length;
+              const iH = H - PT - PB;
+              return (
+                <div style={{ overflowX:"auto" }}>
+                  <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", minWidth:480, display:"block" }}>
+                    {[0,25,50,75,100].map(pct => (
+                      <line key={pct} x1={0} x2={W} y1={PT + iH*(1-pct/100)} y2={PT + iH*(1-pct/100)}
+                        stroke="rgba(255,255,255,0.06)" strokeWidth={1}/>
+                    ))}
+                    {months.map((month, mi) => {
+                      const total = totals[mi];
+                      let cumH = 0;
+                      const x = mi * barW + barW * 0.05;
+                      const bw = barW * 0.9;
+                      const isDisruption = mi >= 2 && mi <= 6;
+                      return (
+                        <g key={month}>
+                          {streams.map(st => {
+                            const pct = total > 0 ? st.data[mi] / total : 0;
+                            const bh = pct * iH;
+                            const y = PT + iH - cumH - bh;
+                            cumH += bh;
+                            if (bh < 0.5) return null;
+                            return <rect key={st.label} x={x} y={y} width={bw} height={bh} fill={st.color} opacity={isDisruption ? 0.5 : 0.88} />;
+                          })}
+                          {isDisruption && (
+                            <rect x={x} y={PT} width={bw} height={3} fill="rgba(248,113,113,0.6)" />
+                          )}
+                          <text x={x + bw/2} y={H-6} textAnchor="middle" fontSize={10} fill="rgba(255,255,255,0.4)">{month}</text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginTop:"0.4rem" }}>
+                    <span style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.3)" }}>Jul 2025</span>
+                    <span style={{ fontSize:"0.68rem", color:"rgba(248,113,113,0.55)" }}>← disruption period dimmed →</span>
+                    <span style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.3)" }}>May 2026</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:"0.75rem", marginTop:"1.5rem" }}>
+              {[
+                { color:"#378ADD", month:"Mar 2026", label:"English Foundations", note:"Driven by learners who flagged peers couldn't type — community-identified gap" },
+                { color:"#BA7517", month:"Late Apr 2026", label:"Math & Science launch", note:"Math adopted 10× faster than science — revealed community preference for economic literacy" },
+                { color:"#f87171", month:"May 2026", label:"Disruption month", note:"Rainy season solar outage + community leader home fire — not a learning regression" },
+              ].map(a => (
+                <div key={a.label} style={{ background:"rgba(255,255,255,0.04)", border:`1px solid ${a.color}33`, borderRadius:10, padding:"0.85rem 1rem" }}>
+                  <div style={{ fontSize:"0.62rem", fontWeight:700, color:a.color, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"0.25rem" }}>{a.month}</div>
+                  <div style={{ fontSize:"0.78rem", fontWeight:600, color:"#fff", marginBottom:"0.25rem" }}>{a.label}</div>
+                  <div style={{ fontSize:"0.7rem", color:"rgba(255,255,255,0.4)", lineHeight:1.55 }}>{a.note}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
         {/* ── Video ──────────────────────────────────────────────────────── */}
         <section style={{ background: "#0c160a", padding: "4rem 2rem" }}>
@@ -1457,75 +1622,7 @@ const PublicLandingPage: React.FC = () => {
           </div>
         </section>
 
-        {/* ── Programmes ──────────────────────────────────────────────────── */}
-        <section id="programmes" style={{ background: "#fff", padding: "5rem 2rem" }}>
-          <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-            <div style={{ marginBottom: "2.5rem" }}>
-              <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#d97706", marginBottom: "0.6rem" }}>
-                What We Teach
-              </div>
-              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(1.7rem,4vw,2.6rem)", fontWeight: 700, color: "#1a1208", margin: "0 0 0.75rem" }}>
-                Four pathways to capability
-              </h2>
-              <p style={{ color: "rgba(26,18,8,0.58)", maxWidth: 580, lineHeight: 1.72, margin: 0 }}>
-                Every pathway is AI-scaffolded, locally grounded, and designed to meet learners
-                exactly where they are — from zero digital experience to job-ready skills.
-              </p>
-            </div>
-            <div className="prog-grid">
-              <ProgramCard
-                icon={<Brain size={22} />}
-                title="English Skills & AI Learning"
-                accent="#0d9488" bg="#f0fdfa"
-                desc="Foundation-first learning that builds English fluency alongside AI literacy — starting from zero, adapted to each learner's communication level."
-                items={[
-                  "Adaptive English reading and writing",
-                  "AI concepts, ethics, and responsible use",
-                  "AI-900 and AI Ready Skills certification prep",
-                  "Socratic tutoring that meets you at your level",
-                ]}
-              />
-              <ProgramCard
-                icon={<Code size={22} />}
-                title="Tech Skills Workshop"
-                accent="#7c3aed" bg="#faf5ff"
-                desc="Hands-on technical training in the tools that open doors to remote work, freelancing, and entrepreneurship."
-                items={[
-                  "Vibe coding and web development",
-                  "Full-stack app development",
-                  "AI workflow and agent development",
-                  "AI for business — strategy and operations",
-                  "Microsoft AI-900, AB-730, GitHub GH-300",
-                ]}
-              />
-              <ProgramCard
-                icon={<ImagePlus size={22} />}
-                title="AI Creative Studio"
-                accent="#d97706" bg="#fffbeb"
-                desc="Creative AI tools that unlock new income streams and community storytelling capabilities."
-                items={[
-                  "AI image generation and editing",
-                  "AI voice creation and narration",
-                  "AI video production and studio",
-                  "AI content creation for business",
-                ]}
-              />
-              <ProgramCard
-                icon={<Globe size={22} />}
-                title="Community Impact AI"
-                accent="#16a34a" bg="#f0fdf4"
-                desc="AI-assisted consulting grounded in the real economic and ecological contexts of Oloibiri, Ibiade, and similar communities."
-                items={[
-                  "Agriculture and cassava farming consultant",
-                  "Fishing and creek ecology advisor",
-                  "Healthcare navigator",
-                  "Entrepreneurship and enterprise planning",
-                  "Animal husbandry advisor",
-                ]}
-              />
-            </div>
-          </div>
-        </section>
+
 
         {/* ── New Communities ──────────────────────────────────────────────── */}
         <div id="community" style={{ position: "relative" }}>
