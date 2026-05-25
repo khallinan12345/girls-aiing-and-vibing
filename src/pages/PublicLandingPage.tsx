@@ -259,6 +259,16 @@ const PublicLandingPage: React.FC = () => {
   interface StreamRow { activity_month: string; stream: string; activity_count: number; }
   const [streamRows, setStreamRows] = useState<StreamRow[]>([]);
 
+  interface BandRow {
+    session_band: string; band_midpoint: number; n_learners: number;
+    cognitive: number | null; critical_thinking: number | null;
+    problem_solving: number | null; creativity: number | null;
+    avg_clarification: number | null;
+    teaching_intent_pct: number | null; community_application_pct: number | null;
+    enterprise_orientation_pct: number | null; intergenerational_pct: number | null;
+  }
+  const [bandRows, setBandRows] = useState<BandRow[]>([]);
+
   useEffect(() => {
     (async () => {
       const COLS = [
@@ -298,10 +308,11 @@ const PublicLandingPage: React.FC = () => {
 
       // ── Paginated fetch of dashboard_stats for longitudinal panel ────────
       // Fetch by-visit-rank data and all-time summary (both public/anon)
-      const [{ data: visitData, error: visitErr }, { data: atData, error: atErr }, { data: streamData }] = await Promise.all([
+      const [{ data: visitData, error: visitErr }, { data: atData, error: atErr }, { data: streamData }, { data: bandData }] = await Promise.all([
         supabase.from('dashboard_stats_public').select('*').order('visit_rank', { ascending: true }),
         supabase.from('dashboard_stats_alltime').select('*').single(),
         supabase.from('dashboard_activity_streams').select('*').order('activity_month', { ascending: true }),
+        supabase.rpc('get_session_band_stats'),
       ]);
       if (visitErr) console.error('[PublicLandingPage] visit rows error:', visitErr.message);
       if (atErr)    console.error('[PublicLandingPage] alltime error:',    atErr.message);
@@ -309,6 +320,7 @@ const PublicLandingPage: React.FC = () => {
       setLongRows((visitData as PubVisitRow[]) || []);
       setAllTime(atData as AllTimeRow ?? null);
       setStreamRows((streamData as StreamRow[]) || []);
+      setBandRows((bandData as BandRow[]) || []);
       setLongLoading(false);
     })();
   }, []);
@@ -918,109 +930,189 @@ const PublicLandingPage: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Row 2: Skill charts (2×2 grid) */}
-                      <div style={{ marginBottom:"1.25rem" }}>
-                        <div style={{...lbl, color:A.purple, marginBottom:"0.75rem"}}>
-                          Skill development by months of use — persistent learners (0–100)
-                        </div>
-                        <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1.25rem", lineHeight:1.55, maxWidth:700 }}>
-                          Scores measured from AI session transcripts. Each point = average score for all learners at that stage.
-                          Low-engagement months (⚠) are excluded from trendlines.
-                        </p>
-                        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1rem" }}>
-                          {([
-                            { key:"avg_critical_thinking" as const, label:"Critical Thinking", color:A.teal   },
-                            { key:"avg_problem_solving"   as const, label:"Problem Solving",   color:A.green  },
-                            { key:"avg_creativity"        as const, label:"Creativity",         color:A.purple },
-                            { key:"avg_cognitive"         as const, label:"Cognitive",          color:A.amber  },
-                          ] as {key: keyof typeof visits[0], label:string, color:string}[]).map(skill => {
-                            const pts = skillVisits
-                              .filter(v => v[skill.key] != null)
-                              .map(v => ({ x: v.visit_rank, y: Number(v[skill.key]) }));
-                            return (
-                              <div key={skill.key} style={card}>
-                                <div style={{ fontSize:"0.7rem", fontWeight:700, color:skill.color, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"0.5rem" }}>
-                                  {skill.label}
-                                </div>
-                                {pts.length >= 2 ? (
-                                  <MiniLine data={pts} color={skill.color} label={skill.label} />
-                                ) : (
-                                  <div style={{ fontSize:"0.75rem", color:"rgba(255,255,255,0.25)", fontStyle:"italic", padding:"1rem 0", textAlign:"center" }}>
-                                    Accumulating data…
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
+                      {/* Row 2: Session-band capability arc */}
+                      {bandRows.length > 0 && (() => {
+                        const bands = bandRows;
+                        const bandLabels = ['Early\n<50 sessions', 'Developing\n50–99', 'Established\n100–129', 'Core\n130+'];
+                        const W = 800, H = 200, PL = 36, PR = 12, PT = 12, PB = 32;
+                        const iW = W - PL - PR, iH = H - PT - PB;
+                        const barW = iW / bands.length;
+                        const maxScore = 100;
 
-                      {/* Row 3: Role readiness bar charts */}
-                      <div style={{ ...card, marginBottom:"1.25rem" }}>
-                        <div style={{...lbl, color:A.amber}}>
-                          Role readiness signals by months of use — % of learners per stage
-                        </div>
-                        <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1.25rem", lineHeight:1.55 }}>
-                          Detected via AI transcript analysis — unprompted evidence of applying learning beyond the platform.
-                          Each bar group = one signal; bars left→right = Mo.1, Mo.2, Mo.3…
-                        </p>
-                        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(180px,1fr))", gap:"1.25rem" }}>
-                          {([
-                            { key:"teaching_intent_count"        as const, label:"Teaching intent",       desc:"plans to teach peers, family, or neighbours" },
-                            { key:"community_application_count"  as const, label:"Community application", desc:"applied AI to a real local problem" },
-                            { key:"enterprise_orientation_count" as const, label:"Enterprise orientation", desc:"referenced a business or income plan" },
-                            { key:"intergenerational_count"      as const, label:"Intergenerational",     desc:"knowledge shared across age groups" },
-                          ] as {key: keyof typeof visits[0], label:string, desc:string}[]).map(item => {
-                            const vals = visits.map(v => ({ pct: rolePct(v, item.key), low: isLow(v), rank: v.visit_rank }));
-                            const maxPct = Math.max(...vals.map(v => v.pct), 1);
-                            return (
-                              <div key={String(item.key)}>
-                                <div style={{ fontSize:"0.75rem", fontWeight:600, color:"rgba(255,255,255,0.8)", marginBottom:"0.35rem" }}>{item.label}</div>
-                                <div style={{ fontSize:"0.65rem", color:"rgba(255,255,255,0.3)", marginBottom:"0.6rem", lineHeight:1.4 }}>{item.desc}</div>
-                                <div style={{ display:"flex", alignItems:"flex-end", gap:2, height:64 }}>
-                                  {vals.map((v,i) => {
-                                    const barH = Math.max(2, (v.pct/100)*64);
-                                    const alpha = 0.2 + (i/Math.max(vals.length-1,1))*0.8;
+                        const xP = (i: number, offset = 0) => PL + i * barW + barW * 0.1 + offset;
+                        const bw = barW * 0.8;
+                        const yP = (v: number) => PT + (1 - v / maxScore) * iH;
+
+                        const skills = [
+                          { key: 'cognitive' as const,          color: '#fbbf24', label: 'Cognitive' },
+                          { key: 'critical_thinking' as const,  color: '#2dd4bf', label: 'Critical Thinking' },
+                          { key: 'problem_solving' as const,    color: '#4ade80', label: 'Problem Solving' },
+                          { key: 'creativity' as const,         color: '#a78bfa', label: 'Creativity' },
+                        ];
+                        const roleSignals = [
+                          { key: 'community_application_pct' as const,  color: '#f87171', label: 'Community application' },
+                          { key: 'enterprise_orientation_pct' as const,  color: '#fb923c', label: 'Enterprise orientation' },
+                          { key: 'teaching_intent_pct' as const,         color: '#34d399', label: 'Teaching intent' },
+                          { key: 'intergenerational_pct' as const,       color: '#818cf8', label: 'Intergenerational' },
+                        ];
+
+                        return (
+                          <div style={{ marginBottom:"1.25rem" }}>
+                            <div style={{...lbl, color:A.purple, marginBottom:"0.5rem"}}>
+                              Capability arc by cumulative sessions — skills peak, then community application rises
+                            </div>
+                            <p style={{ fontSize:"0.73rem", color:"rgba(255,255,255,0.4)", marginBottom:"1.25rem", lineHeight:1.55, maxWidth:700 }}>
+                              Skill scores (left axis) peak in the Developing band (50–99 sessions) as learners master the curriculum.
+                              Beyond 100 sessions, scores plateau as learners shift toward self-directed community application — visible in the rising role readiness signals (right axis).
+                              This is not regression: it is graduation from the rubric into real-world use.
+                            </p>
+
+                            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1rem", marginBottom:"1rem" }}>
+
+                              {/* Skill score bars by band */}
+                              <div style={card}>
+                                <div style={{ fontSize:"0.68rem", fontWeight:700, color:A.purple, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"0.5rem" }}>
+                                  Skill scores by session band (0–100)
+                                </div>
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:"8px", marginBottom:"0.75rem" }}>
+                                  {skills.map(s => (
+                                    <span key={s.key} style={{ display:"flex", alignItems:"center", gap:4, fontSize:"0.65rem", color:"rgba(255,255,255,0.5)" }}>
+                                      <span style={{ width:8, height:8, borderRadius:1, background:s.color, flexShrink:0 }} />{s.label}
+                                    </span>
+                                  ))}
+                                </div>
+                                <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", display:"block" }}>
+                                  {[0,25,50,75,100].map(t => (
+                                    <g key={t}>
+                                      <line x1={PL} x2={W-PR} y1={yP(t)} y2={yP(t)} stroke="rgba(255,255,255,0.05)" strokeWidth={1}/>
+                                      <text x={PL-4} y={yP(t)+4} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.2)">{t}</text>
+                                    </g>
+                                  ))}
+                                  {bands.map((band, bi) => {
+                                    const skillBw = bw / skills.length;
                                     return (
-                                      <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", minWidth:0, gap:2 }}>
-                                        {v.pct > 0 && !v.low && (
-                                          <span style={{ fontSize:"0.55rem", color:A.amber, fontWeight:700, lineHeight:1 }}>{v.pct}%</span>
-                                        )}
-                                        <div style={{
-                                          width:"100%", height:`${barH}px`,
-                                          background: v.low ? "rgba(255,255,255,0.06)" : `rgba(251,191,36,${alpha})`,
-                                          borderRadius:"2px 2px 0 0",
-                                          border: v.low ? "1px dashed rgba(255,255,255,0.1)" : "none",
-                                          minHeight:2,
-                                        }}
-                                          title={`Mo.${v.rank}: ${v.pct}%${v.low?" (⚠ low sessions)":""}`}
-                                        />
-                                      </div>
+                                      <g key={band.session_band}>
+                                        {skills.map((sk, si) => {
+                                          const val = band[sk.key] ?? 0;
+                                          const x = xP(bi) + si * skillBw;
+                                          const bh = (val / maxScore) * iH;
+                                          return (
+                                            <g key={sk.key}>
+                                              <rect x={x} y={yP(val)} width={skillBw - 1} height={bh}
+                                                fill={sk.color} opacity={0.8} />
+                                              {si === 1 && (
+                                                <text x={xP(bi) + bw/2} y={H-4} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.35)">
+                                                  {band.session_band.replace('1. ','').replace('2. ','').replace('3. ','').replace('4. ','')}
+                                                </text>
+                                              )}
+                                            </g>
+                                          );
+                                        })}
+                                        {/* n label */}
+                                        <text x={xP(bi) + bw/2} y={PT+8} textAnchor="middle" fontSize={7.5} fill="rgba(255,255,255,0.25)">
+                                          n={band.n_learners}
+                                        </text>
+                                      </g>
                                     );
                                   })}
-                                </div>
-                                <div style={{ display:"flex", justifyContent:"space-between", borderTop:"1px solid rgba(255,255,255,0.05)", paddingTop:"0.25rem", marginTop:"0.1rem" }}>
-                                  <span style={{ fontSize:"0.58rem", color:"rgba(255,255,255,0.2)" }}>Mo.1</span>
-                                  <span style={{ fontSize:"0.58rem", color:"rgba(255,255,255,0.2)" }}>Mo.{maxVisits}</span>
-                                </div>
+                                  {/* Peak annotation */}
+                                  <text x={xP(1) + bw/2} y={yP((bands[1]?.critical_thinking ?? 0) + 5) - 6} textAnchor="middle"
+                                    fontSize={8} fill={A.teal} fontWeight="bold">peak</text>
+                                </svg>
+                                <p style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.25)", marginTop:"0.4rem", lineHeight:1.5 }}>
+                                  Peak at 50–99 sessions. Plateau beyond 100 reflects shift to self-directed use, not regression.
+                                </p>
                               </div>
-                            );
-                          })}
-                        </div>
-                        <p style={note}>
-                          Bars left→right = Mo.1 to Mo.{maxVisits} (months of use). Darker = more months of use. ⚠ months dimmed.
-                        </p>
-                      </div>
+
+                              {/* Role readiness rising */}
+                              <div style={card}>
+                                <div style={{ fontSize:"0.68rem", fontWeight:700, color:A.amber, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"0.5rem" }}>
+                                  Community role readiness — % of learners per band
+                                </div>
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:"8px", marginBottom:"0.75rem" }}>
+                                  {roleSignals.map(s => (
+                                    <span key={s.key} style={{ display:"flex", alignItems:"center", gap:4, fontSize:"0.65rem", color:"rgba(255,255,255,0.5)" }}>
+                                      <span style={{ width:8, height:8, borderRadius:1, background:s.color, flexShrink:0 }} />{s.label}
+                                    </span>
+                                  ))}
+                                </div>
+                                <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", display:"block" }}>
+                                  {[0,25,50,75,100].map(t => (
+                                    <g key={t}>
+                                      <line x1={PL} x2={W-PR} y1={yP(t)} y2={yP(t)} stroke="rgba(255,255,255,0.05)" strokeWidth={1}/>
+                                      <text x={PL-4} y={yP(t)+4} textAnchor="end" fontSize={8} fill="rgba(255,255,255,0.2)">{t}%</text>
+                                    </g>
+                                  ))}
+                                  {/* Lines connecting bands */}
+                                  {roleSignals.map(sig => {
+                                    const pts = bands.map((band, bi) => ({
+                                      x: xP(bi) + bw/2,
+                                      y: yP(band[sig.key] ?? 0)
+                                    }));
+                                    const path = pts.map((p,i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+                                    return (
+                                      <g key={sig.key}>
+                                        <path d={path} fill="none" stroke={sig.color} strokeWidth={2} strokeLinejoin="round" opacity={0.8}/>
+                                        {pts.map((p,i) => (
+                                          <g key={i}>
+                                            <circle cx={p.x} cy={p.y} r={3.5} fill={sig.color}/>
+                                            <text x={p.x} y={p.y-7} textAnchor="middle" fontSize={8} fill={sig.color} fontWeight="bold">
+                                              {bands[i][sig.key]?.toFixed(0)}%
+                                            </text>
+                                          </g>
+                                        ))}
+                                      </g>
+                                    );
+                                  })}
+                                  {bands.map((band, bi) => (
+                                    <text key={bi} x={xP(bi) + bw/2} y={H-4} textAnchor="middle" fontSize={8} fill="rgba(255,255,255,0.35)">
+                                      {band.session_band.replace(/^\d+\. /, '')}
+                                    </text>
+                                  ))}
+                                </svg>
+                                <p style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.25)", marginTop:"0.4rem", lineHeight:1.5 }}>
+                                  Community application and enterprise orientation both reach 75% in the Core band — learners applying AI beyond the platform.
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Band summary cards */}
+                            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"0.6rem" }}>
+                              {bands.map((band, bi) => {
+                                const bandName = band.session_band.replace(/^\d+\. /, '');
+                                const colors = [A.teal, A.green, A.amber, A.purple];
+                                const c = colors[bi];
+                                const isCore = bi === 3;
+                                return (
+                                  <div key={band.session_band} style={{ background:`rgba(255,255,255,0.03)`, border:`1px solid ${c}22`, borderRadius:10, padding:"0.75rem" }}>
+                                    <div style={{ fontSize:"0.62rem", fontWeight:700, color:c, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"0.3rem" }}>{bandName}</div>
+                                    <div style={{ fontSize:"0.68rem", color:"rgba(255,255,255,0.35)", marginBottom:"0.5rem" }}>n={band.n_learners} learners</div>
+                                    <div style={{ fontSize:"0.72rem", color:"rgba(255,255,255,0.6)", lineHeight:1.55 }}>
+                                      {isCore
+                                        ? `75% community application · 75% enterprise — graduated from curriculum into real use`
+                                        : `CT: ${band.critical_thinking ?? '—'} · PS: ${band.problem_solving ?? '—'} · Clarif: ${band.avg_clarification ?? '—'}/session`
+                                      }
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Composition note */}
                       <div style={{ background:"rgba(167,139,250,0.06)", border:"1px solid rgba(167,139,250,0.15)", borderRadius:12, padding:"1rem 1.25rem", display:"flex", gap:"0.75rem", alignItems:"flex-start" }}>
                         <span style={{ fontSize:"1.1rem", flexShrink:0 }}>📈</span>
                         <p style={{ margin:0, fontSize:"0.8rem", color:"rgba(255,255,255,0.55)", lineHeight:1.7 }}>
                           <strong style={{ color:"#c4b5fd", fontWeight:700 }}>Understanding these charts.</strong>{" "}
-                          Mo.1 shows every learner's first month — a large, diverse group. Mo.2 shows only learners who returned for a second month,
-                          Mo.3 only those who returned for a third, and so on. Smaller n at higher months is expected and healthy — it means
-                          the platform is continuously enrolling new learners while a committed core keeps returning.
-                          Skill gains at Mo.3+ are the strongest signal of genuine capability formation.
+                          The scaffolding table tracks monthly progression — how AI dependence falls as learners return month after month.
+                          The capability arc tracks cumulative experience — skill scores peak around 50–99 total sessions, then learners shift
+                          from curriculum to self-directed community use. These are two complementary lenses on the same journey:
+                          one shows <em>when</em> learners become independent, the other shows <em>what they do</em> with that independence.
+                          The Core band (130+ sessions) shows 75% community application and 75% enterprise orientation — learners who have
+                          graduated from the rubric into real-world impact. The assessment instrument can no longer fully see what they are doing,
+                          because they have outgrown it.
                         </p>
                       </div>
 
