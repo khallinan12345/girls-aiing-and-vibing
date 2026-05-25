@@ -65,6 +65,8 @@ import FullStackCertificationPage from './pages/tech-skills/FullStackCertificati
 import AIWorkflowDevCertificationPage from './pages/tech-skills/AIWorkflowDevCertificationPage';
 import AIForBusinessCertificationPage from './pages/tech-skills/AIForBusinessCertificationPage';
 import AIContentCreationCertificationPage from './pages/tech-skills/AIContentCreationCertificationPage';
+import TechSkillsPage from './pages/TechSkillsPage';
+
 
 // Legacy pages - kept for backwards compatibility
 import CodeAssistantPage from './pages/CodeAssistantPage';
@@ -225,6 +227,7 @@ const AppContent: React.FC = () => {
         <Route path="/tech-skills/microsoft-ai900" element={<MicrosoftAI900Page />} />
         <Route path="/tech-skills/microsoft-ab730" element={<MicrosoftAB730Page />} />
         <Route path="/tech-skills/github-gh300" element={<MicrosoftGH300Page />} />
+        <Route path="/tech-skills" element={<TechSkillsPage />} />
 
         {/* Community Impact Routes */}
         <Route path="/community-impact/ai-ambassadors" element={<AIAmbassadorsPage />} />
