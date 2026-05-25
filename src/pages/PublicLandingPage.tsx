@@ -1135,8 +1135,8 @@ const PublicLandingPage: React.FC = () => {
                       },
                       {
                         icon: "🌍",
-                        term: "Role-Ready",
-                        def: "Learners showing evidence they are applying skills beyond the platform — teaching peers, advising on community problems, planning micro-enterprises, or sharing knowledge across generations. This is the platform's core mission outcome."
+                        term: "Community Role-Ready",
+                        def: "Learners showing evidence they are taking AI into their community — measured by the activities they engage in and the AI's evaluation of their ability to teach others, advise on community problems, plan micro-enterprises, and share knowledge across generations. This is the platform's core mission outcome. A vivid example: Solomon Matthias Solomon, who has established himself as a Healthcare Triage Worker using AI as a daily partner — navigating patients, triaging needs, and advising families in Oloibiri where formal health infrastructure barely reaches."
                       },
                       {
                         icon: "🔧",
