@@ -52,6 +52,7 @@ interface DiagItem {
   summary: string;
   def: string;
   detail: string;
+  submitPrompt: string;
 }
 
 type TaskStatus = 'locked' | 'available' | 'submitted' | 'pass' | 'needs_work';
@@ -72,19 +73,22 @@ const DIAGNOSTICS: DiagItem[] = [
     q: 'Auth test',
     summary: 'Explain the full auth flow end-to-end without looking at code — edge cases, not the happy path.',
     def: "Authentication verifies that a user is who they claim to be. The 'happy path' is what happens when everything works perfectly. Edge cases are everything else: what happens when a token expires mid-session? When a user tries to log in with the wrong password three times? When Supabase is temporarily unreachable? When a session cookie is present but the user was deleted from the database?",
-    detail: 'On nextvillage.community, your auth is handled by Supabase Auth. Walk through: how a learner signs up, how their session token is stored, what happens when that token expires, what happens if they open two browser tabs, and what error your platform shows when auth fails. Do this out loud, from memory, before looking at any code. Write down where you got stuck — those are your gaps.',
+    detail: 'On your platform (nextvillage.community or your own full-stack app), your auth is likely handled by Supabase Auth. Walk through: how a user signs up, how their session token is stored, what happens when that token expires, what happens if they open two browser tabs, and what error your platform shows when auth fails. Do this out loud, from memory, before looking at any code. Write down where you got stuck — those are your gaps.',
+    submitPrompt: 'Write out your platform's auth flow from memory — no IDE, no code open. Cover: (1) how a new user registers, (2) how the session token is stored and refreshed, (3) what happens when the token expires mid-session, (4) at least two edge cases your platform handles (or should handle). Name your platform at the top (nextvillage.community or your own). The evaluator is looking for specificity, not perfection — honest gaps are fine.',
   },
   {
     q: 'Debug test',
     summary: 'Walk through a recent bug: what was your hypothesis before you ran the fix?',
     def: "A hypothesis is a testable explanation for why something is broken, formed before you look at the solution. Most developers go straight from 'error message' to 'fix.' Hypothesis first: 'I think the problem is X because Y, and I can verify by doing Z.' This distinguishes a developer who owns a system from one who merely maintains it.",
-    detail: 'Think of the last bug you fixed on nextvillage.community. Write: what did you think was wrong before you ran the fix? Was your guess right? If you cannot reconstruct a hypothesis, that is your baseline — and Phase 2 is designed to build this muscle deliberately.',
+    detail: 'Think of the last bug you fixed on your platform. Write: what did you think was wrong before you ran the fix? Was your guess right? If you cannot reconstruct a hypothesis, that is your baseline — and Phase 2 is designed to build this muscle deliberately.',
+    submitPrompt: 'Describe a real bug you fixed on your platform (nextvillage.community or your own full-stack app). Structure your answer as four fields: (1) Observable symptom — what did the user or you see? (2) Your hypothesis before looking at anything — what did you think was wrong and why? (3) What you actually found. (4) Whether your hypothesis was correct, and what your mental model missed if it was wrong. One paragraph per field. The evaluator rewards honest reflection over a clean story.',
   },
   {
     q: 'Schema test',
-    summary: 'Sketch the vAI data model on paper — tables, relationships, RLS intent. No IDE.',
+    summary: 'Sketch your platform's data model on paper — tables, relationships, RLS intent. No IDE.',
     def: "A data model describes what data your application stores and how pieces relate to each other. RLS (Row Level Security) is Supabase's mechanism for controlling which users can read or write which rows — for example, a learner should only see their own assessment results, not another learner's.",
-    detail: 'On paper, draw the main tables in nextvillage.community. Name the columns you remember. Draw lines between connected tables. Write one sentence per table describing who is allowed to read it and who is allowed to write it. Where you are unsure, mark it — those are the parts of your own platform you do not fully own yet.',
+    detail: 'On paper, draw the main tables in your platform (nextvillage.community or your own full-stack app). Name the columns you remember. Draw lines between connected tables. Write one sentence per table describing who is allowed to read it and who is allowed to write it. Where you are unsure, mark it — those are the parts of your own platform you do not fully own yet.',
+    submitPrompt: 'Name your platform at the top. Then list your main database tables from memory — for each table write: the table name, the 4–6 most important columns, who can read rows (all users? only the owner? only admins?), and who can write rows. Then describe one foreign key relationship between two tables. You do not need to be complete — the evaluator is looking for genuine ownership of what you have built, and honest "I'm not sure about this one" notes are a good sign.',
   },
 ];
 
@@ -384,28 +388,195 @@ function taskKey(phaseId: string, taskName: string) {
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
-const DiagCard: React.FC<{ item: DiagItem }> = ({ item }) => {
+const DiagCard: React.FC<{
+  item: DiagItem;
+  record: ProgressRecord | null;
+  onEvaluated: (rec: ProgressRecord) => void;
+}> = ({ item, record, onEvaluated }) => {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  const [text, setText] = useState(record?.submission_text ?? '');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const passed = record?.status === 'pass';
+
+  const handleSubmit = async () => {
+    if (!text.trim() || !user?.id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const systemPrompt = `You are a rigorous but encouraging technical mentor evaluating a self-assessment submitted by a developer learner.
+
+The diagnostic is: "${item.q}"
+What good evidence looks like: ${item.submitPrompt}
+
+Evaluate the submission strictly but fairly. Respond in JSON only, no markdown, no preamble:
+{
+  "pass": true | false,
+  "feedback": "2-4 sentences. If pass=true: confirm what was demonstrated and what to carry into Phase 1. If pass=false: be specific about what is vague, missing, or needs more depth, and what to resubmit."
+}
+
+Pass criteria: the submission shows genuine self-knowledge of the learner's own platform. Vague, generic, or copy-pasted answers should not pass. Honest gaps with specific detail are fine.`;
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: text.trim() }],
+        }),
+      });
+      if (!response.ok) throw new Error(`API error ${response.status}`);
+      const data = await response.json();
+      const raw = data.content?.[0]?.text ?? '{}';
+      let parsed: { pass: boolean; feedback: string };
+      try { parsed = JSON.parse(raw.replace(/```json|```/g, '').trim()); }
+      catch { throw new Error('Could not parse evaluation response.'); }
+
+      const newStatus: TaskStatus = parsed.pass ? 'pass' : 'needs_work';
+      const { error: dbError } = await supabase
+        .from('tech_skills_progress')
+        .upsert({
+          user_id: user.id,
+          phase_id: 'diag',
+          track_label: 'Diagnostic',
+          task_name: item.q,
+          status: newStatus,
+          submission_text: text.trim(),
+          ai_feedback: parsed.feedback,
+          ai_score: parsed.pass ? 1 : 0,
+          submitted_at: new Date().toISOString(),
+          evaluated_at: new Date().toISOString(),
+          attempt_count: (record?.attempt_count ?? 0) + 1,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,phase_id,task_name' });
+      if (dbError) throw new Error(dbError.message);
+
+      onEvaluated({
+        phase_id: 'diag',
+        task_name: item.q,
+        status: newStatus,
+        submission_text: text.trim(),
+        ai_feedback: parsed.feedback,
+        attempt_count: (record?.attempt_count ?? 0) + 1,
+      });
+    } catch (e: any) {
+      setError(e.message ?? 'Evaluation failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <button
-      onClick={() => setOpen(o => !o)}
-      className="text-left w-full rounded-lg border border-purple-200 bg-white p-4 hover:shadow-sm transition-shadow"
-    >
-      <p className="text-xs font-mono uppercase tracking-wider text-purple-500 mb-1">{item.q}</p>
-      <p className="text-sm text-gray-700 leading-snug">{item.summary}</p>
+    <div className={`rounded-lg border bg-white p-4 transition-shadow hover:shadow-sm ${
+      passed ? 'border-emerald-300' : 'border-purple-200'
+    }`}>
+      {/* Header row — clickable to expand */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full text-left"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              {passed
+                ? <CheckCircle2 size={14} className="text-emerald-500 flex-shrink-0" />
+                : record?.status === 'needs_work'
+                  ? <RefreshCw size={14} className="text-amber-400 flex-shrink-0" />
+                  : <Circle size={14} className="text-purple-300 flex-shrink-0" />
+              }
+              <p className="text-xs font-mono uppercase tracking-wider text-purple-500">{item.q}</p>
+            </div>
+            <p className="text-sm text-gray-700 leading-snug">{item.summary}</p>
+          </div>
+          <span className="text-xs text-purple-300 font-mono flex-shrink-0 mt-0.5">
+            {open ? '▴' : '▾'}
+          </span>
+        </div>
+      </button>
+
       {open && (
-        <div className="mt-3 pt-3 border-t border-purple-100 text-left space-y-2">
+        <div className="mt-3 pt-3 border-t border-purple-100 space-y-3">
+          {/* Definition */}
           <div className="rounded bg-purple-50 p-2.5">
-            <span className="font-medium text-purple-700">Definition: </span>
+            <span className="font-medium text-purple-700 text-xs">Definition: </span>
             <span className="text-xs text-gray-700">{item.def}</span>
           </div>
+          {/* Detail / instructions */}
           <p className="text-xs text-gray-600 leading-relaxed">{item.detail}</p>
+
+          {/* What to submit */}
+          <div className="rounded-md p-3 bg-purple-50 border border-purple-200">
+            <p className="text-xs font-mono uppercase tracking-wider text-purple-600 mb-1 flex items-center gap-1">
+              <ClipboardList size={11} /> What to submit
+            </p>
+            <p className="text-xs text-gray-700 leading-relaxed">{item.submitPrompt}</p>
+            <p className="text-xs text-gray-400 mt-2 italic">
+              Write in plain text below. No code required — this is a self-assessment of what you already know.
+              You can work from nextvillage.community or your own full-stack platform.
+            </p>
+          </div>
+
+          {/* Prior feedback */}
+          {record?.ai_feedback && (
+            <div className={`rounded-md p-3 border ${
+              passed ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'
+            }`}>
+              <p className={`text-xs font-mono uppercase tracking-wider mb-1 ${
+                passed ? 'text-emerald-700' : 'text-amber-700'
+              }`}>
+                {passed
+                  ? <><ThumbsUp size={11} className="inline mr-1" />Passed — mentor feedback</>
+                  : <><AlertCircle size={11} className="inline mr-1" />Needs work — attempt {record.attempt_count}</>
+                }
+              </p>
+              <p className="text-xs text-gray-700 leading-relaxed">{record.ai_feedback}</p>
+            </div>
+          )}
+
+          {/* Textarea + submit */}
+          {!passed && (
+            <>
+              <textarea
+                value={text}
+                onChange={e => setText(e.target.value)}
+                placeholder="Write your answer here — be specific about your platform..."
+                rows={6}
+                className="w-full text-sm rounded-md border border-purple-200 bg-white p-3 resize-y focus:outline-none focus:ring-2 focus:ring-purple-400"
+              />
+              {error && (
+                <p className="text-xs text-red-600 flex items-center gap-1">
+                  <AlertCircle size={12} /> {error}
+                </p>
+              )}
+              <button
+                onClick={handleSubmit}
+                disabled={loading || !text.trim()}
+                className="inline-flex items-center gap-2 rounded-lg bg-purple-600 text-white text-xs font-semibold px-4 py-2 hover:bg-purple-700 transition-colors disabled:opacity-40"
+              >
+                {loading
+                  ? <><Loader2 size={13} className="animate-spin" /> Evaluating…</>
+                  : <><Send size={13} /> Submit for evaluation</>
+                }
+              </button>
+              {record?.status === 'needs_work' && (
+                <p className="text-xs text-gray-400 font-mono">
+                  Attempt {(record.attempt_count ?? 0) + 1} · revise and resubmit anytime
+                </p>
+              )}
+            </>
+          )}
+          {passed && (
+            <p className="text-xs text-emerald-600 font-mono flex items-center gap-1">
+              <CheckCircle2 size={13} /> Complete
+            </p>
+          )}
         </div>
       )}
-      <p className="text-xs text-purple-300 font-mono mt-2 text-right">
-        {open ? 'collapse ▴' : 'expand ▾'}
-      </p>
-    </button>
+    </div>
   );
 };
 
@@ -520,6 +691,7 @@ Pass criteria: the submission meaningfully addresses the task requirements descr
         <p className="text-xs text-gray-700 leading-relaxed">{task.submitPrompt}</p>
         <p className="text-xs text-gray-500 mt-2 italic">
           Paste from your terminal, AI Playground, GitHub, or document editor.
+          You can work from nextvillage.community or your own website.
           The AI evaluator checks your submission against these criteria.
         </p>
       </div>
@@ -692,9 +864,10 @@ interface PhaseSectionProps {
   phase: Phase;
   progressMap: Map<string, ProgressRecord>;
   onEvaluated: (rec: ProgressRecord) => void;
+  diagAllPassed: boolean;
 }
 
-const PhaseSection: React.FC<PhaseSectionProps> = ({ phase, progressMap, onEvaluated }) => {
+const PhaseSection: React.FC<PhaseSectionProps> = ({ phase, progressMap, onEvaluated, diagAllPassed }) => {
   const [open, setOpen] = useState(phase.id === 'p1');
 
   const phaseIcon = {
@@ -747,7 +920,7 @@ const PhaseSection: React.FC<PhaseSectionProps> = ({ phase, progressMap, onEvalu
                   const prevKey = globalIdx > 0 ? ALL_TASK_KEYS[globalIdx - 1] : null;
                   const prevPassed = prevKey
                     ? progressMap.get(prevKey)?.status === 'pass'
-                    : true; // first task always available
+                    : diagAllPassed; // first task unlocks only after diagnostics pass
                   const status: TaskStatus = rec?.status === 'pass'
                     ? 'pass'
                     : !prevPassed
@@ -825,10 +998,21 @@ const TechSkillsPage: React.FC = () => {
 
   const totalTasks = PHASES.reduce((sum, p) => sum + p.tracks.reduce((s, t) => s + t.tasks.length, 0), 0);
   const totalPassed = [...progressMap.values()].filter(r => r.status === 'pass').length;
+  const diagAllPassed = DIAGNOSTICS.every(d => progressMap.get(taskKey('diag', d.q))?.status === 'pass');
 
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-4xl mx-auto px-6 py-10 pb-20">
+
+        {/* Home button */}
+        <div className="mb-6">
+          <button
+            onClick={() => navigate('/home')}
+            className="inline-flex items-center gap-1.5 text-xs font-mono text-gray-400 hover:text-gray-700 transition-colors border border-gray-200 rounded-md px-3 py-1.5 hover:bg-gray-50"
+          >
+            ← Home
+          </button>
+        </div>
 
         {/* Header */}
         <div className="mb-10">
@@ -906,12 +1090,31 @@ const TechSkillsPage: React.FC = () => {
             </p>
           </div>
           <p className="text-xs text-purple-500 mb-4">
-            Do these before beginning Phase 1 — your answers reveal where to push hardest.
+            Complete all three before Phase 1 unlocks. Your answers reveal where to push hardest.
+            You must pass each one — the AI evaluator checks for genuine self-knowledge of your platform.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {DIAGNOSTICS.map((d, i) => <DiagCard key={i} item={d} />)}
+            {DIAGNOSTICS.map((d, i) => (
+              <DiagCard
+                key={i}
+                item={d}
+                record={progressMap.get(taskKey('diag', d.q)) ?? null}
+                onEvaluated={handleEvaluated}
+              />
+            ))}
           </div>
         </div>
+
+        {/* Phase 1 gate notice */}
+        {!loadingProgress && !diagAllPassed && (
+          <div className="mb-6 rounded-xl border border-purple-200 bg-purple-50 p-4 flex items-center gap-3">
+            <Lock size={16} className="text-purple-400 flex-shrink-0" />
+            <p className="text-xs text-purple-600">
+              <span className="font-semibold">Phase 1 is locked.</span>{' '}
+              Complete and pass all three diagnostics above to unlock the roadmap.
+            </p>
+          </div>
+        )}
 
         {/* Phases */}
         {!loadingProgress && PHASES.map(phase => (
@@ -920,6 +1123,7 @@ const TechSkillsPage: React.FC = () => {
             phase={phase}
             progressMap={progressMap}
             onEvaluated={handleEvaluated}
+            diagAllPassed={diagAllPassed}
           />
         ))}
 
