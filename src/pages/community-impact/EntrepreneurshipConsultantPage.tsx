@@ -61,6 +61,30 @@ type ConsultationType =
 
 type UrgencyLevel = 'low' | 'medium' | 'high' | 'urgent';
 
+// ─── Challenge types ──────────────────────────────────────────────────────────
+
+interface ActiveChallenge {
+  enrollmentId: string;
+  challengeId: string;
+  title: string;
+  description: string;
+  challenge_mode_intro: string;
+  challenge_instruction: string;
+  return_question_1: string;
+  return_question_2: string;
+  return_question_3: string | null;
+  tier_target: string;
+}
+
+interface ChallengeEvalResult {
+  tier: string;
+  tier_label: string;
+  summary: string;
+  tier_reasoning: string;
+  follow_up_instruction: string;
+  next_tier_hint: string;
+}
+
 interface Client {
   id: string;
   youth_user_id: string;
@@ -657,6 +681,19 @@ const EntrepreneurshipConsultantPage: React.FC = () => {
   const [dashboardId, setDashboardId] = useState<string | null>(null);
   const [speechOn, setSpeechOn] = useState(false);
   const [isListening, setIsListening] = useState(false);
+
+  // ── Community AI Challenge state ─────────────────────────────────────────
+  const [availableChallenge, setAvailableChallenge] = useState<ActiveChallenge | null>(null);
+  const [activeChallenge, setActiveChallenge]           = useState<ActiveChallenge | null>(null);
+  const [challengeLoading, setChallengeLoading]         = useState(false);
+  const [showChallengeReflect, setShowChallengeReflect] = useState(false);
+  const [challengeReflect1, setChallengeReflect1]       = useState('');
+  const [challengeReflect2, setChallengeReflect2]       = useState('');
+  const [challengeReflect3, setChallengeReflect3]       = useState('');
+  const [challengeSubmitting, setChallengeSubmitting]   = useState(false);
+  const [challengeResult, setChallengeResult]           = useState<ChallengeEvalResult | null>(null);
+  const [enrolling, setEnrolling]                       = useState(false);
+
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -681,6 +718,111 @@ const EntrepreneurshipConsultantPage: React.FC = () => {
   useEffect(() => { const last = messages[messages.length - 1]; if (last?.role === 'assistant') speak(last.content); }, [messages, speak]);
 
   // ─── Load clients ─────────────────────────────────────────────────────────
+  // ── Load active challenge for this page ─────────────────────────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      setChallengeLoading(true);
+      try {
+        const { data: challenge } = await supabase
+          .from('community_challenges')
+          .select('id, title, description, challenge_mode_intro, challenge_instruction, return_question_1, return_question_2, return_question_3, tier_target')
+          .eq('community_impact_slug', 'entrepreneurship')
+          .eq('active', true)
+          .single();
+        if (!challenge) return;
+
+        const { data: enrollment } = await supabase
+          .from('challenge_enrollments')
+          .select('id, status')
+          .eq('learner_id', user.id)
+          .eq('challenge_id', challenge.id)
+          .in('status', ['active', 'submitted'])
+          .maybeSingle();
+
+        const mapped: ActiveChallenge = {
+          enrollmentId:          enrollment?.id ?? '',
+          challengeId:           challenge.id,
+          title:                 challenge.title,
+          description:           challenge.description,
+          challenge_mode_intro:  challenge.challenge_mode_intro,
+          challenge_instruction: challenge.challenge_instruction,
+          return_question_1:     challenge.return_question_1,
+          return_question_2:     challenge.return_question_2,
+          return_question_3:     challenge.return_question_3,
+          tier_target:           challenge.tier_target,
+        };
+
+        if (enrollment) {
+          setActiveChallenge(mapped);
+        } else {
+          setAvailableChallenge(mapped);
+        }
+      } finally {
+        setChallengeLoading(false);
+      }
+    })();
+  }, [user?.id]);
+
+  // ── Enroll in challenge ───────────────────────────────────────────────────
+  const handleEnrollChallenge = async (ch: ActiveChallenge) => {
+    if (!user?.id || enrolling) return;
+    setEnrolling(true);
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
+
+      const { data: enrollment } = await supabase
+        .from('challenge_enrollments')
+        .insert({
+          learner_id:   user.id,
+          challenge_id: ch.challengeId,
+          org_id:       profile?.organization_id ?? 'oloibiri',
+          status:       'active',
+        })
+        .select('id')
+        .single();
+
+      if (enrollment) {
+        setActiveChallenge({ ...ch, enrollmentId: enrollment.id });
+        setAvailableChallenge(null);
+      }
+    } finally { setEnrolling(false); }
+  };
+
+  // ── Submit challenge reflection ───────────────────────────────────────────
+  const handleSubmitChallengeReflection = async () => {
+    if (!activeChallenge || !challengeReflect1.trim() || !challengeReflect2.trim()) return;
+    setChallengeSubmitting(true);
+    try {
+      await supabase
+        .from('challenge_enrollments')
+        .update({
+          status:                'submitted',
+          submitted_at:          new Date().toISOString(),
+          action_taken:          challengeReflect1.trim(),
+          impact_observed:       challengeReflect2.trim(),
+          extra_detail:          challengeReflect3.trim() || null,
+          community_member_role: 'entrepreneur',
+        })
+        .eq('id', activeChallenge.enrollmentId);
+
+      const { data, error } = await supabase.functions.invoke('evaluate-challenge-submission', {
+        body: { enrollment_id: activeChallenge.enrollmentId },
+      });
+
+      if (error) throw error;
+      if (data?.impact_evaluation) setChallengeResult(data.impact_evaluation);
+    } catch (err) {
+      console.error('[EntrepreneurshipConsultantPage] challenge submit error:', err);
+    } finally {
+      setChallengeSubmitting(false);
+    }
+  };
+
   const loadClients = useCallback(async () => {
     if (!user) return;
     setLoadingClients(true);
@@ -1128,6 +1270,148 @@ const EntrepreneurshipConsultantPage: React.FC = () => {
             </div>
           )}
 
+          {/* ── Challenge Banner — available (not enrolled) ── */}
+          {!challengeLoading && availableChallenge && !activeChallenge && (
+            <div className="bg-amber-900/80 backdrop-blur-sm border border-amber-400/50 rounded-2xl p-5 mb-4 shadow-lg">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-400/20 flex items-center justify-center flex-shrink-0">
+                  <Award size={20} className="text-amber-300" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-bold text-amber-300 uppercase tracking-wide">Community AI Challenge — This Week</span>
+                    <span className="text-xs bg-amber-400/20 text-amber-200 px-2 py-0.5 rounded-full">{availableChallenge.tier_target}</span>
+                  </div>
+                  <p className="text-white font-bold text-base mb-1">{availableChallenge.title}</p>
+                  <p className="text-amber-100 text-sm leading-relaxed mb-3">{availableChallenge.description}</p>
+                  <button
+                    onClick={() => handleEnrollChallenge(availableChallenge)}
+                    disabled={enrolling}
+                    className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white font-bold text-sm transition-colors flex items-center justify-center gap-2"
+                  >
+                    {enrolling
+                      ? <><Loader2 size={14} className="animate-spin" /> Checking out…</>
+                      : <><ChevronRight size={16} /> Check out this challenge</>
+                    }
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Challenge Banner — enrolled ── */}
+          {activeChallenge && (
+            <div className="bg-orange-900/80 backdrop-blur-sm border border-orange-400/50 rounded-2xl p-5 mb-4 shadow-lg">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-400/20 flex items-center justify-center flex-shrink-0">
+                  <Award size={20} className="text-orange-300" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-bold text-orange-300 uppercase tracking-wide">Community AI Challenge — Active</span>
+                    <span className="text-xs bg-orange-400/20 text-orange-200 px-2 py-0.5 rounded-full">{activeChallenge.tier_target}</span>
+                  </div>
+                  <p className="text-white font-bold text-base mb-1">{activeChallenge.title}</p>
+                  <p className="text-orange-100 text-sm leading-relaxed mb-2">{activeChallenge.challenge_mode_intro}</p>
+                  <div className="bg-orange-800/60 rounded-xl p-3 mb-3">
+                    <p className="text-xs font-bold text-orange-300 mb-1">Your mission:</p>
+                    <p className="text-orange-100 text-sm">{activeChallenge.challenge_instruction}</p>
+                  </div>
+                  <button
+                    onClick={() => setShowChallengeReflect(true)}
+                    className="w-full py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm transition-colors flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle size={16} /> I've done it — submit my reflection
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Challenge Reflection Modal ── */}
+          {showChallengeReflect && activeChallenge && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
+                {challengeResult ? (
+                  <div className="p-6">
+                    <div className="text-center mb-6">
+                      <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
+                        <Award size={32} className="text-amber-600" />
+                      </div>
+                      <h2 className="text-2xl font-black text-gray-900">{challengeResult.tier_label}</h2>
+                      <p className="text-sm text-amber-600 font-bold uppercase tracking-wide mt-1">{challengeResult.tier} tier earned</p>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+                      <p className="text-sm font-bold text-amber-800 mb-1">What you achieved</p>
+                      <p className="text-sm text-amber-700 leading-relaxed">{challengeResult.summary}</p>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
+                      <p className="text-sm font-bold text-blue-800 mb-1">Why you earned this tier</p>
+                      <p className="text-sm text-blue-700 leading-relaxed">{challengeResult.tier_reasoning}</p>
+                    </div>
+                    <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-4">
+                      <p className="text-sm font-bold text-orange-800 mb-1">What to do next</p>
+                      <p className="text-sm text-orange-700 leading-relaxed">{challengeResult.follow_up_instruction}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-xl p-3 mb-5">
+                      <p className="text-xs text-gray-500">{challengeResult.next_tier_hint}</p>
+                    </div>
+                    <button
+                      onClick={() => { setShowChallengeReflect(false); setChallengeResult(null); setActiveChallenge(null); }}
+                      className="w-full py-3 rounded-xl bg-amber-600 text-white font-bold hover:bg-amber-700 transition-colors"
+                    >
+                      Done
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-6">
+                    <div className="flex items-center justify-between mb-5">
+                      <div>
+                        <p className="text-xs font-bold text-amber-500 uppercase tracking-wide mb-0.5">Challenge Reflection</p>
+                        <h2 className="text-xl font-black text-gray-900">{activeChallenge.title}</h2>
+                      </div>
+                      <button onClick={() => setShowChallengeReflect(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                        <X size={20} />
+                      </button>
+                    </div>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-bold text-gray-800 mb-1.5">{activeChallenge.return_question_1}</label>
+                        <textarea value={challengeReflect1} onChange={e => setChallengeReflect1(e.target.value)} rows={3}
+                          placeholder="Describe what you did…"
+                          className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none leading-relaxed"/>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-bold text-gray-800 mb-1.5">{activeChallenge.return_question_2}</label>
+                        <textarea value={challengeReflect2} onChange={e => setChallengeReflect2(e.target.value)} rows={3}
+                          placeholder="What happened…"
+                          className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none leading-relaxed"/>
+                      </div>
+                      {activeChallenge.return_question_3 && (
+                        <div>
+                          <label className="block text-sm font-bold text-gray-800 mb-1.5">{activeChallenge.return_question_3}</label>
+                          <textarea value={challengeReflect3} onChange={e => setChallengeReflect3(e.target.value)} rows={2}
+                            placeholder="Additional details…"
+                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none leading-relaxed"/>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={handleSubmitChallengeReflection}
+                      disabled={!challengeReflect1.trim() || !challengeReflect2.trim() || challengeSubmitting}
+                      className="w-full mt-6 py-3.5 rounded-xl font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                    >
+                      {challengeSubmitting
+                        ? <><Loader2 size={16} className="animate-spin" /> Evaluating your impact…</>
+                        : <><CheckCircle size={16} /> Submit reflection</>
+                      }
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {loadingClients ? (
             <div className="flex justify-center py-12"><Loader2 size={28} className="animate-spin text-amber-300"/></div>
           ) : clients.length === 0 ? (
@@ -1447,6 +1731,22 @@ const EntrepreneurshipConsultantPage: React.FC = () => {
                     <div className="flex items-center gap-2 text-green-700 font-semibold text-sm bg-green-50 rounded-xl px-4 py-3">
                       <CheckCircle size={16}/> Case saved to {selectedClient.client_name}'s record.
                     </div>
+                    {/* Challenge nudge — shown after save when challenge is active */}
+                    {activeChallenge && (
+                      <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 flex items-start gap-2">
+                        <Award size={16} className="text-amber-600 flex-shrink-0 mt-0.5"/>
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-amber-800 mb-1">Community AI Challenge active</p>
+                          <p className="text-xs text-amber-700 mb-2">You completed a consultation — did you also complete your challenge mission? Submit your reflection to earn your tier.</p>
+                          <button
+                            onClick={() => setShowChallengeReflect(true)}
+                            className="text-xs font-bold text-amber-700 underline hover:text-amber-900"
+                          >
+                            Submit challenge reflection →
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     {savedConsultId && (
                       <button onClick={() => {
                         const saved = consultations.find(c => c.id === savedConsultId) ?? {
