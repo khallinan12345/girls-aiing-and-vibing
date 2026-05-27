@@ -21,6 +21,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '../../components/layout/AppLayout';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
 import { chatText } from '../../lib/chatClient';
 import { useAuth } from '../../hooks/useAuth';
@@ -633,6 +634,7 @@ const ProbePanel: React.FC<ProbePanelProps> = ({
 
 const AgricultureConsultantPage: React.FC = () => {
   const { user } = useAuth();
+  const location = useLocation();
 
   // ── Navigation
   const [mode, setMode] = useState<AppMode>('dashboard');
@@ -727,8 +729,19 @@ const AgricultureConsultantPage: React.FC = () => {
 
   // ─── Load clients ─────────────────────────────────────────────────────────
   // ── Load active challenge for this page ─────────────────────────────────
+  // If navigated from dashboard checkout, enrollment is passed via location.state
+  // to avoid race condition. Otherwise, query the DB.
   useEffect(() => {
     if (!user?.id) return;
+
+    // Fast path: dashboard passed enrollment directly via navigation state
+    const navEnrollment = (location.state as any)?.challengeEnrollment;
+    if (navEnrollment?.enrollmentId) {
+      setActiveChallenge(navEnrollment);
+      return;
+    }
+
+    // Slow path: query DB (handles direct navigation, page refresh, etc.)
     (async () => {
       setChallengeLoading(true);
       try {
@@ -740,26 +753,13 @@ const AgricultureConsultantPage: React.FC = () => {
           .single();
         if (!challenge) return;
 
-        // Query enrollment — retry once to handle race condition from dashboard navigation
-        let { data: enrollment } = await supabase
+        const { data: enrollment } = await supabase
           .from('challenge_enrollments')
           .select('id, status')
           .eq('learner_id', user.id)
           .eq('challenge_id', challenge.id)
           .in('status', ['active', 'submitted'])
           .maybeSingle();
-
-        if (!enrollment) {
-          await new Promise(resolve => setTimeout(resolve, 600));
-          const { data: retried } = await supabase
-            .from('challenge_enrollments')
-            .select('id, status')
-            .eq('learner_id', user.id)
-            .eq('challenge_id', challenge.id)
-            .in('status', ['active', 'submitted'])
-            .maybeSingle();
-          enrollment = retried;
-        }
 
         const mapped: ActiveChallenge = {
           enrollmentId:          enrollment?.id ?? '',

@@ -812,13 +812,25 @@ const DashboardPage: React.FC = () => {
         setEnrollmentId(enrollment.id);
       }
 
-      // Small delay to ensure enrollment is committed before the
-      // Community Impact page mounts and queries for it
-      await new Promise(resolve => setTimeout(resolve, 400));
-
-      // Navigate to the community impact page
+      // Navigate to the community impact page, passing enrollment state
+      // so the page doesn't need to re-query (avoids race condition)
       const path = SLUG_TO_PATH[weeklyChallenge.community_impact_slug];
-      if (path) navigate(path);
+      if (path) navigate(path, {
+        state: {
+          challengeEnrollment: {
+            enrollmentId:          enrollment?.id ?? '',
+            challengeId:           weeklyChallenge.id,
+            title:                 weeklyChallenge.title,
+            description:           weeklyChallenge.description,
+            challenge_mode_intro:  weeklyChallenge.challenge_mode_intro,
+            challenge_instruction: weeklyChallenge.challenge_instruction,
+            return_question_1:     weeklyChallenge.return_question_1,
+            return_question_2:     weeklyChallenge.return_question_2,
+            return_question_3:     weeklyChallenge.return_question_3,
+            tier_target:           weeklyChallenge.tier_target,
+          }
+        }
+      });
     } finally {
       setEnrolling(false);
     }
