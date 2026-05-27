@@ -743,14 +743,26 @@ const DashboardPage: React.FC = () => {
           .eq('id', user.id)
           .single();
 
-        // Get active challenge — try org-specific first, fallback to any active
-        const { data: challenge } = await supabase
+        // Map org UUID to slug for challenge filtering
+        let orgSlug = 'oloibiri';
+        if (profile?.organization_id) {
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('name')
+            .eq('id', profile.organization_id)
+            .single();
+          orgSlug = org?.name?.toLowerCase().includes('ibiade') ? 'ibiade' : 'oloibiri';
+        }
+
+        // Get active challenge for this learner's org
+        const { data: challenges } = await supabase
           .from('community_challenges')
           .select('id, title, description, community_impact_slug, tier_target, week_end, challenge_mode_intro, challenge_instruction, return_question_1, return_question_2, return_question_3')
           .eq('active', true)
+          .eq('org_id', orgSlug)
           .order('week_start', { ascending: false })
-          .limit(1)
-          .single();
+          .limit(1);
+        const challenge = challenges?.[0] ?? null;
 
         if (challenge) {
           setWeeklyChallenge(challenge);

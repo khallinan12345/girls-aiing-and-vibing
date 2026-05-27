@@ -745,12 +745,33 @@ const AgricultureConsultantPage: React.FC = () => {
     (async () => {
       setChallengeLoading(true);
       try {
-        const { data: challenge } = await supabase
+        // Get learner's org to filter to the right challenge
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single();
+
+        // Map org UUID to slug via organizations table
+        let orgSlug = 'oloibiri';
+        if (profile?.organization_id) {
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('name')
+            .eq('id', profile.organization_id)
+            .single();
+          orgSlug = org?.name?.toLowerCase().includes('ibiade') ? 'ibiade' : 'oloibiri';
+        }
+
+        const { data: challenges } = await supabase
           .from('community_challenges')
-          .select('id, title, description, challenge_mode_intro, challenge_instruction, return_question_1, return_question_2, return_question_3, tier_target')
+          .select('id, title, description, challenge_mode_intro, challenge_instruction, return_question_1, return_question_2, return_question_3, tier_target, org_id')
           .eq('community_impact_slug', 'agriculture')
           .eq('active', true)
-          .single();
+          .eq('org_id', orgSlug)
+          .order('week_start', { ascending: false })
+          .limit(1);
+        const challenge = challenges?.[0] ?? null;
         if (!challenge) return;
 
         const { data: enrollment } = await supabase
