@@ -812,6 +812,10 @@ const DashboardPage: React.FC = () => {
         setEnrollmentId(enrollment.id);
       }
 
+      // Small delay to ensure enrollment is committed before the
+      // Community Impact page mounts and queries for it
+      await new Promise(resolve => setTimeout(resolve, 400));
+
       // Navigate to the community impact page
       const path = SLUG_TO_PATH[weeklyChallenge.community_impact_slug];
       if (path) navigate(path);
@@ -1609,7 +1613,7 @@ const DashboardPage: React.FC = () => {
             )}
 
             {/* ── Community Impact Leaderboard ─────────────────────────────── */}
-            {(communityLeaderboard.length > 0 || communityLbLoading) && (
+            {weeklyChallenge && (
               <div className="bg-white rounded-lg shadow overflow-hidden">
                 <div className="px-6 py-4 border-b bg-gradient-to-r from-emerald-50 to-teal-50 flex items-center justify-between flex-wrap gap-3">
                   <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
@@ -1622,6 +1626,12 @@ const DashboardPage: React.FC = () => {
                 {communityLbLoading ? (
                   <div className="flex items-center justify-center py-10">
                     <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-400" />
+                  </div>
+                ) : communityLeaderboard.length === 0 ? (
+                  <div className="px-6 py-10 text-center">
+                    <div className="text-4xl mb-3">🌍</div>
+                    <p className="text-sm font-semibold text-gray-700 mb-1">No community actions yet this week</p>
+                    <p className="text-xs text-gray-400">Complete this week's challenge to appear on the leaderboard.</p>
                   </div>
                 ) : (
                   <div className="divide-y divide-gray-100">

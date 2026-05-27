@@ -740,13 +740,26 @@ const AgricultureConsultantPage: React.FC = () => {
           .single();
         if (!challenge) return;
 
-        const { data: enrollment } = await supabase
+        // Query enrollment — retry once to handle race condition from dashboard navigation
+        let { data: enrollment } = await supabase
           .from('challenge_enrollments')
           .select('id, status')
           .eq('learner_id', user.id)
           .eq('challenge_id', challenge.id)
           .in('status', ['active', 'submitted'])
           .maybeSingle();
+
+        if (!enrollment) {
+          await new Promise(resolve => setTimeout(resolve, 600));
+          const { data: retried } = await supabase
+            .from('challenge_enrollments')
+            .select('id, status')
+            .eq('learner_id', user.id)
+            .eq('challenge_id', challenge.id)
+            .in('status', ['active', 'submitted'])
+            .maybeSingle();
+          enrollment = retried;
+        }
 
         const mapped: ActiveChallenge = {
           enrollmentId:          enrollment?.id ?? '',
