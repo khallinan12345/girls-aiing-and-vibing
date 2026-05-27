@@ -85,7 +85,7 @@ const DIAGNOSTICS: DiagItem[] = [
   },
   {
     q: 'Schema test',
-    summary: 'Sketch your platform's data model on paper — tables, relationships, RLS intent. No IDE.',
+    summary: "Sketch your platform's data model on paper — tables, relationships, RLS intent. No IDE.",
     def: "A data model describes what data your application stores and how pieces relate to each other. RLS (Row Level Security) is Supabase's mechanism for controlling which users can read or write which rows — for example, a learner should only see their own assessment results, not another learner's.",
     detail: 'On paper, draw the main tables in your platform (nextvillage.community or your own full-stack app). Name the columns you remember. Draw lines between connected tables. Write one sentence per table describing who is allowed to read it and who is allowed to write it. Where you are unsure, mark it — those are the parts of your own platform you do not fully own yet.',
     submitPrompt: "Name your platform at the top. Then list your main database tables from memory — for each table write: the table name, the 4–6 most important columns, who can read rows (all users? only the owner? only admins?), and who can write rows. Then describe one foreign key relationship between two tables. You do not need to be complete — the evaluator is looking for genuine ownership of what you have built, and honest \"I'm not sure about this one\" notes are a good sign.",
@@ -148,7 +148,7 @@ const PHASES: Phase[] = [
             short: 'Context → options → decision → tradeoffs',
             def: { label: 'What is an ADR?', text: "An Architecture Decision Record captures a significant technical decision: the context that made it necessary, the options considered, the decision made, and the consequences — including tradeoffs. ADRs live in the codebase, typically in a /docs/decisions/ folder." },
             how: 'Three good candidates: (1) Why Supabase over a custom backend. (2) Why Vercel Edge Functions over standard serverless — SSE streaming requirement. (3) Why Anthropic with Groq fallback — quality vs. speed tradeoff.',
-            platform: 'Create /docs/decisions/001-supabase.md using the standard ADR template. Three ADRs in a public repo is a stronger signal than most junior developers\' entire portfolios.',
+            platform: "Create /docs/decisions/001-supabase.md using the standard ADR template. Three ADRs in a public repo is a stronger signal than most junior developers\' entire portfolios.",
             submitPrompt: "Paste the full text of one of your three ADRs. It must include at minimum: Context, Options Considered, Decision, and Consequences/Tradeoffs sections.",
           },
           {
