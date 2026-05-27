@@ -65,7 +65,7 @@ import FullStackCertificationPage from './pages/tech-skills/FullStackCertificati
 import AIWorkflowDevCertificationPage from './pages/tech-skills/AIWorkflowDevCertificationPage';
 import AIForBusinessCertificationPage from './pages/tech-skills/AIForBusinessCertificationPage';
 import AIContentCreationCertificationPage from './pages/tech-skills/AIContentCreationCertificationPage';
-import TechSkillsPage from './pages/TechSkillsPage';
+import TechSkillsPage from './pages/tech-skills/TechSkillsPage';
 
 
 // Legacy pages - kept for backwards compatibility
