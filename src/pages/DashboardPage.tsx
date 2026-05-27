@@ -1,6 +1,6 @@
 // Updated DashboardPage.tsx with reorganized layout + Monthly Summary
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Project, Team, UserProfile } from '../types/supabase';
 import {
@@ -35,6 +35,63 @@ import AppLayout from '../components/layout/AppLayout';
 import Button from '../components/ui/Button';
 import { useAuth } from '../hooks/useAuth';
 import classNames from 'classnames';
+
+// ─── Community AI Challenge types ────────────────────────────────────────────
+
+interface WeeklyChallenge {
+  id: string;
+  title: string;
+  description: string;
+  community_impact_slug: string;
+  tier_target: string;
+  week_end: string;
+  challenge_mode_intro: string;
+  challenge_instruction: string;
+  return_question_1: string;
+  return_question_2: string;
+  return_question_3: string | null;
+}
+
+interface CommunityLeaderEntry {
+  learner_id: string;
+  name: string;
+  avatar_url: string | null;
+  highest_tier: string;
+  highest_tier_label: string;
+  total_actions: number;
+  rank: number;
+  seed_count: number;
+  scout_count: number;
+  bridge_count: number;
+  builder_count: number;
+  multiplier_count: number;
+}
+
+const TIER_COLOURS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
+  seed:       { bg: 'bg-green-50',   text: 'text-green-700',   border: 'border-green-300',  dot: 'bg-green-500'   },
+  scout:      { bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-300',   dot: 'bg-blue-500'    },
+  bridge:     { bg: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-300',  dot: 'bg-amber-500'   },
+  builder:    { bg: 'bg-red-50',     text: 'text-red-700',     border: 'border-red-300',    dot: 'bg-red-500'     },
+  multiplier: { bg: 'bg-purple-50',  text: 'text-purple-700',  border: 'border-purple-300', dot: 'bg-purple-500'  },
+};
+
+const SLUG_TO_PATH: Record<string, string> = {
+  'ai-ambassadors':  '/community-impact/ai-ambassadors',
+  'agriculture':     '/community-impact/agriculture',
+  'fishing':         '/community-impact/fishing',
+  'healthcare':      '/community-impact/healthcare',
+  'entrepreneurship':'/community-impact/entrepreneurship',
+  'animal-husbandry':'/community-impact/animal-husbandry',
+};
+
+const SLUG_EMOJI: Record<string, string> = {
+  'ai-ambassadors':   '🤖',
+  'agriculture':      '🌱',
+  'fishing':          '🎣',
+  'healthcare':       '🏥',
+  'entrepreneurship': '💼',
+  'animal-husbandry': '🐾',
+};
 
 // Add interface for dashboard activities with sub_category
 interface DashboardActivity {
@@ -363,6 +420,16 @@ const DashboardPage: React.FC = () => {
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('sessions_thismonth');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+
+  // ── Community AI Challenge state ─────────────────────────────────────────
+  const [weeklyChallenge, setWeeklyChallenge]         = useState<WeeklyChallenge | null>(null);
+  const [challengeLoading, setChallengeLoading]       = useState(false);
+  const [enrollmentStatus, setEnrollmentStatus]       = useState<'none' | 'active' | 'submitted' | 'awarded'>('none');
+  const [enrollmentId, setEnrollmentId]               = useState<string | null>(null);
+  const [enrolling, setEnrolling]                     = useState(false);
+  const [communityLeaderboard, setCommunityLeaderboard] = useState<CommunityLeaderEntry[]>([]);
+  const [communityLbLoading, setCommunityLbLoading]   = useState(false);
+  const navigate = useNavigate();
   const [orgOptions, setOrgOptions] = useState<{ id: string; name: string; join_code: string }[]>([]);
   const [selectedOrgJoinCode, setSelectedOrgJoinCode] = useState<string>('');
   const [leaderJoinCode, setLeaderJoinCode] = useState<string>('');
@@ -661,6 +728,97 @@ const DashboardPage: React.FC = () => {
     userProfile?.role === 'platform_administrator' ? selectedOrgJoinCode :
     userProfile?.role === 'leader' ? leaderJoinCode :
     (userProfile?.join_code_used ?? '');
+
+  // ── Fetch weekly challenge and enrollment status ─────────────────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      setChallengeLoading(true);
+      setCommunityLbLoading(true);
+      try {
+        // Get learner's org via profiles
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single();
+
+        // Get active challenge — try org-specific first, fallback to any active
+        const { data: challenge } = await supabase
+          .from('community_challenges')
+          .select('id, title, description, community_impact_slug, tier_target, week_end, challenge_mode_intro, challenge_instruction, return_question_1, return_question_2, return_question_3')
+          .eq('active', true)
+          .order('week_start', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (challenge) {
+          setWeeklyChallenge(challenge);
+
+          // Check this learner's enrollment
+          const { data: enrollment } = await supabase
+            .from('challenge_enrollments')
+            .select('id, status')
+            .eq('learner_id', user.id)
+            .eq('challenge_id', challenge.id)
+            .maybeSingle();
+
+          if (enrollment) {
+            setEnrollmentStatus(enrollment.status as any);
+            setEnrollmentId(enrollment.id);
+          }
+        }
+
+        // Fetch community impact leaderboard
+        const { data: lb } = await supabase
+          .from('community_leaderboard')
+          .select('*')
+          .order('rank', { ascending: true })
+          .limit(10);
+
+        if (lb) setCommunityLeaderboard(lb as CommunityLeaderEntry[]);
+      } finally {
+        setChallengeLoading(false);
+        setCommunityLbLoading(false);
+      }
+    })();
+  }, [user?.id]);
+
+  // ── Enroll in weekly challenge then navigate ──────────────────────────────
+  const handleChallengeCheckout = async () => {
+    if (!weeklyChallenge || !user?.id || enrolling) return;
+    setEnrolling(true);
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
+
+      // Upsert enrollment — idempotent if already enrolled
+      const { data: enrollment } = await supabase
+        .from('challenge_enrollments')
+        .upsert({
+          learner_id:   user.id,
+          challenge_id: weeklyChallenge.id,
+          org_id:       profile?.organization_id ?? 'oloibiri',
+          status:       'active',
+        }, { onConflict: 'learner_id,challenge_id', ignoreDuplicates: true })
+        .select('id, status')
+        .single();
+
+      if (enrollment) {
+        setEnrollmentStatus(enrollment.status as any);
+        setEnrollmentId(enrollment.id);
+      }
+
+      // Navigate to the community impact page
+      const path = SLUG_TO_PATH[weeklyChallenge.community_impact_slug];
+      if (path) navigate(path);
+    } finally {
+      setEnrolling(false);
+    }
+  };
 
   const fetchLeaderboardForCode = useCallback(async (
     metric: LeaderboardMetric, joinCode: string
@@ -1355,6 +1513,169 @@ const DashboardPage: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-8">
+
+            {/* ── Community AI Challenge Banner ──────────────────────────── */}
+            {!challengeLoading && weeklyChallenge && (
+              <div className={classNames(
+                'rounded-xl border overflow-hidden shadow-sm',
+                enrollmentStatus === 'active' || enrollmentStatus === 'submitted'
+                  ? 'border-emerald-300 bg-gradient-to-r from-emerald-50 to-teal-50'
+                  : enrollmentStatus === 'awarded'
+                  ? 'border-purple-300 bg-gradient-to-r from-purple-50 to-indigo-50'
+                  : 'border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50'
+              )}>
+                <div className="px-5 py-4">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className={classNames(
+                        'w-11 h-11 rounded-xl flex items-center justify-center text-2xl flex-shrink-0',
+                        enrollmentStatus === 'awarded' ? 'bg-purple-100' : 'bg-white shadow-sm'
+                      )}>
+                        {SLUG_EMOJI[weeklyChallenge.community_impact_slug] ?? '🌍'}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className={classNames(
+                            'text-xs font-bold uppercase tracking-wide',
+                            enrollmentStatus === 'active' || enrollmentStatus === 'submitted' ? 'text-emerald-600'
+                            : enrollmentStatus === 'awarded' ? 'text-purple-600'
+                            : 'text-blue-600'
+                          )}>
+                            {enrollmentStatus === 'awarded' ? '✅ Challenge Completed'
+                             : enrollmentStatus === 'active' || enrollmentStatus === 'submitted' ? '🎯 Challenge Checked Out'
+                             : '🌍 Community AI Challenge — This Week'}
+                          </span>
+                          <span className={classNames(
+                            'text-xs px-2 py-0.5 rounded-full font-semibold border',
+                            TIER_COLOURS[weeklyChallenge.tier_target]?.bg ?? 'bg-gray-50',
+                            TIER_COLOURS[weeklyChallenge.tier_target]?.text ?? 'text-gray-600',
+                            TIER_COLOURS[weeklyChallenge.tier_target]?.border ?? 'border-gray-200',
+                          )}>
+                            {weeklyChallenge.tier_target} tier
+                          </span>
+                          {(() => {
+                            const daysLeft = Math.ceil((new Date(weeklyChallenge.week_end).getTime() - Date.now()) / 86400000);
+                            return daysLeft > 0
+                              ? <span className="text-xs text-gray-400">{daysLeft} day{daysLeft !== 1 ? 's' : ''} left</span>
+                              : null;
+                          })()}
+                        </div>
+                        <h3 className="text-base font-bold text-gray-900 leading-tight mb-1">{weeklyChallenge.title}</h3>
+                        <p className="text-sm text-gray-600 leading-relaxed">{weeklyChallenge.description}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex-shrink-0 flex flex-col gap-2 items-end">
+                      {enrollmentStatus === 'none' ? (
+                        <button
+                          onClick={handleChallengeCheckout}
+                          disabled={enrolling}
+                          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition-colors whitespace-nowrap"
+                        >
+                          {enrolling
+                            ? <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Checking out…</>
+                            : <><ArrowRight size={15} /> Take this challenge</>
+                          }
+                        </button>
+                      ) : enrollmentStatus === 'awarded' ? (
+                        <button
+                          onClick={() => navigate(SLUG_TO_PATH[weeklyChallenge.community_impact_slug] ?? '/')}
+                          className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm rounded-xl transition-colors"
+                        >
+                          <ArrowRight size={15} /> View page
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => navigate(SLUG_TO_PATH[weeklyChallenge.community_impact_slug] ?? '/')}
+                          className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors"
+                        >
+                          <ArrowRight size={15} /> Continue challenge
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expanded detail when enrolled */}
+                  {(enrollmentStatus === 'active' || enrollmentStatus === 'submitted') && (
+                    <div className="mt-3 pt-3 border-t border-emerald-200">
+                      <div className="bg-white/70 rounded-lg p-3">
+                        <p className="text-xs font-bold text-emerald-700 mb-1">Your mission:</p>
+                        <p className="text-sm text-gray-700">{weeklyChallenge.challenge_instruction}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Community Impact Leaderboard ─────────────────────────────── */}
+            {(communityLeaderboard.length > 0 || communityLbLoading) && (
+              <div className="bg-white rounded-lg shadow overflow-hidden">
+                <div className="px-6 py-4 border-b bg-gradient-to-r from-emerald-50 to-teal-50 flex items-center justify-between flex-wrap gap-3">
+                  <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                    <Globe2 className="h-6 w-6 text-emerald-600" />
+                    Community Impact Leaderboard
+                  </h2>
+                  <span className="text-xs text-gray-500">ranked by highest tier · then total actions</span>
+                </div>
+
+                {communityLbLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-400" />
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100">
+                    {communityLeaderboard.map(entry => {
+                      const isMe = entry.learner_id === user?.id;
+                      const medal = MEDAL[entry.rank];
+                      const tc = TIER_COLOURS[entry.highest_tier] ?? TIER_COLOURS.seed;
+                      return (
+                        <div key={entry.learner_id}
+                          className={classNames('flex items-center px-6 py-3 gap-4 transition-colors',
+                            isMe ? 'bg-emerald-50 border-l-4 border-emerald-400' : 'hover:bg-gray-50')}>
+                          <div className="w-10 text-center flex-shrink-0">
+                            {medal ? <span className="text-2xl leading-none">{medal}</span>
+                              : <span className="text-base font-bold text-gray-400">#{entry.rank}</span>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className={classNames('text-sm font-semibold truncate block',
+                              isMe ? 'text-emerald-800' : 'text-gray-800')}>
+                              {entry.name ?? 'Learner'}
+                              {isMe && <span className="ml-2 text-xs font-normal text-emerald-600">(you)</span>}
+                            </span>
+                            <span className={classNames(
+                              'inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold border mt-0.5',
+                              tc.bg, tc.text, tc.border
+                            )}>
+                              <span className={classNames('w-1.5 h-1.5 rounded-full', tc.dot)} />
+                              {entry.highest_tier_label}
+                            </span>
+                          </div>
+                          <div className="flex-shrink-0 text-right">
+                            <span className={classNames('text-base font-bold',
+                              entry.rank === 1 ? 'text-amber-600' :
+                              entry.rank === 2 ? 'text-gray-500' :
+                              entry.rank === 3 ? 'text-orange-700' : 'text-gray-700')}>
+                              {entry.total_actions}
+                            </span>
+                            <span className="ml-1 text-xs text-gray-400">
+                              {entry.total_actions === 1 ? 'action' : 'actions'}
+                            </span>
+                          </div>
+                          <div className="hidden sm:flex gap-1 flex-shrink-0">
+                            {entry.seed_count > 0 && <span title="Seed" className="w-6 h-6 rounded-full bg-green-100 text-green-700 text-xs flex items-center justify-center font-bold">{entry.seed_count}</span>}
+                            {entry.scout_count > 0 && <span title="Scout" className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs flex items-center justify-center font-bold">{entry.scout_count}</span>}
+                            {entry.bridge_count > 0 && <span title="Bridge" className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs flex items-center justify-center font-bold">{entry.bridge_count}</span>}
+                            {entry.builder_count > 0 && <span title="Builder" className="w-6 h-6 rounded-full bg-red-100 text-red-700 text-xs flex items-center justify-center font-bold">{entry.builder_count}</span>}
+                            {entry.multiplier_count > 0 && <span title="Multiplier" className="w-6 h-6 rounded-full bg-purple-100 text-purple-700 text-xs flex items-center justify-center font-bold">{entry.multiplier_count}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ── Cohort Leaderboard ──────────────────────────────────────── */}
             {(userProfile?.role === 'platform_administrator'
