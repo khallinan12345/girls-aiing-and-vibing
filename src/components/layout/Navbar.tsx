@@ -328,7 +328,7 @@ const Navbar: React.FC = () => {
                     )}>
                       {link.shorthand}
                     </div>
-                    {link.dropdown.map((item) => (
+                    {(link.name === 'Research' ? researchPrograms : (link.dropdown as any[])).map((item) => (
                       <Link
                         key={item.path}
                         to={item.path}

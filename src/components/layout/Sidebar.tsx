@@ -121,7 +121,7 @@ const Sidebar: React.FC = () => {
         { name: 'Microsoft DP-900',    path: '/tech-skills/microsoft-dp900',         icon: <Database size={20} />      },
         { name: 'Microsoft AB-730',    path: '/tech-skills/microsoft-ab730',         icon: <Briefcase size={20} />     },
         { name: 'GitHub GH-300',       path: '/tech-skills/github-gh300',            icon: <GitBranch size={20} />     },
-        { name: 'Employable Tech Skills Prep',       path: '/tech-skills/tech-skills',            icon: <GitBranch size={20} />     },
+        { name: 'Employable Tech Skills Prep',       path: '/tech-skills',            icon: <GitBranch size={20} />     },
       ],
     },
     {

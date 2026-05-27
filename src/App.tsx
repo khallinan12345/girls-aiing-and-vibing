@@ -227,7 +227,7 @@ const AppContent: React.FC = () => {
         <Route path="/tech-skills/microsoft-ai900" element={<MicrosoftAI900Page />} />
         <Route path="/tech-skills/microsoft-ab730" element={<MicrosoftAB730Page />} />
         <Route path="/tech-skills/github-gh300" element={<MicrosoftGH300Page />} />
-        <Route path="/tech-skills/tech-skills" element={<TechSkillsPage />} />
+        <Route path="/tech-skills" element={<TechSkillsPage />} />
 
         {/* Community Impact Routes */}
         <Route path="/community-impact/ai-ambassadors" element={<AIAmbassadorsPage />} />
