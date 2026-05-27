@@ -1,15 +1,23 @@
-// src/pages/TechSkillsPage.tsx
+// src/pages/tech-skills/TechSkillsPage.tsx
 // Route: /tech-skills
-// Add to App.tsx:  <Route path="/tech-skills" element={<TechSkillsPage />} />
-// Add to Sidebar: link to /tech-skills with Code2 icon under "Learning" section
+//
+// New dependencies:
+//   - supabase client (already in project)
+//   - useAuth hook (already in project)
+//
+// New Supabase table required (already created per Kevin):
+//   tech_skills_progress (see schema in conversation)
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Code2, CheckCircle2, Circle, ChevronDown, ChevronUp,
   Terminal, GitBranch, FlaskConical, Layers, Trophy, Zap,
-  ExternalLink, BookOpen
+  ExternalLink, BookOpen, Lock, Send, Loader2, AlertCircle,
+  ThumbsUp, RefreshCw, ClipboardList
 } from 'lucide-react';
+import { supabase } from '../../lib/supabaseClient';
+import { useAuth } from '../../hooks/useAuth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,6 +27,7 @@ interface Task {
   def: { label: string; text: string };
   how: string;
   platform: string;
+  submitPrompt: string; // what to paste / what evidence is expected
 }
 
 interface Track {
@@ -43,6 +52,17 @@ interface DiagItem {
   summary: string;
   def: string;
   detail: string;
+}
+
+type TaskStatus = 'locked' | 'available' | 'submitted' | 'pass' | 'needs_work';
+
+interface ProgressRecord {
+  phase_id: string;
+  task_name: string;
+  status: TaskStatus;
+  submission_text?: string;
+  ai_feedback?: string;
+  attempt_count: number;
 }
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -73,7 +93,7 @@ const PHASES: Phase[] = [
     id: 'p1',
     label: 'Phase 1 · Months 1–2',
     title: 'Foundations & Discipline',
-    subtitle: 'Consolidate what you\'ve built — make it transferable',
+    subtitle: "Consolidate what you've built — make it transferable",
     color: '#6c4fd4',
     colorBg: 'rgba(108,79,212,0.07)',
     colorBorder: 'rgba(108,79,212,0.22)',
@@ -88,20 +108,23 @@ const PHASES: Phase[] = [
             def: { label: 'What are conventional commits?', text: "Conventional commits is a standard for writing Git commit messages so any developer — including you six months from now — can understand what changed and why. A message like 'fix stuff' tells no one anything. A message like 'fix(auth): handle expired Supabase token on session restore' tells a hiring manager reviewing your GitHub exactly what changed, where, and why. Format: type(scope): short description. Common types: feat (new feature), fix (bug fix), refactor (restructuring without behavior change), docs, test, chore." },
             how: 'Starting today, every commit to nextvillage.community must follow the convention. Install commitlint in the repo to enforce it automatically so it becomes habit, not a choice.',
             platform: 'Go back and look at your last 10 commits. How many tell a clear story? Rewrite them mentally using conventional format — this exercise reveals where your thinking about changes is vague.',
+            submitPrompt: 'Paste the output of `git log --oneline -10` from your repo showing at least 5 conventional commits (feat:, fix:, refactor:, etc.). Each commit message should follow the format type(scope): description.',
           },
           {
             name: 'Set up PR workflow on the vAI repo',
             short: 'Submit PRs to Kevin; he reviews before merge to main',
             def: { label: 'What is a Pull Request (PR)?', text: "A Pull Request is a formal request to merge code from one branch into another — typically from a feature branch into main. It is the standard collaboration mechanism in professional development. A PR includes: a description of what changed and why, a diff showing every line added or removed, and a review process where another developer reads your code and either approves it, requests changes, or asks questions. PRs create a permanent record of every decision made in a codebase." },
-            how: 'On the nextvillage.community GitHub repo, enable branch protection on main: Settings → Branches → Add rule → require pull request review before merging. From now on, you never push directly to main. A good PR description answers: what does this change, why was it needed, and how did you test it?',
-            platform: 'The next feature you build — even a small one — goes through a full PR. Write the description as if Kevin has never seen the code before. This is the single practice most likely to be evaluated in a technical hiring process.',
+            how: 'On the nextvillage.community GitHub repo, enable branch protection on main: Settings → Branches → Add rule → require pull request review before merging. From now on, you never push directly to main.',
+            platform: 'The next feature you build — even a small one — goes through a full PR. Write the description as if Kevin has never seen the code before.',
+            submitPrompt: 'Paste the URL of a real PR you submitted on the vAI repo, plus the first paragraph of your PR description. The description should answer: what does this change, why was it needed, and how did you test it?',
           },
           {
             name: 'Add branch protection + CI lint/build check',
             short: 'Nothing merges to main without passing a gate you set up',
-            def: { label: 'What is CI (Continuous Integration)?', text: 'CI is a practice where every code change automatically triggers a set of checks — linting (does the code follow style rules?), building (does it compile without errors?), and optionally testing. CI catches problems before they reach production. GitHub Actions is the standard tool: you write a YAML file that describes what to run, and GitHub runs it on every push or PR. A branch protection rule can require CI to pass before a PR is mergeable.' },
+            def: { label: 'What is CI (Continuous Integration)?', text: 'CI is a practice where every code change automatically triggers a set of checks — linting, building, and optionally testing. GitHub Actions is the standard tool: you write a YAML file that describes what to run, and GitHub runs it on every push or PR.' },
             how: 'Create a .github/workflows/ci.yml file in nextvillage.community that runs npm run lint and npm run build on every PR. Then add a branch protection rule requiring this check to pass before merging.',
             platform: 'The Vite build already exists — hooking it into GitHub Actions takes about 20 lines of YAML. Once CI is running, you will never again accidentally merge code that breaks the build.',
+            submitPrompt: 'Paste the full contents of your .github/workflows/ci.yml file. It should include checkout, node setup, npm ci, and at minimum npm run build.',
           },
         ],
       },
@@ -111,23 +134,26 @@ const PHASES: Phase[] = [
           {
             name: 'Draw the vAI architecture you built',
             short: '1-page diagram: React → Vercel → Supabase → AI services',
-            def: { label: 'What is a system architecture diagram?', text: 'An architecture diagram is a visual map of the components in a system and how they communicate. It answers: what are the major pieces, and what talks to what? For a web platform it typically shows: the frontend (React), the hosting layer (Vercel), the database and auth (Supabase), external AI services (Anthropic/Groq), and any edge functions or background jobs. Boxes represent components; arrows represent data flow.' },
+            def: { label: 'What is a system architecture diagram?', text: 'An architecture diagram is a visual map of the components in a system and how they communicate. For a web platform it typically shows: the frontend (React), the hosting layer (Vercel), the database and auth (Supabase), external AI services, and any edge functions or background jobs.' },
             how: 'Include: the React frontend served from Vercel, Supabase (database, auth, storage, edge functions), AI service calls (which pages call which models), SSE streaming flows, and the two learner cohorts (Oloibiri and Ibiade) as distinct data contexts.',
-            platform: 'Use Excalidraw or draw.io — both are free. Export as PNG and commit it to the repo under /docs/architecture.png. A hiring manager finding this document on your GitHub will immediately know they are looking at a serious developer.',
+            platform: 'Use Excalidraw or draw.io. Export as PNG and commit it to the repo under /docs/architecture.png.',
+            submitPrompt: 'Paste the GitHub URL to your committed architecture diagram (e.g. https://github.com/yourrepo/blob/main/docs/architecture.png). Then write 2–3 sentences describing the most important data flow shown in the diagram.',
           },
           {
             name: 'Write 3 Architecture Decision Records (ADRs)',
             short: 'Context → options → decision → tradeoffs',
-            def: { label: 'What is an ADR?', text: "An Architecture Decision Record captures a significant technical decision: the context that made a decision necessary, the options considered, the decision made, and the consequences — including what was gained and what was given up. ADRs are rare in junior portfolios and signal exactly the kind of thinking that engineering leads look for when hiring. They live in the codebase, typically in a /docs/decisions/ folder." },
-            how: 'Three good candidates: (1) Why Supabase over a custom backend. (2) Why Vercel Edge Functions over standard serverless — SSE streaming requirement, latency to Nigeria. (3) Why Anthropic with Groq fallback — quality vs. speed tradeoff.',
-            platform: 'Create /docs/decisions/001-supabase.md using the standard ADR template (search "MADR template" for a clean starting format). Three ADRs in a public repo is a stronger signal than most junior developers\' entire portfolios.',
+            def: { label: 'What is an ADR?', text: "An Architecture Decision Record captures a significant technical decision: the context that made it necessary, the options considered, the decision made, and the consequences — including tradeoffs. ADRs live in the codebase, typically in a /docs/decisions/ folder." },
+            how: 'Three good candidates: (1) Why Supabase over a custom backend. (2) Why Vercel Edge Functions over standard serverless — SSE streaming requirement. (3) Why Anthropic with Groq fallback — quality vs. speed tradeoff.',
+            platform: 'Create /docs/decisions/001-supabase.md using the standard ADR template. Three ADRs in a public repo is a stronger signal than most junior developers\' entire portfolios.',
+            submitPrompt: 'Paste the full text of one of your three ADRs. It must include at minimum: Context, Options Considered, Decision, and Consequences/Tradeoffs sections.',
           },
           {
             name: "Name 2 things you'd do differently now",
             short: 'Written reflection — honest critical thinking about your own code',
-            def: { label: 'Why does this matter?', text: "The ability to critically evaluate your own past work — without defensiveness — is a mark of a maturing developer. In interviews you will often be asked: 'What would you do differently if you rebuilt this?' A vague answer ('I'd make it cleaner') signals inexperience. A specific answer ('I would have extracted the branding logic into a context provider earlier, because the useBranding refactor cost three days and touched 14 files') signals someone who learns from their decisions." },
-            how: 'Prompts: What part of the codebase do you dread touching, and why? What took much longer than it should have — and what would have made it faster? What would you refactor first if you had a free week?',
-            platform: "Write this as a short section in your README under 'Lessons learned.' It shows future collaborators — and employers — that you are honest and that you grow.",
+            def: { label: 'Why does this matter?', text: "The ability to critically evaluate your own past work — without defensiveness — is a mark of a maturing developer. In interviews you will often be asked: 'What would you do differently if you rebuilt this?' A vague answer signals inexperience. A specific answer signals someone who learns from their decisions." },
+            how: "Prompts: What part of the codebase do you dread touching, and why? What took much longer than it should have? What would you refactor first if you had a free week?",
+            platform: "Write this as a short section in your README under 'Lessons learned.'",
+            submitPrompt: "Paste the 'Lessons learned' section you added to your README. Each of the two items should name a specific technical decision, explain what went wrong or what was harder than expected, and describe what you would do differently.",
           },
         ],
       },
@@ -149,23 +175,26 @@ const PHASES: Phase[] = [
           {
             name: 'Write unit tests for 3 existing utility functions',
             short: 'Vitest or Jest — small, fast, no network calls',
-            def: { label: 'What is a unit test?', text: 'A unit test is a small piece of code that verifies a single function works correctly — in isolation, without a database, without a network, without a browser. You call the function with known inputs and assert that it returns expected outputs. If the function breaks later, the test fails immediately before the bug reaches a real user. Unit tests are the foundation of professional code quality.' },
-            how: 'Since nextvillage.community uses Vite, use Vitest — it is built for Vite projects and nearly zero-config. Install with npm install -D vitest, add "test": "vitest" to your package.json scripts, and write test files ending in .test.ts.',
-            platform: 'Good candidates: the proficiency scoring functions, cohort reporting calculations, and any date/time utility used in the monthly assessment logic. These are pure functions — ideal first tests.',
+            def: { label: 'What is a unit test?', text: 'A unit test verifies a single function works correctly — in isolation, without a database, without a network, without a browser. You call the function with known inputs and assert expected outputs. Unit tests are the foundation of professional code quality.' },
+            how: 'Since nextvillage.community uses Vite, use Vitest. Install with npm install -D vitest, add "test": "vitest" to package.json scripts, and write test files ending in .test.ts.',
+            platform: 'Good candidates: proficiency scoring functions, cohort reporting calculations, and any date/time utility in the monthly assessment logic.',
+            submitPrompt: 'Paste the full contents of one of your test files (.test.ts). It should contain at least 3 test cases covering different inputs, including at least one edge case (empty input, null, boundary value).',
           },
           {
             name: 'Build an AI agent behavioral test harness',
             short: 'Agents simulate learner personas hitting real user flows',
-            def: { label: 'What is an agentic simulation test suite?', text: 'Traditional automated tests verify code produces correct output. An agentic simulation test suite goes further: AI agents behave like different types of users — a confused first-time learner, an advanced learner, a user on a slow connection — and interact with your platform as those users would. The test suite observes what happens. This catches UX failures, edge cases in conversation flows, and AI response quality issues that unit tests cannot reach. Building one at your stage is genuinely rare.' },
-            how: 'Define 4–5 learner personas (beginner, advanced, disengaged, non-English-first, mobile-only). Write a script for each: what they click, what they type, what responses they give. Use Playwright for browser automation and the Anthropic API to generate persona-appropriate responses dynamically.',
-            platform: 'Start with the Oloibiri new-learner onboarding flow. A "confused beginner" agent attempting registration and first assessment will immediately surface friction that real Oloibiri learners face. Give this project its own repository and README — it is a portfolio centerpiece.',
+            def: { label: 'What is an agentic simulation test suite?', text: 'AI agents behave like different types of users — a confused first-time learner, an advanced learner, a user on a slow connection — and interact with your platform as those users would. This catches UX failures and edge cases that unit tests cannot reach.' },
+            how: 'Define 4–5 learner personas. Write a script for each: what they click, what they type, what responses they give. Use Playwright for browser automation and the Anthropic API to generate persona-appropriate responses dynamically.',
+            platform: 'Start with the Oloibiri new-learner onboarding flow. Give this project its own repository and README — it is a portfolio centerpiece.',
+            submitPrompt: 'Paste the persona definition file (JSON or TypeScript) for at least 2 learner personas, plus a snippet of the Playwright test script that drives one persona through the onboarding flow.',
           },
           {
             name: 'Write a manual test plan for one full user journey',
             short: 'Written before testing, not reconstructed after',
-            def: { label: 'What is a manual test plan?', text: "A manual test plan describes step by step how a human tester should verify a feature works — including what to do, what to look for, and the expected result at each step. It is written before testing begins. It forces you to think clearly about what 'working correctly' actually means for a given feature, and creates a repeatable process." },
-            how: 'Structure: Scope (what is being tested), Preconditions (what must be true before starting), Steps (numbered actions with expected results), Edge cases (what to test when things go wrong), Pass/Fail criteria.',
-            platform: 'Write the test plan for the full new-learner journey: discovery → registration → first AI interaction → first assessment → certificate generation. This touches auth, the AI engine, the assessment logic, and the certification pipeline — every major system in the platform.',
+            def: { label: 'What is a manual test plan?', text: "A manual test plan describes step by step how a human tester should verify a feature works — written before testing begins. It forces you to think clearly about what 'working correctly' actually means." },
+            how: 'Structure: Scope, Preconditions, Steps (numbered actions with expected results), Edge cases, Pass/Fail criteria.',
+            platform: 'Write the test plan for the full new-learner journey: discovery → registration → first AI interaction → first assessment → certificate generation.',
+            submitPrompt: 'Paste your complete manual test plan document. It must include all five sections: Scope, Preconditions, Steps (at least 8 numbered steps with expected results), Edge Cases (at least 3), and Pass/Fail Criteria.',
           },
         ],
       },
@@ -175,23 +204,26 @@ const PHASES: Phase[] = [
           {
             name: 'Keep a hypothesis log for the next 5 bugs',
             short: 'Write your theory before opening AI — then check if you were right',
-            def: { label: 'What is hypothesis-driven debugging?', text: "When something breaks, the instinct is to search the error message or paste it into AI. Hypothesis-driven debugging inserts one step first: form a specific, testable explanation for why the bug exists. Format: 'I believe the issue is X because Y evidence, and I can confirm by doing Z.' This trains you to reason about systems rather than pattern-match on symptoms." },
-            how: 'For each bug write: (1) the observable symptom, (2) your hypothesis before looking at anything, (3) what you found, (4) whether your hypothesis was correct. Keep this in a debug-log.md. After 5 entries, review: how accurate were your hypotheses? Where were your mental models wrong?',
-            platform: 'The next time an SSE stream drops, a Supabase query returns unexpected results, or a Vercel deployment fails — stop before reaching for AI. Write your hypothesis first. This habit, practiced consistently, is worth more than any certification.',
+            def: { label: 'What is hypothesis-driven debugging?', text: "Hypothesis-driven debugging inserts one step before reaching for AI: form a specific, testable explanation for why the bug exists. Format: 'I believe the issue is X because Y evidence, and I can confirm by doing Z.' This trains you to reason about systems rather than pattern-match on symptoms." },
+            how: "For each bug write: (1) the observable symptom, (2) your hypothesis before looking at anything, (3) what you found, (4) whether your hypothesis was correct. Keep this in a debug-log.md.",
+            platform: 'After 5 entries, review: how accurate were your hypotheses? Where were your mental models wrong?',
+            submitPrompt: 'Paste all 5 entries from your debug-log.md. Each entry must have all four fields: symptom, hypothesis, finding, and accuracy assessment. The log should show honest reflection on where your hypotheses were wrong.',
           },
           {
             name: 'Learn Supabase logs + Vercel function logs',
             short: 'Platform-level debugging, not just the browser console',
-            def: { label: 'What are platform logs?', text: 'The browser console shows errors that happen in the browser. Platform logs show everything else: database queries that failed, edge functions that timed out, auth events that were rejected. These logs exist in Supabase (Logs → API, Auth, Database) and in Vercel (deployment → Functions → Logs). A developer who can only read browser errors is missing the majority of production failure information.' },
-            how: 'Learn: how to filter Supabase logs by time, endpoint, and status code; how to read a slow query log; how to find Vercel function execution logs for a specific request; how to correlate a user-facing error with its server-side cause.',
-            platform: 'Spend one hour exploring Supabase logs for the Oloibiri cohort. Look at the last 100 auth events. Are there unexpected failures? Repeated errors? This is what platform ownership looks like — knowing what your system is doing even when no one reports a problem.',
+            def: { label: 'What are platform logs?', text: 'The browser console shows errors in the browser. Platform logs show everything else: database queries that failed, edge functions that timed out, auth events that were rejected. A developer who can only read browser errors is missing the majority of production failure information.' },
+            how: 'Learn: how to filter Supabase logs by time, endpoint, and status code; how to read a slow query log; how to find Vercel function logs for a specific request.',
+            platform: 'Spend one hour exploring Supabase logs for the Oloibiri cohort. Look at the last 100 auth events.',
+            submitPrompt: 'Paste a screenshot description or text output from Supabase logs showing at least one real event you investigated (auth event, API call, or error). Then write 2–3 sentences explaining what you found and what it told you about your platform.',
           },
           {
             name: 'Write one post-mortem on a past bug',
             short: 'Timeline, root cause, what signals were missed',
-            def: { label: 'What is a post-mortem?', text: 'A post-mortem is a written analysis of a bug or outage conducted after it is resolved. It is not about blame — it is about learning. A good post-mortem describes: what happened and when, the impact, the root cause (not just the symptom), what fixed it, and what changes would prevent recurrence. Post-mortems are standard practice at every serious technology company.' },
-            how: 'Standard format — Summary (one sentence), Timeline (noticed → diagnosed → resolved), Root cause (the underlying technical reason), Impact (users affected and duration), Resolution (what fixed it), Prevention (what would catch this earlier next time).',
-            platform: 'Pick the most significant bug you have fixed — something that affected real learners in Oloibiri or Ibiade. Write the post-mortem in /docs/post-mortems/. The act of writing it will surface things you did not fully understand at the time, which is the point.',
+            def: { label: 'What is a post-mortem?', text: 'A post-mortem is a written analysis of a bug conducted after it is resolved. It is not about blame — it is about learning. A good post-mortem describes: what happened and when, the impact, the root cause, what fixed it, and what changes would prevent recurrence.' },
+            how: 'Standard format — Summary, Timeline, Root cause, Impact, Resolution, Prevention.',
+            platform: 'Pick the most significant bug you have fixed — something that affected real learners in Oloibiri or Ibiade.',
+            submitPrompt: 'Paste your complete post-mortem document. It must include all six sections: Summary (one sentence), Timeline (at least 3 timestamped entries), Root Cause (the underlying technical reason, not just the symptom), Impact, Resolution, and Prevention.',
           },
         ],
       },
@@ -213,23 +245,26 @@ const PHASES: Phase[] = [
           {
             name: 'Contribute a fix to an open-source repo',
             short: 'Unfamiliar codebase, real review process',
-            def: { label: 'What does open-source contribution prove?', text: "Contributing requires navigating a codebase you did not write, understanding its conventions, making a change that fits the existing style, writing a PR description that convinces strangers your change is correct, and responding to review feedback professionally. A merged PR in a public repository is verifiable by any hiring manager in 30 seconds. It proves you can work in code review culture — the default in every professional team." },
-            how: "On GitHub, search for issues labeled 'good first issue' in repos you already use. A documentation fix or a small bug fix is better than a large feature — maintainers are more likely to review and merge small changes quickly.",
-            platform: 'If you encounter a limitation in a library used on nextvillage.community — a missing feature in a Supabase helper, a bug in a UI component — that is the ideal contribution candidate. You understand the context, you have a real use case, and your PR description will be concrete and credible.',
+            def: { label: 'What does open-source contribution prove?', text: "Contributing requires navigating a codebase you did not write, understanding its conventions, making a change that fits the existing style, writing a PR description that convinces strangers your change is correct, and responding to review feedback professionally. A merged PR in a public repository is verifiable by any hiring manager in 30 seconds." },
+            how: "On GitHub, search for issues labeled 'good first issue' in repos you already use. A documentation fix or a small bug fix is better than a large feature.",
+            platform: 'If you encounter a limitation in a library used on nextvillage.community, that is the ideal contribution candidate.',
+            submitPrompt: 'Paste the GitHub URL of your merged pull request. Then write a paragraph describing: what the bug or issue was, how you navigated the unfamiliar codebase to find the right place to fix it, and what the review process was like.',
           },
           {
             name: "Read and formally critique a peer's project",
-            short: 'Structured written review: what works, what you\'d change, and why',
-            def: { label: 'What is a code review?', text: "A code review is a systematic examination of someone else's code. Good reviewers look for: correctness (does it do what it claims?), clarity (can a future developer understand it?), edge cases (what happens with unexpected inputs?), and security (could this be exploited?). The ability to give precise, constructive code review distinguishes senior developers." },
-            how: 'Your critique should include: what the code does well (be specific, not generic), at least two things you would change with clear reasons, and one question you would ask the author before merging. Share the written review with the author.',
-            platform: 'This skill directly applies to leading future Oloibiri developers. The structured thinking you use to review a peer\'s code is what you will use to mentor the next person who builds on nextvillage.community.',
+            short: "Structured written review: what works, what you'd change, and why",
+            def: { label: 'What is a code review?', text: "A code review is a systematic examination of someone else's code. Good reviewers look for: correctness, clarity, edge cases, and security. The ability to give precise, constructive code review distinguishes senior developers." },
+            how: "Your critique should include: what the code does well (be specific), at least two things you would change with clear reasons, and one question you would ask the author before merging.",
+            platform: "This skill directly applies to leading future Oloibiri developers.",
+            submitPrompt: 'Paste your written code review. It must include three sections: (1) What works well — with at least one specific, non-generic observation. (2) Two specific changes with reasons. (3) One question you would ask the author before merging.',
           },
           {
             name: 'Trace one library you use daily into its source',
             short: 'Read it. Understand what it actually does. Write a 1-paragraph summary.',
-            def: { label: 'Why read library source code?', text: "Every developer uses libraries they treat as black boxes. Reading the source of a library you depend on builds three capabilities: you understand what it can and cannot do, you can debug it when it behaves unexpectedly, and you learn patterns from developers who are better than you. Most great developers became great partly by reading other people's excellent code." },
-            how: 'Pick one function from a library used in nextvillage.community. Find the source on GitHub. Trace the function: what does it call internally? What errors can it throw? What assumptions does it make about inputs? Write a 1-paragraph plain-English summary.',
-            platform: 'The Supabase JS client is open source on GitHub. Reading how signInWithPassword() works under the hood will deepen your understanding of the auth flow from the diagnostic section — and may answer questions you did not know you had.',
+            def: { label: 'Why read library source code?', text: "Reading the source of a library you depend on builds three capabilities: you understand what it can and cannot do, you can debug it when it behaves unexpectedly, and you learn patterns from developers who are better than you." },
+            how: 'Pick one function from a library used in nextvillage.community. Find the source on GitHub. Trace the function: what does it call internally? What errors can it throw? What assumptions does it make?',
+            platform: 'The Supabase JS client is open source. Reading how signInWithPassword() works under the hood will deepen your understanding of the auth flow.',
+            submitPrompt: 'Name the library and function you traced. Paste a link to the source on GitHub. Then write your 1-paragraph plain-English summary explaining what the function actually does internally — including at least one thing that surprised you or that you did not know before reading the source.',
           },
         ],
       },
@@ -239,23 +274,26 @@ const PHASES: Phase[] = [
           {
             name: "Design a system you haven't built",
             short: 'Diagram it, choose a stack, defend the tradeoffs',
-            def: { label: 'What is a system design exercise?', text: "System design is the process of defining the architecture, components, and data flows of a system before writing any code. In interviews, you will often be given a prompt like 'design a notification system' and asked to think through it out loud. This tests whether you can reason about scale, tradeoffs, and technical decisions without being told what to build. It appears in virtually every mid-level and senior interview process." },
-            how: 'Prompt: Design a push notification system for nextvillage.community that sends daily learning reminders to 10,000 learners across Oloibiri and Ibiade, with different message content per cohort and offline delivery queuing for intermittent connections. Produce: a component diagram, a data model, your stack choices, and a paragraph on what you would do differently at 100,000 learners.',
-            platform: 'This is not hypothetical — a notification system is something the platform may actually need. Your design could become a real feature proposal, which gives you an authentic story to tell in interviews.',
+            def: { label: 'What is a system design exercise?', text: "System design is the process of defining the architecture, components, and data flows before writing any code. It tests whether you can reason about scale, tradeoffs, and technical decisions without being told what to build." },
+            how: 'Prompt: Design a push notification system for nextvillage.community that sends daily learning reminders to 10,000 learners across Oloibiri and Ibiade, with different message content per cohort and offline delivery queuing for intermittent connections.',
+            platform: 'Produce: a component diagram, a data model, your stack choices, and a paragraph on what you would do differently at 100,000 learners.',
+            submitPrompt: 'Paste your system design document. It must include: a component list with responsibilities, a data model (table/schema sketch), stack choices with justification, and a paragraph addressing scale to 100,000 learners. Diagrams can be described in text if you cannot paste an image.',
           },
           {
             name: 'GitHub Foundations certification',
             short: 'Validates Git discipline with a portable credential',
-            def: { label: 'What is the GitHub Foundations certification?', text: 'GitHub Foundations is an official certification from GitHub that validates knowledge of Git fundamentals, repositories, branching, PRs, issues, Actions, and collaboration workflows. It appears on your LinkedIn and GitHub profile as a verified credential — visible to any recruiter or hiring manager who looks you up. Cost: approximately $99 USD.' },
-            how: 'GitHub provides a free study guide at gh.io/foundations-study-guide. After completing Phases 1 and 2, you will already know most of the material from practice. Budget 2–3 weeks of light study.',
-            platform: 'The GitHub Foundations certification signals to Nigerian and international employers that your Git practices meet a verified standard — not just self-reported.',
+            def: { label: 'What is the GitHub Foundations certification?', text: 'GitHub Foundations is an official certification from GitHub that validates knowledge of Git fundamentals, repositories, branching, PRs, issues, Actions, and collaboration workflows. It appears on your LinkedIn and GitHub profile as a verified credential.' },
+            how: 'GitHub provides a free study guide at gh.io/foundations-study-guide. After completing Phases 1 and 2, you will already know most of the material from practice.',
+            platform: 'The GitHub Foundations certification signals to Nigerian and international employers that your Git practices meet a verified standard.',
+            submitPrompt: 'Paste your GitHub Foundations certification badge URL or credential ID from your GitHub profile or Credly. Then write 1–2 sentences on which topic in the exam you found hardest and why.',
           },
           {
             name: 'Microsoft AI-900 certification',
             short: 'AI vocabulary + third-party validation for the Nigerian market',
-            def: { label: 'What is AI-900?', text: 'Microsoft AI-900 (Azure AI Fundamentals) covers core AI concepts: machine learning, computer vision, natural language processing, generative AI, and responsible AI principles. It validates that you understand the AI landscape and can speak intelligently about it professionally. In Nigeria and across Africa, Microsoft certifications carry significant weight with employers. Cost: approximately $165 USD with student discounts available.' },
-            how: 'Microsoft offers free learning paths at learn.microsoft.com. Budget 3–4 weeks of study. After passing, update your platform documentation to use precise AI terminology — the vocabulary maps directly to what nextvillage.community does.',
-            platform: 'The AI-900 also strengthens partnership conversations — including with Microsoft\'s Elevate Africa program. Being able to name what your platform does accurately is part of telling its story credibly.',
+            def: { label: 'What is AI-900?', text: "Microsoft AI-900 (Azure AI Fundamentals) covers core AI concepts: machine learning, computer vision, natural language processing, generative AI, and responsible AI principles. In Nigeria and across Africa, Microsoft certifications carry significant weight with employers." },
+            how: 'Microsoft offers free learning paths at learn.microsoft.com. Budget 3–4 weeks of study.',
+            platform: "The AI-900 also strengthens partnership conversations — including with Microsoft's Elevate Africa program.",
+            submitPrompt: 'Paste your AI-900 certification badge URL or Credly credential ID. Then write 2–3 sentences connecting one concept from the AI-900 curriculum to something specific in how nextvillage.community works.',
           },
         ],
       },
@@ -277,23 +315,26 @@ const PHASES: Phase[] = [
           {
             name: 'Own one full feature solo: requirements → deploy',
             short: 'No review from Kevin until you request it',
-            def: { label: 'What does full ownership of a feature mean?', text: 'Full ownership means you are responsible for every phase: writing the requirements, designing the solution, building and testing it, writing the PR, deploying it, and monitoring it for the first week after launch. You are not asking for direction — you are making the decisions and living with the outcomes. This is what all professional software development looks like.' },
-            how: 'Suggested feature: a learner progress dashboard visible to Bennywhite Davidson and Solomon Mathias Solomon — showing weekly active learners, assessment completion rates, and proficiency trends for both Oloibiri and Ibiade cohorts. Write a one-page requirements document before writing any code.',
-            platform: 'Share the requirements document with Kevin not for approval but for information — then proceed independently. The requirements document is part of the deliverable.',
+            def: { label: 'What does full ownership of a feature mean?', text: 'Full ownership means you are responsible for every phase: writing the requirements, designing the solution, building and testing it, writing the PR, deploying it, and monitoring it for the first week after launch.' },
+            how: 'Suggested feature: a learner progress dashboard visible to Bennywhite Davidson and Solomon Mathias Solomon — showing weekly active learners, assessment completion rates, and proficiency trends for both cohorts.',
+            platform: 'Share the requirements document with Kevin not for approval but for information — then proceed independently.',
+            submitPrompt: 'Paste: (1) your one-page requirements document, (2) the GitHub PR URL, and (3) the Vercel deployment URL. The requirements document must be written before the code — if the PR predates the doc, that is a flag.',
           },
           {
             name: 'Own monitoring + incident log for 60 days',
             short: 'You are the on-call person — document every anomaly',
-            def: { label: 'What is platform monitoring?', text: 'Monitoring is the practice of actively watching a live system to detect problems — ideally before users report them. An incident log is a running record of every anomaly observed: what happened, when, what the likely cause was, and whether action was taken. It is the difference between knowing your platform and just running it.' },
-            how: 'Set up a Vercel status alert for deployment failures. In Supabase, enable email alerts for auth anomalies. Create an incident-log.md and update it weekly. After 60 days, write a 1-page summary: what patterns did you see, and what would you add to the monitoring setup?',
-            platform: 'The Oloibiri cohort operates in an environment with intermittent connectivity. Monitoring over 60 days will give you real data on how offline conditions affect your platform — both operationally important and a compelling story for funders and potential employers.',
+            def: { label: 'What is platform monitoring?', text: 'Monitoring is actively watching a live system to detect problems — ideally before users report them. An incident log is a running record of every anomaly: what happened, when, what the likely cause was, and whether action was taken.' },
+            how: 'Set up Vercel status alerts for deployment failures and Supabase email alerts for auth anomalies. Create an incident-log.md and update it weekly.',
+            platform: 'The Oloibiri cohort operates in an environment with intermittent connectivity. 60 days of monitoring will give you real data on how offline conditions affect your platform.',
+            submitPrompt: 'Paste your incident-log.md covering at least 4 weeks. It must include at least 3 entries with: date, observed anomaly, likely cause, and action taken (or "no action — monitored"). Then paste your 1-page summary of patterns observed.',
           },
           {
             name: 'Write the vAI onboarding doc for a future developer',
             short: 'If you left, could someone else take over? Write that guide.',
-            def: { label: 'What is a developer onboarding document?', text: "A developer onboarding document allows a new developer to understand, run, and contribute to a codebase without asking questions. Writing one forces you to surface assumptions you have been carrying silently — things you 'just know' that no one else would. It is the truest test of ownership." },
-            how: 'Cover: prerequisites (Node version, environment variables, Supabase project setup), architecture overview (link to your Phase 1 diagram), key flows (how a new learner is created, how assessments work, how certifications are generated), deployment process, and known gotchas.',
-            platform: 'This document is also the foundation for training future Oloibiri developers. If your goal is a Nigerian tech hub, the onboarding doc is the first teaching material. Write it as if the next reader is a talented developer from Oloibiri who knows less about the platform than you — because they will be.',
+            def: { label: 'What is a developer onboarding document?', text: "A developer onboarding document allows a new developer to understand, run, and contribute to a codebase without asking questions. Writing one forces you to surface assumptions you have been carrying silently — things you 'just know' that no one else would." },
+            how: 'Cover: prerequisites, architecture overview, key flows (how a new learner is created, how assessments work, how certifications are generated), deployment process, and known gotchas.',
+            platform: 'This document is also the foundation for training future Oloibiri developers.',
+            submitPrompt: 'Paste the full onboarding document. It must include all five sections: Prerequisites, Architecture Overview (with link to diagram), Key Flows (at least 3 flows described step-by-step), Deployment Process, and Known Gotchas (at least 2).',
           },
         ],
       },
@@ -303,23 +344,26 @@ const PHASES: Phase[] = [
           {
             name: 'Build one independent project (not vAI)',
             short: 'Your idea, your stack — demonstrates agency to hiring managers',
-            def: { label: 'Why an independent project?', text: "nextvillage.community is genuinely impressive — but it was initiated and mentored by Kevin. Any hiring manager will ask, at least silently: 'Is this his work or his mentor's?' An independent project built from your own idea, on your own initiative, with no external prompting, answers that question definitively. It signals that you are a developer who creates, not just one who executes." },
-            how: 'Criteria: your own idea, deployed and publicly accessible, with a README explaining what it does, why you built it, and what you would do differently. Should use at least one technology or pattern you learned during this roadmap that you did not already know.',
-            platform: 'The vAI platform gives you a rich source of inspiration. What problem did you notice while building nextvillage.community that the platform itself does not solve? That gap is your independent project.',
+            def: { label: 'Why an independent project?', text: "nextvillage.community is genuinely impressive — but it was initiated and mentored by Kevin. An independent project built from your own idea answers definitively: 'Is this his work or his mentor's?'" },
+            how: 'Criteria: your own idea, deployed and publicly accessible, with a README explaining what it does, why you built it, and what you would do differently.',
+            platform: 'What problem did you notice while building nextvillage.community that the platform itself does not solve? That gap is your independent project.',
+            submitPrompt: 'Paste: (1) the live URL, (2) the GitHub repo URL, and (3) the README excerpt that covers what it does, why you built it, and what you would do differently. The project must be deployed — a GitHub repo alone does not count.',
           },
           {
             name: 'Launch a portfolio site: two projects with architecture notes',
             short: 'Not just screenshots — explain the decisions and tradeoffs',
-            def: { label: 'What makes a developer portfolio effective?', text: "Most developer portfolios show screenshots and list technologies used. An effective portfolio shows thinking: why was this architecture chosen, what tradeoffs were made, what problems were harder than they looked. A hiring manager reviewing 20 candidates remembers the one who explained their decisions, not the one with the most features listed." },
-            how: 'For each project include: a 2-sentence description of what it does and who it serves, the architecture diagram, one key technical decision and why you made it, one thing that was harder than expected and how you solved it, and a live link plus a GitHub link.',
-            platform: 'The vAI platform entry should lead with the human impact — 79+ learners in off-grid Nigeria — before the technical details. That framing is what makes a hiring manager stop scrolling.',
+            def: { label: 'What makes a developer portfolio effective?', text: "Most developer portfolios show screenshots and list technologies. An effective portfolio shows thinking: why was this architecture chosen, what tradeoffs were made, what problems were harder than they looked. A hiring manager remembers the one who explained their decisions." },
+            how: 'For each project include: a 2-sentence description, the architecture diagram, one key technical decision and why, one thing that was harder than expected, and a live link plus GitHub link.',
+            platform: 'The vAI platform entry should lead with the human impact — 79+ learners in off-grid Nigeria — before the technical details.',
+            submitPrompt: 'Paste the live URL of your portfolio site. Then paste the full text of the vAI project entry — it must include human impact framing first, then architecture, then technical decisions. The portfolio must be live, not a local build.',
           },
           {
             name: 'Complete a mock technical interview with Kevin',
             short: 'Architecture, live debugging, tradeoff discussion — treat it as real',
-            def: { label: 'What does a technical interview look like?', text: "A technical interview typically has three parts: (1) a conversation about your background and projects — where you explain what you built, why, and what you learned; (2) a live coding or debugging exercise solved in real time while thinking out loud; (3) a system design discussion where the interviewer wants to hear your reasoning process, not just a correct answer. Most developers perform poorly in interviews not because they lack skill, but because they have never practiced the format." },
-            how: "The mock interview should cover: (1) Describe nextvillage.community in 90 seconds to someone who has never heard of it. (2) Kevin introduces a bug — you diagnose it while narrating your thinking out loud. (3) Tradeoff question: 'Why Supabase instead of building your own auth?' Kevin gives honest direct feedback afterward.",
-            platform: "The 90-second platform description is the most important exercise. Practice it until it leads with impact (79 learners, off-grid Nigeria, AI-powered) before technology. That sequence is what makes a stranger care.",
+            def: { label: 'What does a technical interview look like?', text: "A technical interview has three parts: (1) a conversation about your background and projects; (2) a live coding or debugging exercise solved in real time while thinking out loud; (3) a system design discussion where the interviewer wants to hear your reasoning process." },
+            how: "The mock interview should cover: (1) Describe nextvillage.community in 90 seconds. (2) Kevin introduces a bug — you diagnose it while narrating your thinking out loud. (3) Tradeoff question: 'Why Supabase instead of building your own auth?'",
+            platform: "The 90-second platform description is the most important exercise. Practice it until it leads with impact before technology.",
+            submitPrompt: "Write your 90-second platform description as you would deliver it in a real interview. Then write Kevin's feedback from the mock interview — what he said you did well and what he said you should improve. Both parts are required.",
           },
         ],
       },
@@ -327,70 +371,18 @@ const PHASES: Phase[] = [
   },
 ];
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Flat ordered list of all task keys for sequential gating
+const ALL_TASK_KEYS: string[] = PHASES.flatMap(p =>
+  p.tracks.flatMap(t => t.tasks.map(task => `${p.id}::${task.name}`))
+);
+
+function taskKey(phaseId: string, taskName: string) {
+  return `${phaseId}::${taskName}`;
+}
+
 // ─── Sub-components ────────────────────────────────────────────────────────────
-
-const TaskRow: React.FC<{ task: Task; phaseColor: string; phaseBg: string }> = ({
-  task, phaseColor, phaseBg,
-}) => {
-  const [done, setDone] = useState(false);
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="border-b border-gray-100 last:border-0">
-      {/* Row */}
-      <div className="flex items-start gap-3 py-3 px-1">
-        <button
-          onClick={() => setDone(d => !d)}
-          className="mt-0.5 flex-shrink-0 focus:outline-none"
-          aria-label={done ? 'Mark incomplete' : 'Mark complete'}
-        >
-          {done
-            ? <CheckCircle2 size={18} style={{ color: phaseColor }} />
-            : <Circle size={18} className="text-gray-300" />}
-        </button>
-        <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium leading-snug ${done ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-            {task.name}
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5 italic">{task.short}</p>
-        </div>
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="flex-shrink-0 flex items-center gap-1 text-xs text-gray-400 border border-gray-200 rounded-md px-2 py-1 hover:bg-gray-50 transition-colors font-mono"
-        >
-          details {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        </button>
-      </div>
-
-      {/* Accordion */}
-      {open && (
-        <div className="ml-7 mb-3 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700 leading-relaxed space-y-3">
-          {/* Definition */}
-          <div className="rounded-md p-3" style={{ background: phaseBg, borderLeft: `3px solid ${phaseColor}` }}>
-            <p className="text-xs font-mono uppercase tracking-wider mb-1.5" style={{ color: phaseColor }}>
-              {task.def.label}
-            </p>
-            <p className="text-xs leading-relaxed text-gray-700">{task.def.text}</p>
-          </div>
-
-          {/* How to */}
-          <div>
-            <p className="text-xs font-mono uppercase tracking-wider text-gray-400 mb-1.5">How to practice</p>
-            <p className="text-sm text-gray-700">{task.how}</p>
-          </div>
-
-          {/* Platform callout */}
-          <div className="rounded-md p-3 bg-emerald-50 border border-emerald-200">
-            <p className="text-xs font-mono uppercase tracking-wider text-emerald-700 mb-1.5">
-              On nextvillage.community
-            </p>
-            <p className="text-xs leading-relaxed text-emerald-900">{task.platform}</p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 const DiagCard: React.FC<{ item: DiagItem }> = ({ item }) => {
   const [open, setOpen] = useState(false);
@@ -417,9 +409,293 @@ const DiagCard: React.FC<{ item: DiagItem }> = ({ item }) => {
   );
 };
 
-const PhaseSection: React.FC<{ phase: Phase }> = ({ phase }) => {
+// ── Submission panel ──────────────────────────────────────────────────────────
+
+interface SubmissionPanelProps {
+  task: Task;
+  phaseId: string;
+  phaseColor: string;
+  phaseBg: string;
+  record: ProgressRecord | null;
+  onEvaluated: (rec: ProgressRecord) => void;
+}
+
+const SubmissionPanel: React.FC<SubmissionPanelProps> = ({
+  task, phaseId, phaseColor, phaseBg, record, onEvaluated
+}) => {
+  const { user } = useAuth();
+  const [text, setText] = useState(record?.submission_text ?? '');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const alreadyPassed = record?.status === 'pass';
+
+  const handleSubmit = async () => {
+    if (!text.trim() || !user?.id) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      // ── 1. Call Anthropic via edge function (or directly) for evaluation ──
+      const systemPrompt = `You are a rigorous but encouraging technical mentor evaluating evidence submitted by a developer learner named Silas.
+
+The task is: "${task.name}"
+What good evidence looks like: ${task.submitPrompt}
+
+Evaluate the submission strictly but fairly. Respond in JSON only, no markdown, no preamble:
+{
+  "pass": true | false,
+  "feedback": "2-4 sentences. If pass=true: confirm what was done well and what to carry forward. If pass=false: be specific about exactly what is missing or needs improvement and what to resubmit."
+}
+
+Pass criteria: the submission meaningfully addresses the task requirements described above. Incomplete, placeholder, or off-topic submissions should not pass.`;
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: text.trim() }],
+        }),
+      });
+
+      if (!response.ok) throw new Error(`API error ${response.status}`);
+      const data = await response.json();
+      const raw = data.content?.[0]?.text ?? '{}';
+      let parsed: { pass: boolean; feedback: string };
+      try {
+        parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+      } catch {
+        throw new Error('Could not parse evaluation response.');
+      }
+
+      const newStatus: TaskStatus = parsed.pass ? 'pass' : 'needs_work';
+
+      // ── 2. Upsert into tech_skills_progress ──
+      const { error: dbError } = await supabase
+        .from('tech_skills_progress')
+        .upsert({
+          user_id: user.id,
+          phase_id: phaseId,
+          track_label: '', // caller could pass this; fine as empty for now
+          task_name: task.name,
+          status: newStatus,
+          submission_text: text.trim(),
+          ai_feedback: parsed.feedback,
+          ai_score: parsed.pass ? 1 : 0,
+          submitted_at: new Date().toISOString(),
+          evaluated_at: new Date().toISOString(),
+          attempt_count: (record?.attempt_count ?? 0) + 1,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,phase_id,task_name' });
+
+      if (dbError) throw new Error(dbError.message);
+
+      const updated: ProgressRecord = {
+        phase_id: phaseId,
+        task_name: task.name,
+        status: newStatus,
+        submission_text: text.trim(),
+        ai_feedback: parsed.feedback,
+        attempt_count: (record?.attempt_count ?? 0) + 1,
+      };
+      onEvaluated(updated);
+    } catch (e: any) {
+      setError(e.message ?? 'Evaluation failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 p-4 space-y-3">
+
+      {/* What to submit */}
+      <div className="rounded-md p-3" style={{ background: phaseBg, borderLeft: `3px solid ${phaseColor}` }}>
+        <p className="text-xs font-mono uppercase tracking-wider mb-1" style={{ color: phaseColor }}>
+          <ClipboardList size={11} className="inline mr-1" />What to submit
+        </p>
+        <p className="text-xs text-gray-700 leading-relaxed">{task.submitPrompt}</p>
+        <p className="text-xs text-gray-500 mt-2 italic">
+          Paste from your terminal, AI Playground, GitHub, or document editor.
+          The AI evaluator checks your submission against these criteria.
+        </p>
+      </div>
+
+      {/* Feedback from previous attempt */}
+      {record?.ai_feedback && (
+        <div className={`rounded-md p-3 border ${
+          record.status === 'pass'
+            ? 'bg-emerald-50 border-emerald-200'
+            : 'bg-amber-50 border-amber-200'
+        }`}>
+          <p className={`text-xs font-mono uppercase tracking-wider mb-1 ${
+            record.status === 'pass' ? 'text-emerald-700' : 'text-amber-700'
+          }`}>
+            {record.status === 'pass'
+              ? <><ThumbsUp size={11} className="inline mr-1" />Passed — mentor feedback</>
+              : <><AlertCircle size={11} className="inline mr-1" />Needs work — attempt {record.attempt_count}</>
+            }
+          </p>
+          <p className="text-xs text-gray-700 leading-relaxed">{record.ai_feedback}</p>
+        </div>
+      )}
+
+      {/* Submission textarea */}
+      {!alreadyPassed && (
+        <>
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder="Paste your evidence here — terminal output, code, document text, URLs..."
+            rows={8}
+            className="w-full text-sm font-mono rounded-md border border-gray-200 bg-gray-50 p-3 resize-y focus:outline-none focus:ring-2 focus:border-transparent"
+            style={{ '--tw-ring-color': phaseColor } as any}
+          />
+
+          {error && (
+            <p className="text-xs text-red-600 flex items-center gap-1">
+              <AlertCircle size={12} /> {error}
+            </p>
+          )}
+
+          <button
+            onClick={handleSubmit}
+            disabled={loading || !text.trim()}
+            className="inline-flex items-center gap-2 rounded-lg text-white text-xs font-semibold px-4 py-2 transition-opacity disabled:opacity-40"
+            style={{ background: phaseColor }}
+          >
+            {loading
+              ? <><Loader2 size={13} className="animate-spin" /> Evaluating…</>
+              : <><Send size={13} /> Submit for evaluation</>
+            }
+          </button>
+
+          {record?.status === 'needs_work' && (
+            <p className="text-xs text-gray-400 font-mono">
+              Attempt {(record.attempt_count ?? 0) + 1} · revise and resubmit anytime
+            </p>
+          )}
+        </>
+      )}
+
+      {alreadyPassed && (
+        <p className="text-xs text-emerald-600 font-mono flex items-center gap-1">
+          <CheckCircle2 size={13} /> Task complete · next task is now unlocked
+        </p>
+      )}
+    </div>
+  );
+};
+
+// ── TaskRow ───────────────────────────────────────────────────────────────────
+
+interface TaskRowProps {
+  task: Task;
+  phaseId: string;
+  phaseColor: string;
+  phaseBg: string;
+  status: TaskStatus;
+  record: ProgressRecord | null;
+  onEvaluated: (rec: ProgressRecord) => void;
+}
+
+const TaskRow: React.FC<TaskRowProps> = ({
+  task, phaseId, phaseColor, phaseBg, status, record, onEvaluated
+}) => {
+  const [open, setOpen] = useState(false);
+  const locked = status === 'locked';
+  const passed = status === 'pass';
+
+  return (
+    <div className={`border-b border-gray-100 last:border-0 ${locked ? 'opacity-50' : ''}`}>
+      {/* Row header */}
+      <div className="flex items-start gap-3 py-3 px-1">
+        {/* Status icon */}
+        <div className="mt-0.5 flex-shrink-0">
+          {passed
+            ? <CheckCircle2 size={18} style={{ color: phaseColor }} />
+            : locked
+              ? <Lock size={18} className="text-gray-300" />
+              : status === 'needs_work'
+                ? <RefreshCw size={18} className="text-amber-400" />
+                : <Circle size={18} className="text-gray-300" />
+          }
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-medium leading-snug ${passed ? 'line-through text-gray-400' : locked ? 'text-gray-400' : 'text-gray-800'}`}>
+            {task.name}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5 italic">{task.short}</p>
+          {status === 'needs_work' && (
+            <p className="text-xs text-amber-500 mt-0.5 font-mono">↩ revise and resubmit</p>
+          )}
+        </div>
+
+        <button
+          onClick={() => !locked && setOpen(o => !o)}
+          disabled={locked}
+          className={`flex-shrink-0 flex items-center gap-1 text-xs border rounded-md px-2 py-1 font-mono transition-colors ${
+            locked
+              ? 'text-gray-300 border-gray-100 cursor-not-allowed'
+              : 'text-gray-400 border-gray-200 hover:bg-gray-50'
+          }`}
+        >
+          {locked ? <><Lock size={10} /> locked</> : <>details {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</>}
+        </button>
+      </div>
+
+      {/* Accordion */}
+      {open && !locked && (
+        <div className="ml-7 mb-3 space-y-3">
+          {/* Definition */}
+          <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3 text-sm text-gray-700">
+            <div className="rounded-md p-3" style={{ background: phaseBg, borderLeft: `3px solid ${phaseColor}` }}>
+              <p className="text-xs font-mono uppercase tracking-wider mb-1.5" style={{ color: phaseColor }}>
+                {task.def.label}
+              </p>
+              <p className="text-xs leading-relaxed text-gray-700">{task.def.text}</p>
+            </div>
+            <div>
+              <p className="text-xs font-mono uppercase tracking-wider text-gray-400 mb-1.5">How to practice</p>
+              <p className="text-sm text-gray-700">{task.how}</p>
+            </div>
+            <div className="rounded-md p-3 bg-emerald-50 border border-emerald-200">
+              <p className="text-xs font-mono uppercase tracking-wider text-emerald-700 mb-1.5">
+                On nextvillage.community
+              </p>
+              <p className="text-xs leading-relaxed text-emerald-900">{task.platform}</p>
+            </div>
+          </div>
+
+          {/* Submission panel */}
+          <SubmissionPanel
+            task={task}
+            phaseId={phaseId}
+            phaseColor={phaseColor}
+            phaseBg={phaseBg}
+            record={record}
+            onEvaluated={onEvaluated}
+          />
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── PhaseSection ──────────────────────────────────────────────────────────────
+
+interface PhaseSectionProps {
+  phase: Phase;
+  progressMap: Map<string, ProgressRecord>;
+  onEvaluated: (rec: ProgressRecord) => void;
+}
+
+const PhaseSection: React.FC<PhaseSectionProps> = ({ phase, progressMap, onEvaluated }) => {
   const [open, setOpen] = useState(phase.id === 'p1');
-  const totalTasks = phase.tracks.reduce((s, t) => s + t.tasks.length, 0);
 
   const phaseIcon = {
     p1: <GitBranch size={16} />,
@@ -428,9 +704,11 @@ const PhaseSection: React.FC<{ phase: Phase }> = ({ phase }) => {
     p4: <Trophy size={16} />,
   }[phase.id];
 
+  const allTasks = phase.tracks.flatMap(t => t.tasks);
+  const passedCount = allTasks.filter(t => progressMap.get(taskKey(phase.id, t.name))?.status === 'pass').length;
+
   return (
     <div className="mb-8">
-      {/* Phase header */}
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full text-left flex items-start gap-3 mb-4"
@@ -448,31 +726,47 @@ const PhaseSection: React.FC<{ phase: Phase }> = ({ phase }) => {
           </h2>
           <p className="text-xs text-gray-400 font-mono mt-0.5">{phase.subtitle}</p>
         </div>
-        <span className="text-gray-300 mt-1 flex-shrink-0">
-          {open ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-        </span>
+        <div className="flex items-center gap-2 mt-1 flex-shrink-0">
+          <span className="text-xs font-mono text-gray-400">{passedCount}/{allTasks.length}</span>
+          {open ? <ChevronUp size={18} className="text-gray-300" /> : <ChevronDown size={18} className="text-gray-300" />}
+        </div>
       </button>
 
       {open && (
         <div className="space-y-3">
-          {/* Tracks grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {phase.tracks.map((track, ti) => (
               <div key={ti} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                <p
-                  className="text-xs font-mono uppercase tracking-wider mb-3"
-                  style={{ color: phase.color }}
-                >
+                <p className="text-xs font-mono uppercase tracking-wider mb-3" style={{ color: phase.color }}>
                   {track.label}
                 </p>
-                {track.tasks.map((task, i) => (
-                  <TaskRow
-                    key={i}
-                    task={task}
-                    phaseColor={phase.color}
-                    phaseBg={phase.colorBg}
-                  />
-                ))}
+                {track.tasks.map((task, i) => {
+                  const key = taskKey(phase.id, task.name);
+                  const rec = progressMap.get(key) ?? null;
+                  const globalIdx = ALL_TASK_KEYS.indexOf(key);
+                  const prevKey = globalIdx > 0 ? ALL_TASK_KEYS[globalIdx - 1] : null;
+                  const prevPassed = prevKey
+                    ? progressMap.get(prevKey)?.status === 'pass'
+                    : true; // first task always available
+                  const status: TaskStatus = rec?.status === 'pass'
+                    ? 'pass'
+                    : !prevPassed
+                      ? 'locked'
+                      : rec?.status ?? 'available';
+
+                  return (
+                    <TaskRow
+                      key={i}
+                      task={task}
+                      phaseId={phase.id}
+                      phaseColor={phase.color}
+                      phaseBg={phase.colorBg}
+                      status={status}
+                      record={rec}
+                      onEvaluated={onEvaluated}
+                    />
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -481,10 +775,7 @@ const PhaseSection: React.FC<{ phase: Phase }> = ({ phase }) => {
           <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 flex items-start gap-3">
             <span className="text-xl flex-shrink-0">{phase.id === 'p4' ? '🏁' : '🎯'}</span>
             <div>
-              <p
-                className="text-xs font-mono uppercase tracking-wider mb-1"
-                style={{ color: phase.color }}
-              >
+              <p className="text-xs font-mono uppercase tracking-wider mb-1" style={{ color: phase.color }}>
                 Phase milestone
               </p>
               <p className="text-sm text-gray-700 leading-relaxed">{phase.milestone}</p>
@@ -502,17 +793,44 @@ const PhaseSection: React.FC<{ phase: Phase }> = ({ phase }) => {
 
 const TechSkillsPage: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [progressMap, setProgressMap] = useState<Map<string, ProgressRecord>>(new Map());
+  const [loadingProgress, setLoadingProgress] = useState(true);
 
-  const totalTasks = PHASES.reduce(
-    (sum, p) => sum + p.tracks.reduce((s, t) => s + t.tasks.length, 0),
-    0,
-  );
+  // Load all progress records for this user
+  useEffect(() => {
+    if (!user?.id) { setLoadingProgress(false); return; }
+    supabase
+      .from('tech_skills_progress')
+      .select('phase_id, task_name, status, submission_text, ai_feedback, attempt_count')
+      .eq('user_id', user.id)
+      .then(({ data, error }) => {
+        if (error) console.error('[TechSkillsPage] progress load error:', error);
+        if (data) {
+          const map = new Map<string, ProgressRecord>();
+          data.forEach((r: any) => map.set(taskKey(r.phase_id, r.task_name), r));
+          setProgressMap(map);
+        }
+        setLoadingProgress(false);
+      });
+  }, [user?.id]);
+
+  const handleEvaluated = useCallback((rec: ProgressRecord) => {
+    setProgressMap(prev => {
+      const next = new Map(prev);
+      next.set(taskKey(rec.phase_id, rec.task_name), rec);
+      return next;
+    });
+  }, []);
+
+  const totalTasks = PHASES.reduce((sum, p) => sum + p.tracks.reduce((s, t) => s + t.tasks.length, 0), 0);
+  const totalPassed = [...progressMap.values()].filter(r => r.status === 'pass').length;
 
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-4xl mx-auto px-6 py-10 pb-20">
 
-        {/* ── Header ── */}
+        {/* Header */}
         <div className="mb-10">
           <p className="text-xs font-mono uppercase tracking-widest text-gray-400 mb-3">
             vAI · nextvillage.community
@@ -525,7 +843,7 @@ const TechSkillsPage: React.FC = () => {
           </h1>
           <p className="text-base text-gray-500 max-w-xl leading-relaxed mb-6">
             A 9-month plan from full-stack builder to platform owner and employable developer.
-            Expand any task for definitions, context, and direction tied to nextvillage.community.
+            Each task must be completed and evaluated before the next unlocks.
           </p>
 
           {/* AI Playground CTA */}
@@ -536,12 +854,11 @@ const TechSkillsPage: React.FC = () => {
                 Use the AI Playground to do the work
               </p>
               <p className="text-xs text-blue-600 leading-relaxed mb-3">
-                For each task, open the AI Playground and use it as your thinking partner —
-                ask it to explain concepts deeper, generate starter code, review your ADRs,
-                or challenge your design decisions.
+                For each task, open the AI Playground and use it as your thinking partner.
+                Then paste your evidence back here to submit.
               </p>
               <button
-                onClick={() => window.open('/ai-playground', '_blank')}
+                onClick={() => window.open('/playground', '_blank')}
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white text-xs font-semibold px-4 py-2 hover:bg-blue-700 transition-colors"
               >
                 <Terminal size={13} />
@@ -552,23 +869,35 @@ const TechSkillsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Progress summary ── */}
+        {/* Progress summary */}
         <div className="mb-8 rounded-xl border border-gray-100 bg-gray-50 px-5 py-4 flex items-center gap-4">
           <BookOpen size={18} className="text-gray-400 flex-shrink-0" />
           <div className="flex-1">
             <p className="text-xs font-mono text-gray-400 uppercase tracking-wider mb-1">
-              Roadmap overview
+              Your progress
             </p>
-            <p className="text-sm text-gray-600">
-              <span className="font-semibold text-gray-800">4 phases</span> ·{' '}
-              <span className="font-semibold text-gray-800">{totalTasks} tasks</span> ·{' '}
-              <span className="font-semibold text-gray-800">9 months</span> ·
-              Check off tasks as you complete them. Phases collapse to keep your view clean.
-            </p>
+            {loadingProgress ? (
+              <p className="text-sm text-gray-400 flex items-center gap-1">
+                <Loader2 size={13} className="animate-spin" /> Loading…
+              </p>
+            ) : (
+              <div className="flex items-center gap-4">
+                <p className="text-sm text-gray-600">
+                  <span className="font-semibold text-gray-800">{totalPassed}</span>
+                  <span className="text-gray-400"> / {totalTasks} tasks passed</span>
+                </p>
+                <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden max-w-xs">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-purple-500 to-emerald-500 transition-all duration-500"
+                    style={{ width: `${(totalPassed / totalTasks) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* ── Diagnostic ── */}
+        {/* Diagnostic */}
         <div className="mb-10 rounded-xl border border-purple-200 bg-purple-50 p-5">
           <div className="flex items-center gap-2 mb-1">
             <Zap size={14} className="text-purple-500" />
@@ -577,19 +906,24 @@ const TechSkillsPage: React.FC = () => {
             </p>
           </div>
           <p className="text-xs text-purple-500 mb-4">
-            Click each card to expand. Do these before beginning Phase 1 — your answers reveal where to push hardest.
+            Do these before beginning Phase 1 — your answers reveal where to push hardest.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {DIAGNOSTICS.map((d, i) => <DiagCard key={i} item={d} />)}
           </div>
         </div>
 
-        {/* ── Phases ── */}
-        {PHASES.map(phase => (
-          <PhaseSection key={phase.id} phase={phase} />
+        {/* Phases */}
+        {!loadingProgress && PHASES.map(phase => (
+          <PhaseSection
+            key={phase.id}
+            phase={phase}
+            progressMap={progressMap}
+            onEvaluated={handleEvaluated}
+          />
         ))}
 
-        {/* ── Footer ── */}
+        {/* Footer */}
         <p className="text-center text-xs font-mono text-gray-300 pt-6 border-t border-gray-100">
           vAI · nextvillage.community · May 2026
         </p>
