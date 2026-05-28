@@ -22,6 +22,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '../../components/layout/AppLayout';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
 import { chatText, chatJSON } from '../../lib/chatClient';
 import { useAuth } from '../../hooks/useAuth';
@@ -623,6 +624,7 @@ const RefreshCwIcon: React.FC<{ size?: number; className?: string }> = ({ size =
 
 const EntrepreneurshipConsultantPage: React.FC = () => {
   const { user } = useAuth();
+  const location = useLocation();
 
   // ── Navigation
   const [mode, setMode] = useState<AppMode>('select');
@@ -719,17 +721,45 @@ const EntrepreneurshipConsultantPage: React.FC = () => {
 
   // ─── Load clients ─────────────────────────────────────────────────────────
   // ── Load active challenge for this page ─────────────────────────────────
+  // Fast path: dashboard passed enrollment via navigation state (no race condition)
+  // Slow path: query DB for direct navigation / page refresh
   useEffect(() => {
     if (!user?.id) return;
+
+    const navEnrollment = (location.state as any)?.challengeEnrollment;
+    if (navEnrollment?.enrollmentId) {
+      setActiveChallenge(navEnrollment);
+      return;
+    }
+
     (async () => {
       setChallengeLoading(true);
       try {
-        const { data: challenge } = await supabase
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single();
+
+        let orgSlug = 'oloibiri';
+        if (profile?.organization_id) {
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('name')
+            .eq('id', profile.organization_id)
+            .single();
+          orgSlug = org?.name?.toLowerCase().includes('ibiade') ? 'ibiade' : 'oloibiri';
+        }
+
+        const { data: challenges } = await supabase
           .from('community_challenges')
-          .select('id, title, description, challenge_mode_intro, challenge_instruction, return_question_1, return_question_2, return_question_3, tier_target')
+          .select('id, title, description, challenge_mode_intro, challenge_instruction, return_question_1, return_question_2, return_question_3, tier_target, org_id')
           .eq('community_impact_slug', 'entrepreneurship')
           .eq('active', true)
-          .single();
+          .eq('org_id', orgSlug)
+          .order('week_start', { ascending: false })
+          .limit(1);
+        const challenge = challenges?.[0] ?? null;
         if (!challenge) return;
 
         const { data: enrollment } = await supabase
