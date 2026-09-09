@@ -1,8 +1,8 @@
 
 
 
-//
-// A child-friendly guide for the Oloibiri AI Camp (ages 8–10).
+
+   // A child-friendly guide for the Oloibiri AI Camp (ages 8–10).
 // Walks children through five camp days of AI creation:
 // Robot design → Character creation → Storytelling → Game design → Choice project.
 //
@@ -15,7 +15,14 @@ import AppLayout from '../../components/layout/AppLayout';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabaseClient';
 import {
-  Check, ChevronDown, ChevronRight, Compass, Lock, Loader2, Sparkles, Zap, Heart,
+  
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Compass,
+  Lock,
+  Loader2,
+  Sparkles,
 } from 'lucide-react';
 
 const TRACK = 'oloibiri-ai-camp';
@@ -34,79 +41,103 @@ const STEPS: CampStep[] = [
   {
     id: 'day1',
     day: 'Day 1',
-    title: 'I Can Talk to AI 🤖',
+    title: 'I Can Give AI Good Instructions 🤖',
     emoji: '🤖',
-    blurb: 'Design a robot and teach AI to draw it.',
+    blurb: 'Give AI instructions, create a robot, and make it better.',
     body: [
-      "Today you're going to invent a robot. Think about what it looks like, what it can do, and who it helps.",
-      "Here's how it works: You describe your robot to AI. AI makes a picture. You look at it and say, 'That's close, but I want the arms to be bigger.' AI fixes it. You keep checking and fixing until it's just right.",
-      "Then you draw your robot on paper and label all its cool parts — the laser eyes, the spinning arms, whatever makes it special.",
-      "Remember: YOU are the boss. AI helps, but you decide what's good.",
+      "⭐ Aha! Activity — Can AI Guess Your Robot? (15 minutes). Think of a robot in your head. What does it look like? What can it do? What does it help people with? Tell a partner your ideas. Now imagine what would happen if you gave those instructions to AI. The more details you give, the better AI can understand your idea.",
+
+"🤖 AI Activity 1 — Describe Your Robot. Invent your own robot. Give it a name, choose its colors and shape, decide what special powers it has, and think about who it helps. Then describe your robot to AI and ask AI to create a picture of it.",
+
+"🤖 AI Activity 2 — Make Your Robot Better. Look carefully at the picture AI created. Is anything different from your idea? Tell AI what you want to change. You might say, 'Make the arms bigger,' 'Give it three eyes,' 'Change the color to blue,' or 'Add wheels.' Ask AI to improve your robot at least once.",
+
+"✏️ Hands-on Activity — Draw Your Robot. Now draw your robot on paper. Give it a name and label its special parts. Show what makes your robot different from every other robot.",
+
+"Remember: YOU are the boss. AI is your helper. You give the instructions, you check the result, and you decide what should change.",
     ],
-    checkpoint: 'You have a robot picture from AI and a paper drawing with labels. You changed the description at least once to make it better.',
+    checkpoint: 'You have an AI picture of your robot, an improved version, and a paper drawing with labels. You gave AI instructions, checked its picture, and asked AI to make at least one change.',
   },
   {
     id: 'day2',
     day: 'Day 2',
     title: 'I Can Create With AI ✨',
     emoji: '✨',
-    blurb: 'Make a character and build a webpage.',
+    blurb: 'Invent a character, create with AI, and make it better.',
     body: [
-      "Today you're creating a character — someone totally new that you invented.",
-      "First, draw them on paper. Give them a name, decide what they look like, what their superpower is, and what they love most.",
-      "Then you tell AI about your character: 'Her name is Luna. She has silver hair and can talk to animals. She loves starlight.' AI helps you turn that into a real webpage that shows your character.",
-      "You check it. If something's wrong, you fix it. If the colors are weird or the name is spelled funny, you tell AI and it fixes it.",
-      "By the end, you have a real webpage on the internet that shows off your character.",
-    ],
-    checkpoint: 'You have a paper character card and a live webpage that shows your character. You made at least one change to make it better.',
+      
+  "⭐ Aha! Activity — Who Is This Character? (15 minutes). Think of a character without telling anyone who it is. Give three clues about the character — what they look like, something they can do, and something they love. Let a partner guess your character. Now think: if three clues can help a person imagine your character, what happens when we give AI lots of good details?",
+
+  "🤖 AI Activity 1 — Create Your Character. Invent a brand-new character. Give your character a name, choose their appearance, decide their special power or talent, and think about what they love. Draw your character on paper first. Then describe your character to AI and ask AI to create a picture of them.",
+
+  "🤖 AI Activity 2 — Make Your Character Better. Look at the picture AI created and compare it with your paper drawing. Did AI get everything right? Tell AI what you want to change. You might say, 'Give my character curly hair,' 'Change the shirt to yellow,' or 'Add a backpack.' Ask AI to improve your character at least once.",
+
+  "✏️ Hands-on Activity — Create a Character Card. On paper, draw your character and write their name, special power, favorite thing, and one interesting fact about them. Compare your paper character with the AI picture and decide what you like best.",
+
+  "Remember: YOU are the creator. AI can help bring your idea to life, but you decide what your character looks like and what makes them special.",
+],
+    
+    checkpoint: 'You have a paper character card and an AI picture of your character. You checked the picture and asked AI to make at least one change.',
   },
   {
-    id: 'day3',
-    day: 'Day 3',
-    title: 'I Can Tell Stories With AI 🎬',
-    emoji: '🎬',
-    blurb: 'Write a story and make it into a movie.',
-    body: [
-      "Today you're a storyteller. You're going to write a story and turn it into a real video.",
-      "Your story needs four parts: a beginning (where we are), a problem (what goes wrong), a solution (how we fix it), and an ending (what happens next).",
-      "Example: 'Luna finds a lost baby dragon. The dragon is scared. Luna sings to calm it down. The dragon becomes her friend.'",
-      "Draw your story as a storyboard — like a comic book with four boxes, one for each part.",
-      "Then AI helps you make a real video or movie with your story. You watch it, check if it matches your idea, and fix anything that's wrong.",
-      "You're the director — you decide if the story is told the right way.",
-    ],
-    checkpoint: 'You have a storyboard drawing and a video or movie that tells your story. You watched it and made sure it matches what you wanted.',
-  },
+  id: 'day3',
+  day: 'Day 3',
+  title: 'I Can Tell Stories With AI 🎬',
+  emoji: '🎬',
+  blurb: 'Create a story, bring it to life with AI, and make it better.',
+  body: [
+    "⭐ Aha! Activity — What Happens Next? (15 minutes). Start a story with one sentence: 'Mia opened the mysterious box and...' Take turns with a partner adding one sentence at a time. Keep going until you have a fun ending. Now think: if people can build a story one idea at a time, how can we give AI the right instructions to help us tell a story?",
+
+    "🤖 AI Activity 1 — Create Your Story. Invent a short story with a beginning, a problem, a solution, and an ending. Choose your main character, where the story happens, and what exciting thing happens. Then tell AI your ideas and ask it to help you create your story.",
+
+    "🤖 AI Activity 2 — Bring Your Story to Life. Use AI to turn your story into pictures or scenes for your movie. Look carefully at what AI creates. Does it match your character and story? Tell AI what to change and improve at least one part.",
+
+    "✏️ Hands-on Activity — Make a Storyboard. Draw four boxes on paper. In each box, draw one part of your story: beginning, problem, solution, and ending. Add a few words under each picture to explain what is happening.",
+
+    "Remember: YOU are the director. AI can help create your story, but you choose the characters, the ideas, and what happens next.",
+  ],
+  checkpoint: 'You have a four-part storyboard and AI-created pictures or scenes for your story. You checked the result and asked AI to improve at least one part.',
+},
   {
     id: 'day4',
     day: 'Day 4',
     title: 'I Can Solve Problems With AI 🎮',
     emoji: '🎮',
-    blurb: 'Design a game and test it.',
+    blurb: 'Design a game, build it with AI, and make it better.',
     body: [
-      "Today you're a game designer. You're going to make a game, test it, and make it better.",
-      "First, decide: What's the goal? (Win by collecting stars? Reach the end? Beat the timer?) What are the rules? What makes it hard? How do you win?",
-      "Draw your game on paper first. Test it with friends. Ask them: 'Is this fun? Is it too easy? Too hard? What would make it better?'",
-      "Then AI helps you build it on the computer. You play it. You notice what doesn't work — maybe it's too easy, or the rules are confusing.",
-      "You tell AI what to change. AI fixes it. You play again. You keep testing and fixing until it's fun.",
-      "At the end, everyone votes on their favorite game. That's how you know if your idea worked.",
-    ],
-    checkpoint: 'You have a paper game design, a playable game on the computer, and you tested it at least twice. You made at least one change based on testing.',
-  },
+      
+  "⭐ Aha! Activity — How Does a Game Work? (15 minutes). Think about a game you enjoy playing. What is the goal? What are the rules? How does a player win? Share your ideas with a partner. Now think: if you can explain a game to a person, how can you give AI clear instructions to help you build one?",
+
+  "🤖 AI Activity 1 — Design Your Game. Invent a simple game. Decide the goal, the rules, the characters or objects, and how the player wins. Draw your game on paper first. Then describe your game to AI and ask AI to help you create it.",
+
+  "🤖 AI Activity 2 — Test and Improve Your Game. Play the game AI created. Look for anything that does not work or could be more fun. Tell AI what you want to change. You might say, 'Make the game easier,' 'Add more stars,' or 'Give the player more time.' Test the game again after AI makes the change.",
+
+  "✏️ Hands-on Activity — Game Designer Challenge. Draw your game board or game screen on paper. Show the goal, rules, characters, and how the player wins. Test your paper game with a partner and ask them what they would change.",
+
+  "Remember: YOU are the game designer. AI can help build your idea, but you decide the rules, test the game, and choose what should change.",
+],
+    checkpoint: 'You have a paper game design and an AI-created game. You played and tested the game, then asked AI to improve at least one part.',
+    },
   {
-    id: 'day5',
-    day: 'Day 5',
-    title: 'I Am an AI Creator 🌟',
-    emoji: '🌟',
-    blurb: 'Pick your favorite and finish it.',
-    body: [
-      "Today is your choice. You pick one thing you made this week — a robot, a character, a story, a movie, or a game — and you make it perfect.",
-      "You finish it. You test it. You fix anything that's not quite right. You make it something you're really proud of.",
-      "Then you make a showcase card that tells the story: What did I make? Why did I pick it? What did AI help me do? What did I change or fix? What would I do next?",
-      "At the end, you show your creation to someone who matters to you — your family, a friend, or the whole camp. You tell them your story.",
-      "You're not just showing what AI made. You're showing what YOU created, what YOU decided, and what YOU learned.",
-    ],
-    checkpoint: "You have a finished creation, a showcase card, and you've practiced explaining it to someone.",
-  },
+  id: 'day5',
+  day: 'Day 5',
+  title: 'I Am an AI Creator 🌟',
+  emoji: '🌟',
+  blurb: 'Choose your favorite project, improve it, and show what you can create.',
+  body: [
+    "⭐ Aha! Activity — Show and Tell (15 minutes). Pick something you made this week and tell a partner about it without showing them the project. Give three clues: what you made, what it does, and why you like it. Let your partner guess. Then think: what makes your creation special to YOU?",
+
+    "🤖 AI Activity 1 — Choose and Improve. Pick your favorite project from this week — your robot, character, story, movie, or game. Look at it carefully and decide what you would like to make better. Tell AI what you want to change and ask AI to help you improve your project.",
+
+    "🤖 AI Activity 2 — Create Your Final Version. Make your final version with AI. Check your project carefully. Does it match your idea? Is there anything you want to fix? Ask AI to make one more improvement if needed, then choose the version you are most proud of.",
+
+    "✏️ Hands-on Activity — Make a Showcase Card. On paper, make a card for your project. Write: What did I make? Why did I choose it? What did AI help me do? What did I change or fix? What would I like to create next?",
+
+    "Remember: YOU are the AI creator. AI can help you create and improve your idea, but you make the choices. Be proud of what YOU created and what YOU learned this week.",
+  ],
+  checkpoint: 'You have a finished project, a showcase card, and a final version that you checked and improved with AI.',
+},
+
+
 ];
 
 const TOTAL_STEPS = STEPS.length;
@@ -124,35 +155,28 @@ const OloibiriAICampGuidePage: React.FC = () => {
   const lsKey = `tutorial:${TRACK}`;
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(lsKey);
-      if (raw) setDone(new Set<string>(JSON.parse(raw).completed ?? []));
-    } catch { /* corrupt cache */ }
-    setLoaded(true);
-  }, [lsKey]);
+  try {
+    const saved = localStorage.getItem(lsKey);
 
-  useEffect(() => {
-    if (!userId) return;
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from('tutorial_progress')
-        .select('completed_steps')
-        .eq('user_id', userId)
-        .eq('track', TRACK)
-        .maybeSingle();
-      if (cancelled || !data) return;
-      setDone(prev => new Set<string>([...prev, ...(data.completed_steps ?? [])]));
-    })();
-    return () => { cancelled = true; };
-  }, [userId]);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      setDone(new Set(parsed.completed ?? []));
+    }
+  } catch {
+    setDone(new Set());
+  }
+
+  setLoaded(true);
+}, [lsKey]);
+
+  
 
   const persist = useCallback((nextDone: Set<string>) => {
     try {
       localStorage.setItem(lsKey, JSON.stringify({ completed: [...nextDone], updated: Date.now() }));
     } catch { /* private browsing */ }
     if (!userId) return;
-    setSyncing(true);
+    setSyncing(true)
     supabase
       .from('tutorial_progress')
       .upsert({
@@ -169,17 +193,16 @@ const OloibiriAICampGuidePage: React.FC = () => {
     return idx === -1 ? STEPS.length : idx;
   }, [done]);
 
-  const isUnlocked = (index: number) => index <= firstIncompleteIndex();
+  const isUnlocked = (_index: number) => true;
+  const doneCount = STEPS.filter(s => done.has(s.id)).length;
+  const pct = Math.round((doneCount / TOTAL_STEPS) * 100);
 
   const markDone = (stepId: string) => {
     const next = new Set(done);
     next.add(stepId);
     setDone(next);
     persist(next);
-  };
-
-  const doneCount = STEPS.filter(s => done.has(s.id)).length;
-  const pct = Math.min(100, Math.round((doneCount / TOTAL_STEPS) * 100));
+    };
 
   if (!loaded) {
     return (
@@ -208,10 +231,10 @@ const OloibiriAICampGuidePage: React.FC = () => {
 
           <div className="mt-5">
             <div className="mb-1.5 flex items-center justify-between text-xs text-purple-200">
-              <span>Days complete: {doneCount} of {TOTAL_STEPS}</span>
+              <span>Days complete: {doneCount} of {TOTAL_STEPS}</span>{' '}
               <span className="flex items-center gap-1.5">
                 {syncing && <Loader2 className="h-3 w-3 animate-spin" />}
-                {pct}%
+                {pct ?? 0}%
               </span>
             </div>
             <div className="h-3 overflow-hidden rounded-full bg-purple-800">
@@ -244,7 +267,7 @@ const OloibiriAICampGuidePage: React.FC = () => {
                   </div>
                   <h2 className="text-lg font-bold text-gray-900">{step.title}</h2>
                   <p className="truncate text-sm text-gray-600">{step.blurb}</p>
-                  {!unlocked && <p className="mt-1 text-xs font-semibold text-purple-600">Finish the last day first!</p>}
+                  {!unlocked && <p className="mt-1 text-xs font-semibold text-purple-600">Finish the previous day first!</p>}
                 </div>
                 {unlocked && (open ? <ChevronDown className="h-5 w-5 text-purple-400" /> : <ChevronRight className="h-5 w-5 text-purple-400" />)}
               </button>
@@ -312,4 +335,6 @@ const OloibiriAICampGuidePage: React.FC = () => {
 };
 
 export default OloibiriAICampGuidePage;
+ 
+  
  
